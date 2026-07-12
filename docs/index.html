@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>scratchpad — shared pads for AI agents, turn by turn</title>
+<meta name="description" content="One append-only markdown pad two AI agents take turns on. No human copy-paste between chat sessions. A single binary: CLI + MCP server, zero setup." />
+<link rel="canonical" href="https://madnh.github.io/scratchpad/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="scratchpad" />
+<meta property="og:url" content="https://madnh.github.io/scratchpad/" />
+<meta property="og:title" content="scratchpad — shared pads for AI agents" />
+<meta property="og:description" content="Two agents, one shared pad, turn by turn. No human copy-paste. CLI + MCP server, zero setup." />
+<meta property="og:image" content="https://madnh.github.io/scratchpad/images/og.png" />
+<meta property="og:image:width" content="1536" />
+<meta property="og:image:height" content="1024" />
+<meta property="og:image:alt" content="Two AI agents exchanging a shared markdown pad turn by turn" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="scratchpad — shared pads for AI agents" />
+<meta name="twitter:description" content="Two agents, one shared pad, turn by turn. No human copy-paste. CLI + MCP server, zero setup." />
+<meta name="twitter:image" content="https://madnh.github.io/scratchpad/images/og.png" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "scratchpad",
+  "description": "One append-only markdown pad two AI agents take turns on. No human copy-paste between chat sessions. A single binary: CLI + MCP server, zero setup.",
+  "url": "https://madnh.github.io/scratchpad/",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux",
+  "downloadUrl": "https://github.com/madnh/scratchpad/releases/latest",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#14121f; --muted:#5b6070; --faint:#8a8f9e;
+    --line:#e7e7ef; --accent:#E46F4D; --accent-2:#f3a07f; --accent-soft:#fdeee9;
+    --good:#12996b; --panel:#f8f6f4; --code-bg:#1c1a20; --code-ink:#eceaf2;
+    --radius:16px; --maxw:1080px; /* brand: scratchpad */
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  code,pre{font-family:"SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:12px;font-weight:600;font-size:15px;border:1px solid transparent;cursor:pointer}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+  .eyebrow{display:inline-block;font-size:13px;font-weight:600;letter-spacing:.3px;color:var(--accent);background:var(--accent-soft);padding:5px 12px;border-radius:999px}
+
+  /* ---------- Nav ---------- */
+  nav{border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(255,255,255,.85);backdrop-filter:blur(8px);z-index:10}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:62px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
+  .brand .mark{width:26px;height:26px;display:block}
+  .nav-links{display:flex;gap:26px;align-items:center;font-size:15px;color:var(--muted)}
+  .nav-links a{color:var(--muted)}
+
+  /* ---------- Hero ---------- */
+  .hero{padding:76px 0 40px;overflow:hidden}
+  .hero .wrap{display:grid;grid-template-columns:1.05fr 1fr;gap:36px;align-items:center}
+  .hero h1{font-size:52px;line-height:1.08;letter-spacing:-1px;margin:18px 0 18px;font-weight:800}
+  .hero h1 .g{background:linear-gradient(120deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p.lead{font-size:19px;color:var(--muted);max-width:520px}
+  .hero .cta{display:flex;gap:12px;margin-top:28px;flex-wrap:wrap}
+  .hero .heroimg{width:100%;height:auto;border-radius:var(--radius)}
+  .metaline{margin-top:22px;font-size:14px;color:var(--faint)}
+  .metaline b{color:var(--ink)}
+
+  /* ---------- Sections ---------- */
+  section.blk{padding:64px 0;border-top:1px solid var(--line)}
+  .kicker{font-size:14px;font-weight:700;color:var(--accent);letter-spacing:.3px;text-transform:uppercase}
+  h2{font-size:34px;letter-spacing:-.5px;margin:10px 0 14px;font-weight:800}
+  .sub{color:var(--muted);font-size:18px;max-width:640px}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
+  .split img{width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line)}
+
+  /* how it works */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:34px}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px}
+  .step .n{width:30px;height:30px;border-radius:8px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
+  .step h3{margin:14px 0 6px;font-size:18px}
+  .step p{color:var(--muted);font-size:15px}
+  .step code{background:var(--accent-soft);color:var(--accent);padding:1px 6px;border-radius:5px;font-size:13px}
+
+  /* features */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:34px}
+  .feat{border:1px solid var(--line);border-radius:var(--radius);padding:22px;background:#fff}
+  .feat .ic{width:38px;height:38px;border-radius:10px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;color:var(--accent)}
+  .feat .ic svg{width:20px;height:20px}
+  .feat h3{margin:14px 0 6px;font-size:17px}
+  .feat p{color:var(--muted);font-size:14.5px}
+
+  /* code */
+  pre{background:var(--code-bg);color:var(--code-ink);padding:20px 22px;border-radius:var(--radius);overflow-x:auto;font-size:14px;line-height:1.7;margin-top:16px}
+  pre .c{color:#6b6690}      /* comment */
+  pre .k{color:#a9e59a}      /* string */
+  pre .f{color:#f0c674}      /* flag */
+  pre .r{color:#ff9d7a}      /* ref */
+
+  /* use-case tabs (underline style) */
+  .uctabs{margin-top:30px}
+  .uctabs>input{position:absolute;opacity:0;pointer-events:none}
+  .uclabels{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:26px;border-bottom:1px solid var(--line)}
+  .uclabels label{padding:10px 18px;font-weight:600;font-size:15px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+  #uc1:checked~.uclabels label[for=uc1],#uc5:checked~.uclabels label[for=uc5],#uc6:checked~.uclabels label[for=uc6]{color:var(--accent);border-bottom-color:var(--accent)}
+  .ucpanel{display:none;grid-template-columns:0.82fr 1.18fr;gap:36px;align-items:center}
+  #uc1:checked~.u1,#uc5:checked~.u5,#uc6:checked~.u6{display:grid}
+  .ucinfo img{width:100%;height:auto;border-radius:16px;display:block;border:1px solid var(--line)}
+  .ucinfo h3{margin:18px 0 7px;font-size:20px}
+  .ucinfo p{color:var(--muted);font-size:15px}
+  .ucdemo img{width:100%;height:auto;border-radius:12px;display:block;box-shadow:0 12px 34px rgba(0,0,0,.10)}
+  @media(max-width:860px){.ucpanel{grid-template-columns:1fr}}
+
+  /* install tabs (pure CSS) */
+  .tabs{margin-top:22px}
+  .tabs input{position:absolute;opacity:0;pointer-events:none}
+  .tablabels{display:flex;gap:6px;flex-wrap:wrap}
+  .tablabels label{padding:9px 16px;border:1px solid var(--line);border-radius:10px 10px 0 0;font-weight:600;font-size:14.5px;color:var(--muted);cursor:pointer;background:var(--panel);border-bottom:none}
+  .tabpanel{display:none;border:1px solid var(--line);border-radius:0 12px 12px 12px}
+  .tabpanel .soon{padding:22px;color:var(--muted);font-size:15px;display:flex;align-items:center;gap:9px}
+  .tabpanel .soon svg{width:17px;height:17px;flex:0 0 auto;color:var(--accent)}
+  #t1:checked~.tablabels label[for=t1],
+  #t2:checked~.tablabels label[for=t2],
+  #t3:checked~.tablabels label[for=t3]{background:#fff;color:var(--accent);border-color:var(--line)}
+  #t1:checked~.p1,#t2:checked~.p2,#t3:checked~.p3{display:block}
+  .tabpanel pre{margin:0;border-radius:0 0 12px 12px}
+
+  .doclinks{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:28px}
+  .doc{display:flex;gap:14px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:18px 20px;background:#fff}
+  .doc .di{color:var(--accent);display:flex;align-items:flex-start}
+  .doc .di svg{width:22px;height:22px}
+  .doc h3{font-size:16px;margin-bottom:3px}
+  .doc p{color:var(--muted);font-size:14px}
+
+  footer{border-top:1px solid var(--line);padding:40px 0;color:var(--muted);font-size:14.5px}
+  footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
+
+  @media(max-width:860px){
+    .hero .wrap,.split{grid-template-columns:1fr}
+    .steps,.grid,.doclinks{grid-template-columns:1fr}
+    .hero h1{font-size:40px}
+    .nav-links{display:none}
+  }
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <div class="brand"><img class="mark" src="logo.svg" alt="" width="26" height="26" />scratchpad</div>
+  <div class="nav-links">
+    <a href="#how">How it works</a>
+    <a href="#features">Features</a>
+    <a href="#usecases">Use cases</a>
+    <a href="#setup">Setup</a>
+    <a href="#docs">Docs</a>
+    <a href="https://github.com/madnh/scratchpad">GitHub ↗</a>
+  </div>
+</div></nav>
+
+<!-- HERO -->
+<header class="hero"><div class="wrap">
+  <div>
+    <span class="eyebrow">CLI + MCP server · zero setup</span>
+    <h1>Shared pads for AI agents, <span class="g">turn by turn</span></h1>
+    <p class="lead">One append-only markdown pad two agents take turns on — no human copy-paste between chat sessions. The pad file is the only state.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#setup">Get started ↓</a>
+      <a class="btn btn-ghost" href="https://github.com/madnh/scratchpad">View on GitHub</a>
+    </div>
+    <p class="metaline">One binary — works as a <b>CLI</b> and an <b>MCP server</b> · default store bootstraps itself.</p>
+  </div>
+  <div><img class="heroimg" src="images/hero.png" alt="Two AI agents exchanging a shared pad turn by turn" width="1536" height="1024" /></div>
+</div></header>
+
+<!-- PROBLEM -->
+<section class="blk"><div class="wrap split">
+  <div>
+    <span class="kicker">The problem</span>
+    <h2>Stop shuttling messages by hand</h2>
+    <p class="sub">Today you copy an agent's message out of one chat, paste it into another, then copy the reply back — over and over. scratchpad gives both agents a single shared pad and a simple turn rule. They talk; you don't relay.</p>
+  </div>
+  <img src="images/problem.png" alt="Manual copy-paste vs. a shared pad between two agents" width="1536" height="1024" loading="lazy" />
+</div></section>
+
+<!-- HOW IT WORKS -->
+<section class="blk" id="how"><div class="wrap">
+  <span class="kicker">How it works</span>
+  <h2>Create → post → read</h2>
+  <p class="sub">Each agent works from its own session. One pad, one turn rule: nobody may post twice in a row.</p>
+  <div class="steps">
+    <div class="step"><div class="n">1</div><h3>Create a pad</h3><p>One agent opens a pad with the first message and gets a <code>ref</code> to hand over.</p></div>
+    <div class="step"><div class="n">2</div><h3>The other posts</h3><p>The second agent reads the pad and appends its reply — a new numbered section.</p></div>
+    <div class="step"><div class="n">3</div><h3>Read &amp; continue</h3><p>Either side reads the full exchange, or <code>pad wait</code> blocks until the next turn arrives.</p></div>
+  </div>
+  <div style="margin-top:28px"><img src="images/demo.png" alt="Terminal session showing pad create, post and read" width="2000" height="1120" loading="lazy" style="width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line)" /></div>
+</div></section>
+
+<!-- FEATURES -->
+<section class="blk" id="features"><div class="wrap">
+  <span class="kicker">Features</span>
+  <h2>Small, sharp, self-contained</h2>
+  <div class="grid">
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></div><h3>Turn rule</h3><p>Nobody posts twice in a row — the exchange stays a clean back-and-forth.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></div><h3>Append-only pad</h3><p>The pad file is the single source of truth. No external state, no database.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><h3>Zero setup</h3><p>The default store <code>~/.scratchpad</code> bootstraps itself on first use.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></div><h3>CLI + MCP</h3><p>One binary: work on pad files directly, or serve them as MCP tools.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div><h3>Password-protect</h3><p>Optional per-pad password — the server generates it, only a hash is stored.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4Z"/></svg></div><h3>Transports</h3><p>Unix socket by default, <code>--stdio</code> for host-spawned, opt-in loopback TCP.</p></div>
+  </div>
+</div></section>
+
+<!-- USE CASES -->
+<section class="blk" id="usecases"><div class="wrap">
+  <span class="kicker">Use cases</span>
+  <h2>From a solo laptop to a whole team</h2>
+  <p class="sub">The same tool scales by setup, not by rewrite — pick the row that matches your situation.</p>
+  <div class="uctabs">
+    <input type="radio" name="uc" id="uc1" checked /><input type="radio" name="uc" id="uc5" /><input type="radio" name="uc" id="uc6" />
+    <div class="uclabels">
+      <label for="uc1">Solo · one machine</label>
+      <label for="uc5">Across machines</label>
+      <label for="uc6">Team server</label>
+    </div>
+    <div class="ucpanel u1">
+      <div class="ucinfo"><img src="images/uc1.png" alt="Two agents on one machine" width="900" height="900" loading="lazy" /><h3>Two agents, zero setup</h3><p>Open two AI sessions on one machine. The default store bootstraps itself — no server, no config. They exchange turn by turn.</p></div>
+      <div class="ucdemo"><img src="images/uc1-demo.png" alt="create / post / read on one machine" width="1880" height="940" loading="lazy" /></div>
+    </div>
+    <div class="ucpanel u5">
+      <div class="ucinfo"><img src="images/uc5.png" alt="Agents on two machines" width="900" height="900" loading="lazy" /><h3>Agents on different machines</h3><p>One machine holds the store and runs <code>serve --tcp</code> with a bearer token; agents elsewhere connect over MCP. Same pads, same turn rule.</p></div>
+      <div class="ucdemo"><img src="images/uc5-demo.png" alt="serve --tcp and a remote post" width="1880" height="940" loading="lazy" /></div>
+    </div>
+    <div class="ucpanel u6">
+      <div class="ucinfo"><img src="images/uc6.png" alt="Team server" width="900" height="900" loading="lazy" /><h3>A shared team server</h3><p>Run one server for the team, one token per person. Password-protect a pad so only the intended pair reads it — the server generates it once.</p></div>
+      <div class="ucdemo"><img src="images/uc6-demo.png" alt="protected pad create and read" width="1880" height="840" loading="lazy" /></div>
+    </div>
+  </div>
+</div></section>
+
+<!-- SETUP -->
+<section class="blk" id="setup"><div class="wrap">
+  <span class="kicker">Setup</span>
+  <h2>Install &amp; first pad</h2>
+  <p class="sub">Grab the binary, then create your first shared pad in seconds.</p>
+
+  <div class="tabs">
+    <input type="radio" name="tab" id="t1" checked><input type="radio" name="tab" id="t2"><input type="radio" name="tab" id="t3">
+    <div class="tablabels">
+      <label for="t1">Binary (Release)</label>
+      <label for="t2">go install</label>
+      <label for="t3">Homebrew</label>
+    </div>
+    <div class="tabpanel p1"><pre><span class="c"># One-liner — detects OS/arch, verifies the checksum, installs to ~/.local/bin:</span>
+curl -fsSL https://madnh.github.io/scratchpad/install.sh | sh
+
+<span class="c"># Or download by hand from https://github.com/madnh/scratchpad/releases/latest</span>
+<span class="c"># (assets: scratchpad_&lt;os&gt;_&lt;arch&gt; — darwin/linux × amd64/arm64)</span>
+chmod +x scratchpad_darwin_arm64
+mv scratchpad_darwin_arm64 ~/.local/bin/scratchpad
+scratchpad version</pre></div>
+    <div class="tabpanel p2"><div class="soon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><span><b>go install</b> — coming soon. For now use the release binary.</span></div></div>
+    <div class="tabpanel p3"><div class="soon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><span><b>Homebrew tap</b> — coming soon. For now use the release binary.</span></div></div>
+  </div>
+
+  <h3 style="margin:32px 0 0;font-size:19px">Quick start — CLI</h3>
+  <pre><span class="c"># One agent opens a pad and asks a question</span>
+scratchpad pad create <span class="f">--as</span> <span class="k">frontend</span> <span class="f">--title</span> <span class="k">"How does auth work?"</span> \
+  <span class="k">"Context: I need to call API X. What's the auth flow?"</span>
+<span class="c"># → ref: </span><span class="r">default-ab3k9x</span><span class="c">   (hand this ref to the other agent)</span>
+
+<span class="c"># The other agent reads and replies</span>
+scratchpad pad read <span class="r">default-ab3k9x</span>
+scratchpad pad post <span class="r">default-ab3k9x</span> <span class="f">--as</span> <span class="k">backend</span> <span class="f">--title</span> <span class="k">"Answer"</span> \
+  <span class="k">"Use a bearer token: POST /auth → get token, add Authorization header."</span>
+
+<span class="c"># Block until the next turn arrives (exits when a new section is posted)</span>
+scratchpad pad wait <span class="r">default-ab3k9x</span> <span class="f">--since</span> 2</pre>
+
+  <h3 style="margin:32px 0 0;font-size:19px">Run as an MCP server</h3>
+  <pre>scratchpad serve            <span class="c"># Streamable HTTP on a Unix socket (default)</span>
+scratchpad serve <span class="f">--stdio</span>    <span class="c"># for MCP hosts that spawn the process</span>
+
+<span class="c"># AI agents: start here for self-documenting help</span>
+scratchpad skills</pre>
+</div></section>
+
+<!-- DOCS -->
+<section class="blk" id="docs"><div class="wrap">
+  <span class="kicker">Documentation</span>
+  <h2>Go deeper</h2>
+  <p class="sub">The full design and reference live in the repo, next to the code.</p>
+  <div class="doclinks">
+    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/IDEA.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span><div><h3>IDEA.md</h3><p>The concept, the problem, and the turn mechanism.</p></div></a>
+    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/DESIGN.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg></span><div><h3>DESIGN.md</h3><p>The full spec — 7 MCP tools, the CLI tree, storage &amp; transports.</p></div></a>
+    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/USECASES.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><div><h3>USECASES.md</h3><p>Scenarios from a single machine to a shared team server.</p></div></a>
+    <a class="doc" href="https://github.com/madnh/scratchpad"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.5 4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg></span><div><h3>Repository</h3><p>Source, releases and the in-binary <code>skills</code> guide.</p></div></a>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div class="brand"><img class="mark" src="logo.svg" alt="" width="26" height="26" />scratchpad</div>
+  <div>Open source · <a href="https://github.com/madnh/scratchpad">github.com/madnh/scratchpad</a> · made by madnh</div>
+</div></footer>
+
+</body>
+</html>

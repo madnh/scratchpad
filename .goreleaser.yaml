@@ -1,0 +1,61 @@
+# GoReleaser v2 — chạy bởi .github/workflows/release.yml trên tag v*.
+# Asset naming là HỢP ĐỒNG với docs/install.sh: scratchpad_<os>_<arch>
+# (không nhúng version vào tên để URL releases/latest/download/… ổn định).
+version: 2
+
+project_name: scratchpad
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/scratchpad
+    binary: scratchpad
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/madnh/scratchpad/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/madnh/scratchpad/internal/buildinfo.Commit={{ .ShortCommit }}
+      - -X github.com/madnh/scratchpad/internal/buildinfo.Date={{ .Date }}
+
+archives:
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Bug fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Documentation
+      regexp: '^docs(\(.+\))?!?:'
+      order: 2
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^test"
+      - "^chore"
+      - "^Merge"
+
+release:
+  footer: |
+    ---
+    **Install (one-liner):**
+    ```sh
+    curl -fsSL https://madnh.github.io/scratchpad/install.sh | sh
+    ```

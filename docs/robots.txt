@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://madnh.github.io/scratchpad/sitemap.xml
