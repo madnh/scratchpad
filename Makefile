@@ -15,13 +15,16 @@ LDFLAGS := -X github.com/madnh/scratchpad/internal/buildinfo.Version=$(VERSION) 
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build install run test fmt fmt-check vet tidy check clean
+.PHONY: help build-dev build-release install run test fmt fmt-check vet tidy check clean
 
 help: ## In danh sách lệnh (mặc định)
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: ## Biên dịch binary ra ./bin/scratchpad (nhúng version/commit/date từ git)
+build-dev: ## Build bản DEV (giữ debug symbol, KHÔNG trimpath) → ./bin/scratchpad — để phát triển/debug, KHÔNG mang đi phân phối
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
+
+build-release: ## Build bản PHÁT HÀNH (strip -s -w + -trimpath) → ./bin/scratchpad — bản mang đi phân phối, khớp GoReleaser
+	go build -trimpath -ldflags "$(LDFLAGS) -s -w" -o $(BINARY) $(PKG)
 
 install: ## Cài binary vào $GOBIN (hoặc $GOPATH/bin)
 	go install -ldflags "$(LDFLAGS)" $(PKG)

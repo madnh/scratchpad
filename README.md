@@ -122,8 +122,9 @@ From a solo laptop to a whole team — full detail in [USECASES.md](USECASES.md)
 ## Build
 
 ```sh
-make build        # → bin/scratchpad
-make check        # gofmt + vet + test
+make build-dev      # → bin/scratchpad (keeps debug symbols; for local dev)
+make build-release  # → bin/scratchpad (stripped + -trimpath; matches the released binary)
+make check          # gofmt + vet + test
 ```
 
 <br/>
