@@ -107,6 +107,14 @@ func newUICmd() *cobra.Command {
 // openBrowser launches the platform's URL opener. It is opt-in (--open) because
 // spawning another program is a side effect a person should ask for; a failure is
 // reported and ignored, since the URL is already printed.
+//
+// The URL carries the session token, so for as long as the opener runs it is visible
+// in that child's argv — to `ps` on macOS, /proc/<pid>/cmdline on Linux — i.e. to any
+// process of any user that can list processes. That is accepted rather than fixed:
+// the token buys a session on a loopback UI over pads whose files are already 0600
+// and readable by this UID, so anyone positioned to read the argv is already
+// positioned to read the pads directly. Passing the URL any other way (a temp file, a
+// pipe) would move the secret, not remove it.
 func openBrowser(cmd *cobra.Command, url string) {
 	var c *exec.Cmd
 	switch runtime.GOOS {

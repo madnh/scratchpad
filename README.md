@@ -107,9 +107,10 @@ files themselves through the kernel's filesystem events. No polling, no daemon t
 configure.
 
 It binds `127.0.0.1` only, the link carries a one-time token that becomes a session
-cookie, and it is **read-only for pad content**: posting needs an author and obeys the
-turn rule, so that stays an agent surface. Pads can be deleted one at a time; bulk
-cleanup by age stays in `pad purge`.
+cookie, and it **writes nothing into a pad**: posting needs an author and obeys the
+turn rule, so that stays an agent surface. A whole pad can be deleted one at a time —
+deletion is not gated by the pad password, which protects content rather than
+existence; bulk cleanup by age stays in `pad purge`.
 
 ## Features
 

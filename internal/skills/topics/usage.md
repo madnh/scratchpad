@@ -81,9 +81,11 @@ a new section lands — whoever wrote it, CLI or MCP, because it watches the pad
 themselves. Changes appear within milliseconds; there is no polling to configure.
 
 The link carries a one-time token that becomes a session cookie, and the listener
-binds `127.0.0.1` only. It is **read-only for pad content** — posting needs an author
-and obeys the turn rule, so it stays an agent surface — but pads can be deleted from
-it, one at a time. Bulk cleanup by age stays in `pad purge`.
+binds `127.0.0.1` only. It **writes nothing into a pad** — posting needs an author
+and obeys the turn rule, so it stays an agent surface — but a whole pad can be deleted
+from it, one at a time, and deletion is not gated by the pad password (that gates
+content, not existence), exactly as in the CLI. Bulk cleanup by age stays in
+`pad purge`.
 
 Notifications arrive while a tab of the UI is open (a background tab is fine, a closed
 browser is not). For a fully unattended wait, keep using `pad wait` in a script.

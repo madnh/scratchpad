@@ -109,7 +109,9 @@ Field reference:
   The UI normally prints a one-time link at startup; opening it exchanges the token
   for a session cookie. `no_auth: true` drops that, leaving only the loopback bind
   and the Host/Origin guard — which means **every local process that can reach the
-  port can read every pad**, so set it only on a machine you are the sole user of.
+  port can read or delete every pad**, password-protected ones included (the pad
+  password gates content, never deletion). Set it only on a machine you are the sole
+  user of.
   There is no origin allow-list here: the UI binds loopback, so the browser's own
   origin is the only one that can ever reach it.
 

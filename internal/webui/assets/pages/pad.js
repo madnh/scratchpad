@@ -297,6 +297,7 @@ export default function mount(outlet, ctx) {
   const LAZY_MARGIN = "800px 0px";   // start parsing roughly a screen ahead
   const pendingMarkdown = new WeakMap();
   let lazyObserver = null;
+  let idleHandle = 0;
 
   function deferMarkdown(box, content, clamped) {
     // No observer (very old engine, jsdom): parse immediately — correctness first.
@@ -370,6 +371,38 @@ export default function mount(outlet, ctx) {
       }
       lazyObserver.observe(msg);
     }
+    scheduleIdleParse();
+  }
+
+  // Deferring the parse must not COST the reader anything permanent, and a body that
+  // is not in the DOM cannot be found by ⌘F, selected by ⌘A, or included in "save
+  // page" — browser behaviour a reading surface has no business breaking. So once the
+  // page is idle, the rest is parsed anyway, a few bodies per idle slice: the point of
+  // deferring was never to leave the work undone, only to keep it off the critical
+  // path while the reader is waiting for the first screen.
+  //
+  // Messages already parsed this way still cost nothing to lay out — they are the ones
+  // carrying content-visibility: auto.
+  function scheduleIdleParse() {
+    if (typeof requestIdleCallback !== "function") return; // Safari: the observer alone
+    if (idleHandle) cancelIdleCallback(idleHandle);
+    idleHandle = requestIdleCallback((deadline) => {
+      idleHandle = 0;
+      let box;
+      // 8ms of headroom left in the slice: enough for one body without overrunning it.
+      while (deadline.timeRemaining() > 8 && (box = body.querySelector('.sec__body[data-lazy="pending"]'))) {
+        const content = pendingMarkdown.get(box);
+        if (content == null) {
+          box.dataset.lazy = "done"; // stale node from a re-render; do not spin on it
+          continue;
+        }
+        pendingMarkdown.delete(box);
+        const msg = box.closest(".msg");
+        if (msg) lazyObserver?.unobserve(msg);
+        paintMarkdown(box, content);
+      }
+      if (body.querySelector('.sec__body[data-lazy="pending"]')) scheduleIdleParse();
+    }, { timeout: 3000 });
   }
 
   // sectionNode builds one message: the author's avatar, then a bubble holding the
@@ -527,5 +560,10 @@ export default function mount(outlet, ctx) {
 
   loadPad();
 
-  return () => { disposed = true; off(); lazyObserver?.disconnect(); };
+  return () => {
+    disposed = true;
+    off();
+    lazyObserver?.disconnect();
+    if (idleHandle && typeof cancelIdleCallback === "function") cancelIdleCallback(idleHandle);
+  };
 }
