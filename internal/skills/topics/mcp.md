@@ -27,7 +27,7 @@ storage layer, so agents may freely mix both on the same store.
 |---|---|
 | `pad_create` | new pad + section 1; returns the ref (and the password when `protect:true`) |
 | `pad_post` | append a section, enforcing the turn rule |
-| `pad_get` | compact status: table of contents + whose turn — no contents, cheap |
+| `pad_get` | compact status: table of contents, `authors` (who is on the pad), whose turn — no contents, cheap |
 | `pad_read` | section contents: one (`section`), newer-than (`since`), or all |
 | `pad_wait` | long-poll for a section newer than `since` |
 | `pad_list` | pads with metadata, optionally per project |

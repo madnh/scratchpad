@@ -96,6 +96,7 @@ type getOutput struct {
 	Project      string          `json:"project"`
 	CreatedTS    int64           `json:"created_ts"`
 	SectionCount int             `json:"section_count"`
+	Authors      []string        `json:"authors"`
 	LastAuthor   string          `json:"last_author"`
 	LastTS       int64           `json:"last_ts"`
 	Protected    bool            `json:"protected"`
@@ -114,6 +115,7 @@ func (s *Server) padGet(_ context.Context, _ *mcp.CallToolRequest, in getInput) 
 		Project:      pad.Project,
 		CreatedTS:    pad.CreatedTS,
 		SectionCount: len(pad.Sections),
+		Authors:      pad.Authors(),
 		LastAuthor:   last.Author,
 		LastTS:       last.TS,
 		Protected:    pad.Protected(),

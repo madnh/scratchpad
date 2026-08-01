@@ -352,15 +352,21 @@ func (s *Store) Wait(ctx context.Context, ref, password string, since int, timeo
 
 // PadMeta is one pad's listing entry — metadata only, no content. Title is borrowed
 // from section 1 (pads have no name of their own).
+//
+// Authors sits at the same level as LastAuthor, which listings have always published:
+// it says WHO has been talking on a pad, never WHAT was said. A protected pad
+// therefore lists its authors like it lists its title and section count — the password
+// gates content, not the pad's existence or shape.
 type PadMeta struct {
-	Ref          string `json:"ref"`
-	Project      string `json:"project"`
-	Title        string `json:"title"`
-	SectionCount int    `json:"section_count"`
-	LastAuthor   string `json:"last_author"`
-	LastTS       int64  `json:"last_ts"`
-	CreatedTS    int64  `json:"created_ts"`
-	Protected    bool   `json:"protected"`
+	Ref          string   `json:"ref"`
+	Project      string   `json:"project"`
+	Title        string   `json:"title"`
+	SectionCount int      `json:"section_count"`
+	Authors      []string `json:"authors"`
+	LastAuthor   string   `json:"last_author"`
+	LastTS       int64    `json:"last_ts"`
+	CreatedTS    int64    `json:"created_ts"`
+	Protected    bool     `json:"protected"`
 }
 
 // meta reduces a parsed pad to its listing entry.
@@ -371,6 +377,7 @@ func meta(p *Pad) PadMeta {
 		Project:      p.Project,
 		Title:        p.Sections[0].Title,
 		SectionCount: len(p.Sections),
+		Authors:      p.Authors(),
 		LastAuthor:   last.Author,
 		LastTS:       last.TS,
 		CreatedTS:    p.CreatedTS,
