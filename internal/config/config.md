@@ -92,7 +92,11 @@ Field reference:
   `"default"`. Overridden per run by `SCRATCHPAD_PROJECT_NAME` or `--project`.
 - **`limits`** — optional resource bounds; omitted fields use the defaults shown above.
   `max_title_kb`/`max_content_kb` bound one section's title/content size;
-  `max_sections_per_pad`/`max_pads_per_project` bound growth.
+  `max_sections_per_pad`/`max_pads_per_project` bound growth. They also set the size a
+  pad FILE may have when it is read: anything larger than roughly
+  `(max_title_kb + max_content_kb) x max_sections_per_pad` could not have been written
+  through this tool, so it is refused with `content_too_large` rather than loaded into
+  memory. Raising the limits raises that ceiling with them.
 - **`wait`** — optional MCP `pad_wait` timing: `default_s` when the caller omits
   `timeout_s`, `max_s` the server-side cap (values above it are clamped). The CLI
   `pad wait` is not affected by this cap.
