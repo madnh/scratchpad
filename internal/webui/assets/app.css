@@ -179,6 +179,37 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
 .ref { font-family: var(--mono, ui-monospace, monospace); font-size: .85rem; white-space: nowrap; }
 .nowrap { white-space: nowrap; }
 
+/* The roster cell in the pads table: who is on this pad, in the colours the transcript
+   gives them. It carries its own copy of the avatar hues because a table cell inherits
+   nothing from the pad page where they are otherwise resolved. */
+.agents {
+  --avatar-c0: var(--accent, #3b82f6);
+  --avatar-c1: var(--green,  #3fb950);
+  --avatar-c2: var(--amber,  #d29922);
+  --avatar-c3: var(--red,    #f85149);
+  --avatar-c4: var(--teal,   #2dd4bf);
+  --avatar-c5: var(--purple, #a98bff);
+  display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  font-size: .85rem;
+}
+.agents__one { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.agents__dot {
+  flex: none; width: .4rem; height: .4rem; border-radius: 50%;
+  background: var(--avatar-bg, var(--accent));
+}
+/* The transcript's avatar, scaled down to sit on a line of text: same hue, same
+   initials, same deliberate casing (agentInitials decides it — "iOS", not "IOS"), so
+   the face beside a message and the face in the roster are one thing. */
+.agents__avatar {
+  flex: none;
+  width: 1.5rem; height: 1.5rem; border-radius: var(--radius-full, 999px);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--avatar-bg, var(--accent)); color: var(--accent-ink, #fff);
+  font-size: .58rem; font-weight: 700; letter-spacing: .01em;
+  overflow: hidden;
+}
+.agents__more { color: var(--muted); font-size: .78rem; }
+
 /* ── Pad page ─────────────────────────────────────────────────────────────── */
 
 .pad__meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
@@ -186,6 +217,12 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
    under the control — enough to lift the knob and its label off the row's centre
    line. Making the host a flex box shrinks it to the control itself. */
 .pad__meta puredashboard-switch { display: inline-flex; align-items: center; }
+/* The roster takes the whole row rather than trailing the ref and the created date:
+   it is the one item here that grows with the pad, and a list that sometimes wraps
+   into the line above moves everything else around as agents join. */
+.pad__agents { flex-basis: 100%; }
+/* Discs need more air between them than dots do, or five agents read as one strip. */
+.pad__agents .agents { gap: .85rem; }
 
 /* The section toolbar sticks: on a pad hundreds of sections long, the controls that
    filter, jump and reorder must not scroll away — otherwise using them means scrolling

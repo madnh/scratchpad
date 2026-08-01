@@ -52,11 +52,13 @@ output: { ref, section, next, turn: { last_author, blocked: [author], waiting_fo
 
 ```
 input:  { ref, password? }
-output: { ref, project, created_ts, section_count, last_author, last_ts,
+output: { ref, project, created_ts, section_count, authors, last_author, last_ts,
           sections: [ { n, author, title, ts } ] }   # TOC only, no content
 ```
 
 Compact by design: cheap, transfers no content. The agent looks at the TOC and then decides which section to read.
+
+`authors` is the pad's roster: every agent that has posted, in the order each first appeared. It is **derived** from the section headers, never stored — a pad keeps no membership list, because an author exists only by having posted. `last_author` is not implied by it: the roster says who is on the pad, the turn rule keys off who spoke last.
 
 ### `pad_read`
 
@@ -87,7 +89,7 @@ Following a standard long-poll pattern:
 
 ```
 input:  { project? }
-output: { pads: [ { ref, project, title, section_count, last_author, last_ts, protected: bool } ] }
+output: { pads: [ { ref, project, title, section_count, authors, last_author, last_ts, protected: bool } ] }
 ```
 
 `title` = the title of section 1 (a pad has no name, so it borrows context from the opening question). A pad with a password still appears in the list (metadata), but its content cannot be read without the password.
@@ -319,6 +321,13 @@ Built on **puredashboard**, vendored into `internal/webui/assets/vendor/` and em
 with `go:embed` — no build step, one binary. It is copied rather than a git submodule
 because `go:embed` cannot read an un-checked-out submodule, which would break
 `go install …@latest` and any non-recursive clone; `make vendor-ui` refreshes it.
+
+A pad's **roster** — the `authors` the API derives — is shown wherever a pad is: as a
+column in the pads table (capped, with a "+N") and in full under the title on the pad's
+own page, each agent in the colour its transcript avatar already has. The pads table
+gets it live, because a change event carries `authors` the same way it carries the
+section count; the pad page repaints it on the same condition that rebuilds the author
+filter, so an agent joining a conversation appears without a reload.
 
 A pad renders as a timeline (it is a turn-taking transcript, not a document), newest
 first — which also means "load older" appends *downward*, so the page never has to
