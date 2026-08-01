@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Cookie names. The session cookie is HttpOnly (script must never be able to read or
@@ -17,6 +19,14 @@ const (
 	sessionCookie = "scratchpad_ui_session"
 	tokenParam    = "t"
 )
+
+// maxSessions bounds the session table. One person with a few tabs needs a handful;
+// anything beyond that is a client that drops the cookie on every request (a script,
+// or a cross-site tab whose cookie SameSite=Strict withholds), and without a bound
+// each such request would leak a session for the life of the process. When it is
+// reached the oldest session is evicted — a live browser refreshes its own session's
+// timestamp on every poll, so the one thrown away is the stale one.
+const maxSessions = 64
 
 // authState holds the one-time URL token and the live sessions. Sessions live in
 // memory only: restarting the server invalidates them, which is the right default for
@@ -29,12 +39,30 @@ type authState struct {
 	sessions map[string]*session
 }
 
+// sessionCtxKey carries the session from the auth middleware to the handler. It has to
+// travel in the context rather than be looked up again from the request: the request
+// that MINTS a session carries no cookie yet (the cookie is only in the response), so
+// a second lookup would come back nil and the handler would work with no session.
+type sessionCtxKey struct{}
+
+// sessionFrom returns the session the middleware attached, or nil.
+func sessionFrom(r *http.Request) *session {
+	s, _ := r.Context().Value(sessionCtxKey{}).(*session)
+	return s
+}
+
+// withSession returns a copy of the request carrying the session.
+func withSession(r *http.Request, s *session) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), sessionCtxKey{}, s))
+}
+
 // session is one browser. It remembers the passwords of pads the person unlocked so
 // the UI does not have to re-send them (or store them in the browser) on every read;
 // they are held in memory, never written to disk, and die with the process.
 type session struct {
 	mu        sync.Mutex
 	passwords map[string]string // ref → password
+	touched   time.Time         // last use, for eviction when the table is full
 }
 
 // newAuthState mints the URL token unless auth is disabled.
@@ -60,16 +88,34 @@ func randomToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// newSession creates a session and returns its id.
-func (a *authState) newSession() (string, error) {
+// newSession creates a session and returns it with its id.
+func (a *authState) newSession() (string, *session, error) {
 	id, err := randomToken()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
+	sess := &session{passwords: make(map[string]string), touched: time.Now()}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.sessions[id] = &session{passwords: make(map[string]string)}
-	return id, nil
+	if len(a.sessions) >= maxSessions {
+		a.evictOldestLocked()
+	}
+	a.sessions[id] = sess
+	return id, sess, nil
+}
+
+// evictOldestLocked drops the least recently used session. Callers hold a.mu.
+func (a *authState) evictOldestLocked() {
+	oldestID, oldest := "", time.Time{}
+	for id, s := range a.sessions {
+		s.mu.Lock()
+		t := s.touched
+		s.mu.Unlock()
+		if oldestID == "" || t.Before(oldest) {
+			oldestID, oldest = id, t
+		}
+	}
+	delete(a.sessions, oldestID)
 }
 
 // lookup returns the session behind a request, or nil. With auth disabled every
@@ -81,8 +127,14 @@ func (a *authState) lookup(r *http.Request) *session {
 		return nil
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.sessions[c.Value]
+	sess := a.sessions[c.Value]
+	a.mu.Unlock()
+	if sess != nil {
+		sess.mu.Lock()
+		sess.touched = time.Now()
+		sess.mu.Unlock()
+	}
+	return sess
 }
 
 // tokenMatches compares a presented URL token against the real one in constant time.
@@ -94,7 +146,12 @@ func (a *authState) tokenMatches(got string) bool {
 }
 
 // unlocked returns a remembered pad password ("" if the pad was never unlocked).
+// A nil session is a session that remembers nothing, not a crash: these run on every
+// request, and "no session" must degrade to "no unlocked pads".
 func (s *session) unlocked(ref string) string {
+	if s == nil {
+		return ""
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.passwords[ref]
@@ -102,6 +159,9 @@ func (s *session) unlocked(ref string) string {
 
 // remember stores a verified pad password for the rest of the session.
 func (s *session) remember(ref, password string) {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.passwords[ref] = password
@@ -148,11 +208,11 @@ func (s *Server) secure(next http.Handler) http.Handler {
 func (s *Server) requireSession(next http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sess := s.auth.lookup(r); sess != nil {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, withSession(r, sess))
 			return
 		}
 		if s.auth.noAuth || s.auth.tokenMatches(r.URL.Query().Get(tokenParam)) {
-			id, err := s.auth.newSession()
+			id, sess, err := s.auth.newSession()
 			if err != nil {
 				http.Error(w, "cannot start a session", http.StatusInternalServerError)
 				return
@@ -172,7 +232,9 @@ func (s *Server) requireSession(next http.Handler) http.HandlerFunc {
 				http.Redirect(w, r, clean.RequestURI(), http.StatusSeeOther)
 				return
 			}
-			next.ServeHTTP(w, r)
+			// The request being forwarded still carries no cookie — the cookie is only
+			// in the RESPONSE — so the session travels in the context instead.
+			next.ServeHTTP(w, withSession(r, sess))
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {

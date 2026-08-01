@@ -24,7 +24,10 @@ type apiFunc func(r *http.Request, sess *session) (any, error)
 // api wraps a JSON handler with the session gate and uniform encoding/error mapping.
 func (s *Server) api(fn apiFunc) http.HandlerFunc {
 	return s.requireSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sess := s.auth.lookup(r)
+		// From the context, not a second cookie lookup: on the request that mints the
+		// session the cookie does not exist yet, and looking again would hand the
+		// handler a nil session.
+		sess := sessionFrom(r)
 		out, err := fn(r, sess)
 		if err != nil {
 			status, code := httpStatusFor(err)

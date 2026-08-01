@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -369,4 +370,106 @@ func TestSSEDeliversPadChange(t *testing.T) {
 		return
 	}
 	t.Fatal("no SSE event arrived for a new section")
+}
+
+// newNoAuthServer builds a UI server with --no-auth, the mode where every request
+// arrives without a cookie.
+func newNoAuthServer(t *testing.T) (*Server, *httptest.Server, *store.Store) {
+	t.Helper()
+	dir := t.TempDir()
+	projects := filepath.Join(dir, "projects")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		Type: config.ConfigType, Version: config.ConfigVersion,
+		DisplayName: "Test", Instance: "scratchpad",
+		ProjectsDir: projects, Limits: config.DefaultLimits,
+	}
+	st := store.New(projects, config.DefaultLimits)
+	srv, err := New(st, cfg, Options{Port: config.DefaultUIPort, NoAuth: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.handler())
+	t.Cleanup(ts.Close)
+	return srv, ts, st
+}
+
+// TestNoAuthServesCookielessRequests is the regression test for the session panic:
+// under --no-auth the middleware mints a session and forwards the SAME request, which
+// still carries no cookie. Deriving the session from the request a second time handed
+// the handler a nil *session and every pad read crashed the connection. A client with
+// no cookie jar reproduces it exactly.
+func TestNoAuthServesCookielessRequests(t *testing.T) {
+	_, ts, st := newNoAuthServer(t)
+	pad, _, err := st.CreatePad("p", "alice", "hello", "body\n", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 10 * time.Second} // deliberately NO cookie jar
+
+	for _, path := range []string{
+		"/api/pads",
+		"/api/pads/" + pad.Ref(),
+		"/api/pads/" + pad.Ref() + "/sections",
+	} {
+		resp, err := client.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s failed outright (the panic drops the connection): %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200; body: %s", path, resp.StatusCode, body)
+		}
+	}
+}
+
+// TestNoAuthUnlockDoesNotPanic covers the same shape on the unlock path, which ran the
+// bcrypt compare before dereferencing the session.
+func TestNoAuthUnlockDoesNotPanic(t *testing.T) {
+	_, ts, st := newNoAuthServer(t)
+	pad, password, err := st.CreatePad("p", "alice", "secret", "body\n", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	body := strings.NewReader(`{"password":"` + password + `"}`)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/pads/"+pad.Ref()+"/unlock", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "http://"+req.Host)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unlock failed outright: %v", err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlock = %d, want 200; body: %s", resp.StatusCode, out)
+	}
+}
+
+// TestSessionTableIsBounded covers the other half of the same defect: a client that
+// never returns the cookie minted a session per request, forever.
+func TestSessionTableIsBounded(t *testing.T) {
+	srv, ts, _ := newNoAuthServer(t)
+	client := &http.Client{Timeout: 10 * time.Second} // no cookie jar: every request is new
+	for i := 0; i < maxSessions*2; i++ {
+		resp, err := client.Get(ts.URL + "/api/pads")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	srv.auth.mu.Lock()
+	n := len(srv.auth.sessions)
+	srv.auth.mu.Unlock()
+	if n > maxSessions {
+		t.Fatalf("session table holds %d entries, want at most %d", n, maxSessions)
+	}
 }
