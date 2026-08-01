@@ -244,21 +244,8 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
    words of agent prose, and a page of those is unreadable. The fade tells you there
    is more without adding a scrollbar inside a scroll container. */
 .sec__body { position: relative; }
-/* A body that has not been parsed yet is drawn as faint text lines, so a fast scroll
-   shows "loading", not a blank card. It is replaced the moment the markdown lands. */
-.sec__body[data-lazy="pending"] {
-  background-image: repeating-linear-gradient(
-    var(--panel-3, rgba(128, 128, 128, .18)) 0 .55rem,
-    transparent .55rem 1.5rem);
-  background-size: 92% 100%;
-  background-repeat: no-repeat;
-  border-radius: var(--radius, 6px);
-  opacity: .5;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .sec__body[data-lazy="pending"] { animation: lazypulse 1.6s ease-in-out infinite; }
-}
-@keyframes lazypulse { 0%, 100% { opacity: .5; } 50% { opacity: .28; } }
+/* The placeholder for a body not yet parsed comes from <puredashboard-lazy> itself
+   (reserved height + shimmer); nothing to add here beyond the clamp below. */
 .sec__body[data-clamped="true"] .sec__content {
   max-height: 15rem;
   overflow: hidden;

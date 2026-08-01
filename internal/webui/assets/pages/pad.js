@@ -16,6 +16,7 @@
 // DOWNWARD, so the page never has to preserve scroll position around content
 // inserted above the viewport.
 
+import "/vendor/puredashboard/lazy.js";
 import "/vendor/puredashboard/md.js";
 import "/vendor/puredashboard/switch.js";
 import "/vendor/puredashboard/tag.js";
@@ -286,28 +287,30 @@ export default function mount(outlet, ctx) {
 
   // ── lazy markdown ──────────────────────────────────────────────────────────
   //
-  // Parsing markdown is the expensive part of this page: a section can be thousands
-  // of words, and a page of them lands at once. So a body is parsed only when it is
-  // about to be seen — the box goes into the DOM empty and an IntersectionObserver
-  // fills it in as the message approaches the viewport. Once parsed it STAYS parsed:
-  // this defers work, it never throws it away and redoes it on the way back.
-  //
-  // The empty box reserves a height guessed from the section's byte count, so the
-  // scrollbar and "load older" do not lurch as bodies materialise above the reader.
-  const LAZY_MARGIN = "800px 0px";   // start parsing roughly a screen ahead
-  const pendingMarkdown = new WeakMap();
-  let lazyObserver = null;
+  // Parsing markdown is the expensive part of this page: a section can be thousands of
+  // words, and a page of them lands at once. <puredashboard-lazy> does the deferring —
+  // it holds the reserved height, the placeholder, the IntersectionObserver and the
+  // print hook — so what is left here is only the policy this page wants on top of it:
+  // parse what is already on screen at once, and fill the rest in while idle.
+  const LAZY_MARGIN = "800px";   // start parsing roughly a screen ahead
   let idleHandle = 0;
 
+  // pendingLazy finds the boxes still holding a placeholder. data-state is the
+  // component's own reflected state, so this stays true however it was rendered.
+  const pendingLazy = () => body.querySelectorAll('puredashboard-lazy[data-state="pending"]');
+
   function deferMarkdown(box, content, clamped) {
-    // No observer (very old engine, jsdom): parse immediately — correctness first.
-    if (typeof IntersectionObserver !== "function") {
-      paintMarkdown(box, content);
-      return;
-    }
-    box.dataset.lazy = "pending";
-    box.style.minHeight = estimateHeight(content.length, clamped);
-    pendingMarkdown.set(box, content);
+    const lz = el("puredashboard-lazy", { class: "sec__lazy" });
+    lz.rootMargin = LAZY_MARGIN;
+    // A guessed height keeps the scrollbar still while bodies materialise above the
+    // reader; the component swaps in the real height as soon as it renders.
+    lz.height = estimateHeight(content.length, clamped);
+    lz.render = () => {
+      const md = el("puredashboard-markdown", { class: "sec__content" });
+      md.value = content;
+      return md;
+    };
+    box.replaceChildren(lz);
   }
 
   // A clamped body is capped at the clamp height; an open one is guessed from its
@@ -323,85 +326,35 @@ export default function mount(outlet, ctx) {
     return `${estimateRem(len, clamped).toFixed(1)}rem`;
   }
 
-  function paintMarkdown(box, content) {
-    const md = el("puredashboard-markdown", { class: "sec__content" });
-    md.value = content;
-    box.replaceChildren(md);
-    box.style.minHeight = "";
-    box.dataset.lazy = "done";
-  }
-
-  // Called after each render(): the previous observer's targets are detached nodes,
-  // so it is dropped wholesale rather than unobserved one by one.
+  // Called after each render(). Two things the component cannot decide for itself:
   //
-  // The observed element is the MESSAGE, not the body inside it. Off-screen messages
-  // carry `content-visibility: auto`, which skips their subtree's layout — a body
-  // inside a skipped subtree has no box to intersect with, so watching it directly
-  // would defeat the head start rootMargin is there to buy. The message itself always
-  // has a box, because `contain-intrinsic-size` gives it one.
+  // Anything already on screen is parsed NOW. The component's observer fires on the
+  // next frame, and showing a placeholder for a frame in the message the reader is
+  // looking at is a flicker for no reason.
+  //
+  // Then the rest is filled in while the page is idle, because a body that is not in
+  // the DOM cannot be found by ⌘F, selected by ⌘A or saved with the page — browser
+  // behaviour a reading surface has no business breaking. Deferring was only ever
+  // about keeping the work off the critical path, not about leaving it undone.
   function observeLazy() {
-    if (typeof IntersectionObserver !== "function") return;
-    lazyObserver?.disconnect();
-    lazyObserver = new IntersectionObserver((entries, obs) => {
-      for (const e of entries) {
-        if (!e.isIntersecting) continue;
-        obs.unobserve(e.target);
-        const box = e.target.querySelector('.sec__body[data-lazy="pending"]');
-        const content = box && pendingMarkdown.get(box);
-        // Gone from the map = a re-render replaced this node while it was queued.
-        if (content != null) {
-          pendingMarkdown.delete(box);
-          paintMarkdown(box, content);
-        }
-      }
-    }, { rootMargin: LAZY_MARGIN });
     const fold = window.innerHeight;
-    for (const msg of body.querySelectorAll('.msg:has(.sec__body[data-lazy="pending"])')) {
-      // Anything already on screen is parsed NOW, synchronously. Observer callbacks
-      // only run after the next frame, and waiting one frame to fill in the message
-      // the reader is looking at shows them a skeleton for no reason.
-      if (msg.getBoundingClientRect().top < fold) {
-        const box = msg.querySelector('.sec__body[data-lazy="pending"]');
-        const content = pendingMarkdown.get(box);
-        if (content != null) {
-          pendingMarkdown.delete(box);
-          paintMarkdown(box, content);
-          continue;
-        }
-      }
-      lazyObserver.observe(msg);
+    for (const lz of pendingLazy()) {
+      if (lz.getBoundingClientRect().top < fold) lz.renderNow("eager");
     }
     scheduleIdleParse();
   }
 
-  // Deferring the parse must not COST the reader anything permanent, and a body that
-  // is not in the DOM cannot be found by ⌘F, selected by ⌘A, or included in "save
-  // page" — browser behaviour a reading surface has no business breaking. So once the
-  // page is idle, the rest is parsed anyway, a few bodies per idle slice: the point of
-  // deferring was never to leave the work undone, only to keep it off the critical
-  // path while the reader is waiting for the first screen.
-  //
-  // Messages already parsed this way still cost nothing to lay out — they are the ones
-  // carrying content-visibility: auto.
   function scheduleIdleParse() {
     if (typeof requestIdleCallback !== "function") return; // Safari: the observer alone
     if (idleHandle) cancelIdleCallback(idleHandle);
     idleHandle = requestIdleCallback((deadline) => {
       idleHandle = 0;
-      let box;
       // 8ms of headroom left in the slice: enough for one body without overrunning it.
-      while (deadline.timeRemaining() > 8 && (box = body.querySelector('.sec__body[data-lazy="pending"]'))) {
-        const content = pendingMarkdown.get(box);
-        if (content == null) {
-          box.dataset.lazy = "done"; // stale node from a re-render; do not spin on it
-          continue;
-        }
-        pendingMarkdown.delete(box);
-        const msg = box.closest(".msg");
-        if (msg) lazyObserver?.unobserve(msg);
-        paintMarkdown(box, content);
+      for (const lz of pendingLazy()) {
+        if (deadline.timeRemaining() <= 8) break;
+        lz.renderNow("idle");
       }
-      if (body.querySelector('.sec__body[data-lazy="pending"]')) scheduleIdleParse();
+      if (pendingLazy().length) scheduleIdleParse();
     }, { timeout: 3000 });
   }
 
@@ -431,14 +384,9 @@ export default function mount(outlet, ctx) {
         text: clamped ? "Expand" : "Collapse",
       });
       toggle.addEventListener("click", () => {
-        // Expanding is a request to read this body now, so stop deferring it — the
+        // Expanding is a request to read this body NOW, so stop deferring it — the
         // observer may not have reached it if the click came from a keyboard focus.
-        const queued = pendingMarkdown.get(bodyBox);
-        if (queued != null) {
-          pendingMarkdown.delete(bodyBox);
-          lazyObserver?.unobserve(bodyBox);
-          paintMarkdown(bodyBox, queued);
-        }
+        bodyBox.querySelector('puredashboard-lazy[data-state="pending"]')?.renderNow("manual");
         const nowClamped = bodyBox.dataset.clamped !== "true";
         bodyBox.dataset.clamped = String(nowClamped);
         toggle.textContent = nowClamped ? "Expand" : "Collapse";
@@ -563,7 +511,7 @@ export default function mount(outlet, ctx) {
   return () => {
     disposed = true;
     off();
-    lazyObserver?.disconnect();
+    // The lazy elements disconnect their own observers as they leave the DOM.
     if (idleHandle && typeof cancelIdleCallback === "function") cancelIdleCallback(idleHandle);
   };
 }
