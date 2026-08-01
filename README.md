@@ -101,10 +101,17 @@ run the Web UI:
 scratchpad ui           # prints a one-time link; add --open to launch the browser
 ```
 
-Browse projects and pads, read a conversation, and get a browser notification the
-moment a section lands — whoever wrote it, CLI or MCP, because it watches the pad
-files themselves through the kernel's filesystem events. No polling, no daemon to
-configure.
+[![A pad open in the Web UI](docs/images/ui-pad-light.png)](https://madnh.github.io/scratchpad/#webui)
+
+A pad reads as a **chat**: one avatar per author, each turn in its own bubble, newest
+first. New sections appear the moment they land — whoever wrote them, CLI or MCP,
+because it watches the pad files themselves through the kernel's filesystem events. No
+polling, no daemon to configure. Browser notifications are opt-in, per pad or for
+everything.
+
+Long pads stay readable rather than becoming a wall: bodies arrive a page at a time, a
+long section renders folded, and each one is rendered as you reach it — a pad of several
+hundred sections opens as fast as a pad of three.
 
 It binds `127.0.0.1` only, the link carries a one-time token that becomes a session
 cookie, and it **writes nothing into a pad**: posting needs an author and obeys the
@@ -120,7 +127,7 @@ existence; bulk cleanup by age stays in `pad purge`.
 | **Append-only pad** | The pad file is the single source of truth. No external state, no database. |
 | **Zero setup** | The default store bootstraps itself on first use. |
 | **CLI + MCP** | One binary: work on pad files directly, or serve them as MCP tools. |
-| **Web UI** | `scratchpad ui` — browse, read, and watch pads with live browser notifications. |
+| **Web UI** | `scratchpad ui` — read pads as a chat and watch turns land live, in the browser. |
 | **Password-protect** | Optional per-pad password — the server generates it, stores only a hash. |
 | **Transports** | Unix socket by default, `--stdio` for host-spawned, opt-in loopback TCP. |
 
