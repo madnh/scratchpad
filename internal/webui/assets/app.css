@@ -1,0 +1,97 @@
+/* app.css — the shell's own styling. Everything else themes itself from
+   puredashboard's design tokens, so this file only covers the frame and the few
+   pad-specific affordances the component library has no opinion about. */
+
+puredashboard-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: 0 1rem;
+}
+
+.brand { display: flex; align-items: center; gap: .5rem; font-weight: 600; }
+.brand__logo { color: var(--accent); font-size: 1.1rem; }
+.header__spacer { flex: 1; }
+
+/* Connection indicator — the answer to "am I actually seeing updates?" */
+.conn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .8rem; color: var(--muted);
+  padding: .2rem .5rem; border-radius: var(--radius-full, 999px);
+}
+.conn__dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--muted); }
+.conn[data-status="live"] .conn__dot { background: var(--green, #22c55e); }
+.conn[data-status="connecting"] .conn__dot { background: var(--amber, #f59e0b); }
+.conn[data-status="offline"] .conn__dot { background: var(--red, #ef4444); }
+
+.ghost-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text); border-radius: var(--radius, 6px);
+  padding: .25rem .6rem; font-size: .8rem; cursor: pointer;
+}
+.ghost-btn:hover { background: var(--panel-2, var(--panel)); }
+
+.page { padding: 1.25rem; max-width: 72rem; margin: 0 auto; }
+.page__head { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.page__title { font-size: 1.25rem; font-weight: 650; margin: 0; }
+.page__sub { color: var(--muted); font-size: .85rem; }
+.page__spacer { flex: 1; }
+
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
+
+/* A ref is one token a person copies whole — never break it across lines. */
+.ref { font-family: var(--mono, ui-monospace, monospace); font-size: .85rem; white-space: nowrap; }
+.nowrap { white-space: nowrap; }
+
+/* ── Pad page ─────────────────────────────────────────────────────────────── */
+
+.pad__meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
+
+/* The section toolbar sticks: on a pad hundreds of sections long, the controls that
+   filter and jump must not scroll away. */
+.pad__toolbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .5rem 0; margin-bottom: .5rem;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+
+.sec__head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .8rem; color: var(--muted); }
+.sec__n { font-family: var(--mono, ui-monospace, monospace); color: var(--accent); font-weight: 600; }
+.sec__author { color: var(--text); font-weight: 600; }
+.sec__title { color: var(--text); }
+
+/* A long section is CLAMPED rather than shown in full: sections run to thousands of
+   words of agent prose, and a page of those is unreadable. The fade tells you there
+   is more without adding a scrollbar inside a scroll container. */
+.sec__body { position: relative; }
+.sec__body[data-clamped="true"] .sec__content {
+  max-height: 15rem;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+}
+.sec__expand {
+  display: inline-block; margin-top: .35rem;
+  background: none; border: 0; padding: 0;
+  color: var(--accent); font-size: .8rem; cursor: pointer;
+}
+.sec--new > .sec__body { animation: flash 1.6s ease-out; }
+@keyframes flash {
+  from { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  to { background: transparent; }
+}
+
+/* "N new sections ↑" — shown instead of yanking the viewport when a section arrives
+   while the person is reading further back in the history. */
+.newpill {
+  position: sticky; top: 3.2rem; z-index: 6;
+  display: block; width: fit-content; margin: 0 auto .5rem;
+  padding: .3rem .8rem; border-radius: var(--radius-full, 999px);
+  background: var(--accent); color: var(--accent-fg, #fff);
+  border: 0; font-size: .8rem; cursor: pointer;
+}
+
+.loadmore { display: block; margin: 1rem auto; }
+.muted { color: var(--muted); font-size: .85rem; }
+.danger-zone { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }

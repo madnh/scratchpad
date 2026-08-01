@@ -376,6 +376,29 @@ func (s *Store) List(project string) (pads []PadMeta, warnings []string, err err
 	return pads, warnings, nil
 }
 
+// Meta returns ONE pad's listing metadata, plus the title of its last section. Like
+// List it applies no password gate: the password gates a pad's CONTENT, not its
+// existence, and this is exactly the level List already publishes.
+//
+// The last section's title is the one thing beyond that level, so it is returned
+// EMPTY for a protected pad — a change notification for a protected pad says no more
+// than its listing entry does.
+func (s *Store) Meta(ref string) (PadMeta, string, error) {
+	project, id, err := ParseRef(ref)
+	if err != nil {
+		return PadMeta{}, "", err
+	}
+	pad, err := s.readNoPassword(project, id)
+	if err != nil {
+		return PadMeta{}, "", err
+	}
+	lastTitle := ""
+	if !pad.Protected() {
+		lastTitle = pad.Last().Title
+	}
+	return meta(pad), lastTitle, nil
+}
+
 // readNoPassword parses a pad without the password gate — for metadata listings only.
 func (s *Store) readNoPassword(project, id string) (*Pad, error) {
 	f, err := openPad(s.padPath(project, id), project+"-"+id, os.O_RDONLY, unix.LOCK_SH)

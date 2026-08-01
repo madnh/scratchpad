@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Scratchpad</title>
+
+<link rel="stylesheet" href="/vendor/puredashboard/theme/dashboard.css">
+<link rel="stylesheet" href="/vendor/puredashboard/components.css">
+<link rel="stylesheet" href="/app.css">
+
+<script type="module" src="/app.js"></script>
+</head>
+
+<!--
+  The APP SHELL is static markup, not something JavaScript builds: the frame paints on
+  first byte instead of after the modules load, and it stays mounted for the whole
+  session. Navigation replaces only #view, so the header, the sidebar and — the point
+  of this UI — the live event stream survive every route change.
+-->
+<body>
+<puredashboard-layout>
+
+  <puredashboard-header>
+    <div class="brand">
+      <span class="brand__logo" aria-hidden="true">▤</span>
+      <span class="brand__name" id="brand-name">Scratchpad</span>
+    </div>
+
+    <div class="header__spacer"></div>
+
+    <span class="conn" id="conn" title="Live connection status" aria-live="polite">
+      <span class="conn__dot" aria-hidden="true"></span>
+      <span class="conn__text">connecting…</span>
+    </span>
+
+    <button type="button" class="ghost-btn" id="notify-btn" hidden>Enable notifications</button>
+    <button type="button" class="ghost-btn" id="theme-btn" title="Switch theme" aria-label="Switch theme">◐</button>
+  </puredashboard-header>
+
+  <puredashboard-layout has-sider>
+    <puredashboard-sider collapsible breakpoint="md" id="sider">
+      <puredashboard-nav id="nav"></puredashboard-nav>
+    </puredashboard-sider>
+
+    <puredashboard-content>
+      <!-- Router outlet. Everything above this line is mounted exactly once. -->
+      <main id="view" class="page">
+        <puredashboard-skeleton lines="4"></puredashboard-skeleton>
+      </main>
+    </puredashboard-content>
+  </puredashboard-layout>
+
+</puredashboard-layout>
+</body>
+</html>

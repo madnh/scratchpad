@@ -48,6 +48,8 @@ const (
 	// EnvNonInteractive, when truthy, forces non-interactive mode (never prompt; fail
 	// fast instead), mirroring the --non-interactive flag.
 	EnvNonInteractive = "SCRATCHPAD_NONINTERACTIVE"
+	// EnvUIPort is the loopback port the Web UI listens on, mirroring --port.
+	EnvUIPort = "SCRATCHPAD_UI_PORT"
 )
 
 // Neutral defaults for the marker's identity fields.
@@ -61,6 +63,9 @@ const (
 	// DefaultTCPPort is the opt-in loopback TCP port (67xx range). TCP is never the
 	// default transport.
 	DefaultTCPPort = 6710
+	// DefaultUIPort is the loopback port for the Web UI (67xx range, next to the MCP
+	// TCP port — a different listener with a different audience and auth model).
+	DefaultUIPort = 6711
 )
 
 // Limits bounds every resource so a runaway agent cannot grow a pad or a project
@@ -99,6 +104,19 @@ type TCP struct {
 	AllowedOrigins []string `json:"allowed_origins,omitempty"`
 }
 
+// UI configures the Web UI listener (`ui`). It is a HUMAN surface, separate from the
+// MCP transports: a different port, a different audience, and a browser-shaped auth
+// model (a one-time URL token exchanged for a session cookie) instead of MCP's bearer
+// tokens. It binds loopback only, so there is no allow-list of remote origins to
+// configure — the browser's own origin is the only one that can ever reach it.
+type UI struct {
+	Port int `json:"port,omitempty"`
+	// NoAuth drops the URL token + session cookie, leaving only the loopback bind
+	// and the Host/Origin guard. Off by default; it means every local process that
+	// can reach the port can read every pad.
+	NoAuth bool `json:"no_auth,omitempty"`
+}
+
 // Config is the marker file: a schema header (type/version), identity, and optional
 // setting groups. `init` writes only the header + identity; the optional groups are
 // added by an operator when needed (config.md documents the defaults).
@@ -128,6 +146,7 @@ type Config struct {
 	Limits Limits `json:"limits,omitzero"`
 	Wait   Wait   `json:"wait,omitzero"`
 	TCP    TCP    `json:"tcp,omitzero"`
+	UI     UI     `json:"ui,omitzero"`
 
 	// ProjectsDir is <dir>/projects — derived, never persisted.
 	ProjectsDir string `json:"projects_dir,omitempty"`
@@ -212,6 +231,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.TCP.Port <= 0 {
 		c.TCP.Port = DefaultTCPPort
+	}
+	if c.UI.Port <= 0 {
+		c.UI.Port = DefaultUIPort
 	}
 }
 
