@@ -10,11 +10,13 @@
 //     127.0.0.1 still sends its own Host), and rejects cross-origin writes.
 //   - Auth is browser-shaped: a one-time token in the URL printed at startup, swapped
 //     for an HttpOnly session cookie, rather than MCP's bearer tokens.
-//   - The surface is READ-ONLY for pad content. A person watching a conversation is
-//     not a participant in it: posting requires an author identity and would have to
-//     obey the turn rule, which belongs to the agents' surfaces. Pads can be deleted,
-//     one at a time; bulk cleanup by age stays in the CLI's `pad purge`, where the
-//     victim list is printed and confirmed first.
+//   - The surface WRITES NOTHING INTO a pad. A person watching a conversation is not a
+//     participant in it: posting requires an author identity and would have to obey the
+//     turn rule, which belongs to the agents' surfaces. The one mutating action is
+//     deleting a whole pad, one at a time — and, exactly as in the CLI, deletion is not
+//     gated by the pad password, which protects CONTENT rather than existence. Bulk
+//     cleanup by age stays in the CLI's `pad purge`, where the victim list is printed
+//     and confirmed first.
 //
 // Everything goes through internal/store, so the UI observes the same flock discipline
 // and password gate as the CLI and the MCP server — there is no second disk path.

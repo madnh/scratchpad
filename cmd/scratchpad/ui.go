@@ -78,7 +78,9 @@ func newUICmd() *cobra.Command {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Scratchpad UI on %s (dir %s)\n", cfg.DisplayName, cfg.ProjectsDir)
 			if resolvedNoAuth {
 				fmt.Fprintln(cmd.ErrOrStderr(),
-					"warning: --no-auth — every local process that can reach this port can read every pad")
+					"warning: --no-auth — every local process that can reach this port can read OR DELETE every pad,")
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"         including password-protected ones (the password gates content, never deletion)")
 			} else {
 				fmt.Fprintln(cmd.ErrOrStderr(),
 					"open the URL above; the token in it starts a session, then it is dropped from the address bar")

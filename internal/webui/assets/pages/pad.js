@@ -68,11 +68,14 @@ export default function mount(outlet, ctx) {
       return;
     }
     if (disposed) return;
-    setDocTitle();
     if (pad.locked) {
       renderLocked();
       return;
     }
+    // Only once the pad is known to be readable. A tab title outlives the tab — it
+    // goes into history and session restore — so a protected pad the person never
+    // unlocked must not leave its title there.
+    setDocTitle();
     await loadLatest();
   }
 
@@ -80,14 +83,35 @@ export default function mount(outlet, ctx) {
   // carries — the title arrives with the pad. A tab strip of "default-b5i2cj" tells a
   // person nothing, so name the tab after the pad as soon as we know its name, cut
   // short: a browser tab shows a few words and the ref stays in the page itself.
+  //
+  // The title is written by an agent, so it is sanitised first: control characters and
+  // bidi overrides are stripped (a title containing U+202E can reverse the text the
+  // browser renders in the tab and the history entry, which is how a decoy is built),
+  // and the cut is made on CHARACTERS so it cannot split a surrogate pair and leave a
+  // lone half behind.
   function setDocTitle() {
-    const t = (pad.title || "").trim();
+    const t = padTitleForTab(pad.title);
     if (!t) return;
-    const short = t.length > 48 ? `${t.slice(0, 47).trimEnd()}…` : t;
     // The deployment's own name, which the shell already put in the brand mark — an
     // operator who renamed this instance sees that name in the tab too.
     const app = document.getElementById("brand-name")?.textContent.trim() || "Scratchpad";
-    document.title = `${short} · ${app}`;
+    document.title = `${t} · ${app}`;
+  }
+
+  const TAB_TITLE_CHARS = 48;
+  // C0/C1 controls, the bidi overrides and isolates, and the zero-width/BOM characters
+  // that let a string render as something other than what it contains.
+  const UNSAFE_TITLE_CHARS =
+    /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+
+  function padTitleForTab(raw) {
+    const cleaned = String(raw ?? "").replace(UNSAFE_TITLE_CHARS, " ").replace(/\s+/g, " ").trim();
+    if (!cleaned) return "";
+    // Array.from splits by code point, so an emoji or a non-BMP character counts once
+    // and is never cut in half.
+    const chars = Array.from(cleaned);
+    if (chars.length <= TAB_TITLE_CHARS) return cleaned;
+    return `${chars.slice(0, TAB_TITLE_CHARS - 1).join("").trimEnd()}\u2026`;
   }
 
   async function loadLatest() {
