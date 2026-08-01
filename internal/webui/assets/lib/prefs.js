@@ -13,6 +13,7 @@
 const KEYS = {
   order: "scratchpad.ui.order",
   stickyBar: "scratchpad.ui.stickyBar",
+  outline: "scratchpad.ui.outline",
 };
 
 const DEFAULTS = {
@@ -21,6 +22,11 @@ const DEFAULTS = {
   // A pad runs to hundreds of sections; controls that scroll away are controls you
   // have to scroll back for.
   stickyBar: true,
+  // The rail is where you find out how long the conversation is and where you are in
+  // it — worth its width by default. A narrow window hides it regardless; that is a
+  // fact about the viewport and is deliberately NOT written back here, or one resize
+  // would erase the choice.
+  outline: true,
 };
 
 function read(key) {
@@ -73,4 +79,15 @@ export function stickyBar() {
 export function setStickyBar(on) {
   write(KEYS.stickyBar, on ? "on" : "off");
   announce("stickyBar", !!on);
+}
+
+/** outline shows the pad's section index beside the transcript. */
+export function outline() {
+  const raw = read(KEYS.outline);
+  return raw === null ? DEFAULTS.outline : raw !== "off";
+}
+
+export function setOutline(on) {
+  write(KEYS.outline, on ? "on" : "off");
+  announce("outline", !!on);
 }

@@ -52,6 +52,12 @@ export const api = {
     return request(`/api/pads/${encodeURIComponent(ref)}/sections${qs ? "?" + qs : ""}`);
   },
 
+  // The opening excerpt of ONE section, for the outline's hover popup. Deliberately
+  // not part of the TOC: it is wanted for the handful of entries a person points at,
+  // not for every entry of every pad they open.
+  sectionPreview: (ref, n, opts = {}) =>
+    request(`/api/pads/${encodeURIComponent(ref)}/sections/${encodeURIComponent(n)}/preview`, opts),
+
   unlock: (ref, password) =>
     request(`/api/pads/${encodeURIComponent(ref)}/unlock`, {
       method: "POST",
