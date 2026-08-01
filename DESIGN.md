@@ -125,6 +125,7 @@ The author is always **self-declared, from a single source**: the `author` param
 scratchpad
 ├── init                 # initialize a CUSTOM dir (flag/env); the default dir self-bootstraps, so init is not required
 ├── serve                # MCP server: UDS by default; --stdio; --tcp opt-in
+├── ui                   # Web UI for a human: browse, read, watch (loopback only) — see the Web UI section
 ├── doctor               # diagnostics, strictly read-only (see the Doctor section)
 ├── skills               # self-documenting docs (go:embed); skills docs <topic>; -o json
 ├── version
@@ -170,6 +171,7 @@ The standard need for "running the CLI from any folder in a repo lands in the sa
 | `SCRATCHPAD_PROJECT_NAME` | The default project when a command/tool does not pass `project` | `default` |
 | `SCRATCHPAD_AUTHOR` | The default author for `--as` | — |
 | `SCRATCHPAD_NONINTERACTIVE` | Disable prompts (automation) | — |
+| `SCRATCHPAD_UI_PORT` | Loopback port for the Web UI (`ui`) | `6711` |
 
 Every env has a corresponding flag; on conflict, **flag > env > config file > default**.
 
@@ -210,14 +212,16 @@ Every env has a corresponding flag; on conflict, **flag > env > config file > de
     "port": 6710,
     "token_digests": ["sha256:..."],
     "allowed_origins": []
-  }
+  },
+
+  "ui": { "port": 6711, "no_auth": false }
 }
 ```
 
 - **Required header**: `type` (fixed, a recognition guard) + `version` (the marker's schema version).
 - **Identity group**: `display_name` (the human-facing display name — deliberately *not* `project_name`, because "project" already means something different in Scratchpad), `instance` (a technical label: the socket name).
 - **Storage/behavior group**: `dir` (optional — relocate storage elsewhere, meaningful only in a config at the default location; this is a deliberate exception to the "do not store paths" rule, acting as a pointer that the user requested be configurable via the config file), `default_project` (the default project, overridden by env `SCRATCHPAD_PROJECT_NAME`/flag).
-- **Optional group, omit = default**: `limits`, `wait`, `tcp`. `init` writes only the header + identity; the optional groups are added by the operator when needed (the defaults are explained in `config.md`). `tcp.token_digests` stores only the SHA-256 digest, never the raw token; once `tcp` is in the file, `serve --tcp` does not need the flag repeated (flags still win over the file on conflict).
+- **Optional group, omit = default**: `limits`, `wait`, `tcp`, `ui`. `init` writes only the header + identity; the optional groups are added by the operator when needed (the defaults are explained in `config.md`). `tcp.token_digests` stores only the SHA-256 digest, never the raw token; once `tcp` is in the file, `serve --tcp` does not need the flag repeated (flags still win over the file on conflict). `ui` holds the Web UI's loopback `port` and `no_auth` — no origin allow-list, because the UI binds loopback and the browser's own origin is the only one that can reach it.
 
 **Not stored in config**: paths (`projects/`, socket — derived from dir); author (per-agent, belonging to each session's env `SCRATCHPAD_AUTHOR`); a pad's password (belonging to each pad file's header — a pad is self-contained, `rm` cleans it, leaving no cruft in config).
 
@@ -225,6 +229,108 @@ Every env has a corresponding flag; on conflict, **flag > env > config file > de
 - Data (`projects/`) and the socket are all **derived from dir** — moving the dir moves everything.
 - `init` is used for a custom dir (`--dir`/env) or provisioning; interactively it confirms before creating, and refuses to clobber an existing marker. The default dir needs no `init` (it self-bootstraps).
 - Docs discipline: `config.md` is a separate source file in the repo (embedded into the binary), its content is purely user-facing — it explains each field of the marker, the resolution order, and the env vars, so that whoever opens the dir 6 months later understands it on their own. The rule "changing the config schema means updating the guide + bumping `version` in the same change" lives in the repo's `CLAUDE.md` (maintainer-facing), not in the deploy guide.
+
+## Web UI (`ui`)
+
+`pad wait` is an **agent** ergonomic: it blocks, and its exit code wakes a program. A
+person gets nothing from that. `ui` is the human counterpart — browse projects and
+pads, read one, and be told when a section lands.
+
+It is a **separate loopback listener, not a fourth MCP transport**. Three things
+differ from `serve`, and each one is why it does not belong on the same port:
+
+- A browser cannot speak to a Unix socket, so this needs TCP regardless.
+- Auth is browser-shaped: a one-time token in the URL printed at startup, exchanged
+  for an `HttpOnly; SameSite=Strict` session cookie and then dropped from the address
+  bar via a 303 — rather than MCP's bearer token on every call.
+- Its audience is a person, so its lifecycle is ad-hoc (`--open`, Ctrl-C), not
+  host-supervised.
+
+Default port **6711** (67xx range, next to the MCP TCP port). Guards: bind `127.0.0.1`
+only, reject a non-loopback `Host` (the DNS-rebinding defence — a page resolving its
+own name to 127.0.0.1 still sends its own `Host`), require a same-origin `Origin` on
+state-changing methods, and serve a strict CSP (`script-src 'self'`).
+
+**Read-only for pad content.** A person watching a conversation is not a participant
+in it: posting needs an author identity and would have to obey the turn rule, which
+belongs to the agents' surfaces. Deleting a pad is available — **one at a time**, with
+no row selection and no bulk endpoint: wiping a batch of transcripts is irreversible,
+and `pad purge` already does that where a person states an age threshold and reads the
+victim list before confirming.
+
+### Change detection — push, not poll
+
+The pad file is the single source of truth, so the UI watches the **store**, not the
+writers: whoever appends — CLI, MCP server, or a person with an editor or `rm` — is
+noticed identically, no writer has to cooperate, and `internal/store` stays ignorant
+of who is listening. A writer-side hook would miss every uncooperative writer and drag
+a "is the UI running?" question into the write path.
+
+The mechanism is kernel filesystem notification (inotify / kqueue / FSEvents via
+fsnotify) on the projects directory and each project directory — one watch per
+project, not per pad. Two safeguards, because notification is best-effort: a slow full
+rescan (30s) covers dropped events and filesystems where notification silently does
+not work, and a failure to start fsnotify degrades to that rescan and reports itself
+(`/api/status` → `watcher: "rescan"`, surfaced in the UI's Settings) instead of going
+quietly blind. Emission is state-based (stat mtime+size against a snapshot), which
+collapses the several write events one append produces into one event and makes the
+rescan idempotent.
+
+End to end: `write()` → kernel event (~ms) → 50ms debounce → `store.Get` under a
+shared flock (so a half-written file is never read — the existing lock discipline
+already solves this) → SSE → browser.
+
+### HTTP surface
+
+SSE, not WebSocket: the traffic is one-way, it rides ordinary HTTP, and `EventSource`
+reconnects by itself, so a server restart heals with no client retry logic.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/status` | deployment, store path, watcher mode (`push`/`rescan`) |
+| `GET /api/projects` | projects + pad count + last activity |
+| `GET /api/pads[?project=]` | pad metadata listing |
+| `GET /api/pads/{ref}` | header + turn + full TOC, **no section bodies** |
+| `GET /api/pads/{ref}/sections[?before=&limit=&section=]` | one page of bodies |
+| `POST /api/pads/{ref}/unlock` | verify a protected pad's password once per session |
+| `DELETE /api/pads/{ref}` | delete one pad (no bulk counterpart, by design) |
+| `GET /api/events` | SSE stream of pad changes |
+
+**Sizing for real pads drove this shape.** A pad reaches hundreds of sections of long
+agent prose, so nothing loads a whole one: the TOC carries no bodies, bodies arrive
+one page (20) at a time newest-first, and `before` walks backwards on demand.
+
+A protected pad's password is verified once and held in the server-side session (in
+memory, never on disk), so paging costs no extra bcrypt round and the browser never
+keeps the secret. Events carry **metadata only — exactly the level `pad_list` already
+publishes** — with the last section's title omitted for a protected pad, so a
+notification reveals nothing its listing entry does not.
+
+### Front end
+
+An **app shell**: `index.html` ships the frame as static markup so it paints on first
+byte, and the router swaps only the content region — the header, the sidebar and the
+SSE connection survive every navigation. Hash routing (`#/pads/projectx-abc123`),
+because the UI is served from the binary at `/` and hash mode needs no catch-all
+rewrite; the router only reacts to `hashchange`, so ⌘-click and copy-link keep working.
+
+Built on **puredashboard**, vendored into `internal/webui/assets/vendor/` and embedded
+with `go:embed` — no build step, one binary. It is copied rather than a git submodule
+because `go:embed` cannot read an un-checked-out submodule, which would break
+`go install …@latest` and any non-recursive clone; `make vendor-ui` refreshes it.
+
+A pad renders as a timeline (it is a turn-taking transcript, not a document), newest
+first — which also means "load older" appends *downward*, so the page never has to
+preserve scroll position around content inserted above the viewport. A long section
+renders clamped with an explicit expand. A section arriving while the person is
+reading history offers a jump pill instead of moving the viewport.
+
+Notifications are turn-aware — who moved and who it is on now, the one fact that
+matters in a turn-taking protocol. The Notification API needs a secure context and
+`http://127.0.0.1` qualifies, so this works with no certificate. The honest limit,
+stated in Settings rather than discovered: notifications fire only while a tab is open
+(backgrounded is fine, closed is not) — for an unattended wait, `pad wait` is still
+the tool.
 
 ### Doctor
 
@@ -259,7 +365,7 @@ Positioning: **the CLI is the primary path, self-sufficient for local use** — 
 | Create / post / view TOC / read / list (`create` `post` `get` `read` `list`, project list) | ✅ | ✅ |
 | Wait for a new section | ✅ `pad wait` — **not capped**, runs in the background, exit code wakes the agent | ✅ `pad_wait` — **capped at 300s**, the agent loops itself using `since` |
 | Delete / cleanup (`delete`, `purge`) | ✅ (confirm with a human, `--yes` for automation) | ❌ — the agent surface is append-only |
-| Operations (`init`, `serve`, `doctor`, `skills`, `version`) | ✅ | ❌ |
+| Operations (`init`, `serve`, `ui`, `doctor`, `skills`, `version`) | ✅ | ❌ |
 | Identity | `--as` / env `SCRATCHPAD_AUTHOR` | param `author` (self-declared, mandatory) |
 | Needs a running server | ❌ — reads/writes disk directly (flock) | ✅ — needs `serve` (UDS / stdio / TCP) |
 | Long content | via stdin (`-`), no shell-escaping worries | param `content`, capped at 64KB |

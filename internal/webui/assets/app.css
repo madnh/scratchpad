@@ -1,0 +1,287 @@
+/* app.css — the shell's own styling. Everything else themes itself from
+   puredashboard's design tokens, so this file only covers the frame and the few
+   pad-specific affordances the component library has no opinion about. */
+
+puredashboard-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: 0 1rem;
+}
+
+.brand {
+  display: flex; align-items: center; gap: .5rem;
+  font-weight: 600; color: inherit; text-decoration: none;
+}
+.brand__logo { display: block; width: 24px; height: 24px; border-radius: 5px; }
+.header__spacer { flex: 1; }
+
+/* Connection indicator — the answer to "am I actually seeing updates?" */
+.conn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .8rem; color: var(--muted);
+  padding: .2rem .5rem; border-radius: var(--radius-full, 999px);
+}
+.conn__dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--muted); }
+.conn[data-status="live"] .conn__dot { background: var(--green, #22c55e); }
+.conn[data-status="connecting"] .conn__dot { background: var(--amber, #f59e0b); }
+.conn[data-status="offline"] .conn__dot { background: var(--red, #ef4444); }
+
+.ghost-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text); border-radius: var(--radius, 6px);
+  padding: .25rem .6rem; font-size: .8rem; cursor: pointer;
+}
+.ghost-btn:hover { background: var(--panel-2, var(--panel)); }
+
+/* ── Sidebar pad browser ──────────────────────────────────────────────────── */
+
+/* Lay the rail out as a column so the pad list takes the slack and Settings is
+   pushed to the bottom, above the sider's own collapse trigger. */
+.puredashboard-sider__inner { display: flex; flex-direction: column; }
+
+.sider__pads {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  margin-top: .5rem;
+  padding: .6rem .5rem 1rem;
+  /* The list can outgrow the rail; scroll it rather than the whole shell, so the
+     section menu above and Settings below both stay put. */
+  overflow-y: auto;
+}
+#nav-bottom { flex: 0 0 auto; border-top: 1px solid var(--border); padding-top: .25rem; }
+
+/* Collapsed to a 64px rail there is no room for any of this. */
+puredashboard-sider[collapsed] .sider__pads { display: none; }
+
+/* Square rows: rounded pills read as buttons floating in the rail, and with the
+   two-line pad entries they left ragged gaps down both edges. */
+puredashboard-sider .puredashboard-nav__link { border-radius: 0; }
+/* The base stylesheet underlines every <a> on hover. In a rail whose rows already
+   highlight as a block, the underline is a second, noisier hover state. */
+puredashboard-sider .puredashboard-nav__link:hover { text-decoration: none; }
+
+.sider__head { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .5rem; }
+/* Full width with a small label, so neither choice gets ellipsised in a narrow rail. */
+#group-mode puredashboard-segmented { display: block; width: 100%; font-size: .74rem; }
+.sider__label {
+  font-size: .7rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.sider__all {
+  display: block; margin-top: .6rem; padding: .25rem .5rem;
+  font-size: .78rem; color: var(--accent); text-decoration: none;
+}
+
+.padgroup + .padgroup { margin-top: .7rem; }
+.padgroup__head {
+  display: flex; align-items: baseline; gap: .4rem;
+  padding: .15rem .5rem .25rem;
+}
+.padgroup__label {
+  font-size: .72rem; font-weight: 600; color: var(--muted);
+  text-decoration: none; text-transform: uppercase; letter-spacing: .04em;
+}
+a.padgroup__label:hover { color: var(--accent); }
+.padgroup__count { font-size: .68rem; color: var(--muted); opacity: .75; }
+
+/* One line per entry: which pad, and how long ago it moved. The title takes the slack
+   and truncates; the age is short, fixed and pinned to the right, so the ages line up
+   into a column you can scan for "what moved?" without opening anything. */
+.padnav { display: flex; align-items: baseline; gap: .4rem; min-width: 0; }
+.padnav__row { display: flex; align-items: center; gap: .35rem; min-width: 0; flex: 1; }
+.padnav__title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .82rem;
+}
+.padnav__meta {
+  flex: none;
+  font-size: .68rem; color: var(--muted); white-space: nowrap;
+}
+.padnav__dot {
+  flex: none; width: .45rem; height: .45rem; border-radius: 50%;
+  background: var(--accent);
+}
+.padlist__empty { padding: .5rem; font-size: .8rem; color: var(--muted); }
+
+/* The row height comes from the entry plus its own padding rather than the nav's
+   fixed one — titles wrap to nothing, but a row packed to its text edges makes the
+   list read as a solid block instead of a list of separate pads. */
+.padgroup puredashboard-nav { --pd-nav-item-height: auto; }
+.padgroup .puredashboard-nav__link { padding: .5rem .6rem; }
+
+/* ── Content column + its credit line ─────────────────────────────────────── */
+
+/* A column so the outlet can take the slack: on a short page the credit line still
+   lands at the bottom of the viewport rather than floating under the content. */
+puredashboard-content { display: flex; flex-direction: column; padding: 0; }
+
+.page { flex: 1 0 auto; padding: 1.25rem; max-width: 72rem; width: 100%; margin: 0 auto; }
+
+/* One quiet centred line under the page — not a bar. */
+.foot {
+  flex: 0 0 auto;
+  max-width: 72rem; width: 100%; margin: 0 auto;
+  padding: .5rem 1.25rem 1rem;
+  font-size: .74rem; color: var(--muted); text-align: center;
+}
+.foot a { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; }
+.foot a:hover { color: var(--accent); border-bottom-color: currentColor; }
+.foot__version { font-family: var(--mono, ui-monospace, monospace); opacity: .75; margin-left: .3rem; }
+
+/* Cards stacked straight down a page need air between them; the ones inside
+   .stat-row are spaced by that grid's gap instead, so only direct children match. */
+.page > puredashboard-card { display: block; margin-bottom: .9rem; }
+.page > puredashboard-card:last-child { margin-bottom: 0; }
+
+/* The actions keep their place on the title's line however long the title runs: the
+   title is the flexible item and wraps inside its own column, the buttons never
+   shrink and never get pushed onto a line of their own. */
+.page__head { display: flex; align-items: flex-start; gap: .75rem; flex-wrap: nowrap; margin-bottom: 1rem; }
+.page__title {
+  font-size: 1.25rem; font-weight: 650; margin: 0;
+  flex: 1; min-width: 0; overflow-wrap: anywhere;
+}
+/* The spacer stops stretching once the title is the flexible item — two growing
+   siblings would split the row in half and wrap the title at 50% width. */
+.page__head > .page__spacer { flex: none; }
+.page__head > button { flex: none; margin-top: .15rem; }
+.page__sub { color: var(--muted); font-size: .85rem; }
+.page__spacer { flex: 1; }
+
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
+
+/* A ref is one token a person copies whole — never break it across lines. */
+.ref { font-family: var(--mono, ui-monospace, monospace); font-size: .85rem; white-space: nowrap; }
+.nowrap { white-space: nowrap; }
+
+/* ── Pad page ─────────────────────────────────────────────────────────────── */
+
+.pad__meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
+/* The switch renders as a block, so its host box keeps a line-height's worth of slack
+   under the control — enough to lift the knob and its label off the row's centre
+   line. Making the host a flex box shrinks it to the control itself. */
+.pad__meta puredashboard-switch { display: inline-flex; align-items: center; }
+
+/* The section toolbar sticks: on a pad hundreds of sections long, the controls that
+   filter and jump must not scroll away. */
+.pad__toolbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .5rem 0; margin-bottom: .5rem;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+
+/* ── Transcript as a chat ─────────────────────────────────────────────────────
+   A pad is a conversation, so it reads as one: an avatar per author and the prose
+   in a bubble beside it. Every message is on the same side — there is no "me" in a
+   pad between N agents — so identity is carried by the avatar, not by the side. */
+.chat { display: flex; flex-direction: column; gap: 1rem; }
+
+/* The avatar hues are the shared status colours, so an agent's chip sits in the same
+   visual language as the rest of the UI. The handle picks one by hash. */
+.chat {
+  --avatar-c0: var(--accent, #3b82f6);
+  --avatar-c1: var(--green,  #3fb950);
+  --avatar-c2: var(--amber,  #d29922);
+  --avatar-c3: var(--red,    #f85149);
+  --avatar-c4: var(--teal,   #2dd4bf);
+  --avatar-c5: var(--purple, #a98bff);
+}
+
+.msg { display: flex; align-items: flex-start; gap: .6rem; }
+
+/* Parsing a body lazily saves the JS; this saves the layout and paint for the ones
+   already parsed. An off-screen message skips rendering its subtree entirely, which
+   matters here because a single section can be a thousand DOM nodes of tables and
+   code. --msg-est (set per message from its byte count) stands in for the height
+   while skipped, so the scrollbar does not jump; `auto` lets the browser use the real
+   height once it has rendered the message even once.
+   Deliberately NOT applied to the first two messages: they are inside the initial
+   fold, where content-visibility only adds work to the critical path. Unsupported
+   browsers ignore the whole rule and simply render everything, which is correct. */
+.chat > .msg:nth-child(n+3) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto var(--msg-est, 20rem);
+}
+.msg__avatar {
+  flex: none; margin-top: 1.3rem;
+  width: 2.15rem; height: 2.15rem; border-radius: var(--radius-full, 999px);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--avatar-bg, var(--accent)); color: var(--accent-ink, #fff);
+  font-size: .72rem; font-weight: 700; letter-spacing: .01em;
+  /* No text-transform: agentInitials already decides the casing, and a few labels
+     are cased deliberately ("iOS"). overflow:hidden because the text comes from an
+     agent-written handle: nothing it can be named may spill across the row. */
+  overflow: hidden;
+}
+/* min-width:0 lets wide children (tables, code blocks) shrink instead of stretching
+   the row — they scroll inside the bubble rather than the page. */
+.msg__col { flex: 1; min-width: 0; }
+
+.msg__head { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; font-size: .8rem; color: var(--muted); margin-bottom: .2rem; }
+.msg__author { color: var(--text); font-weight: 600; font-size: .85rem; }
+.msg__n { font-family: var(--mono, ui-monospace, monospace); color: var(--accent); font-weight: 600; }
+
+.msg__bubble {
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  border-top-left-radius: 2px;   /* the corner that points back at the avatar */
+  padding: .6rem .8rem;
+  overflow-x: auto;
+}
+/* The title is what a reader scans a pad by — it says what the turn was FOR, while
+   the prose under it can run for thousands of words. It gets to be bigger than the
+   body text, not the same size as it. */
+.msg__title {
+  color: var(--text); font-weight: 650; font-size: 1.05rem; line-height: 1.35;
+  margin-bottom: .4rem;
+}
+
+/* A long section is CLAMPED rather than shown in full: sections run to thousands of
+   words of agent prose, and a page of those is unreadable. The fade tells you there
+   is more without adding a scrollbar inside a scroll container. */
+.sec__body { position: relative; }
+/* The placeholder for a body not yet parsed comes from <puredashboard-lazy> itself
+   (reserved height + shimmer); nothing to add here beyond the clamp below. */
+.sec__body[data-clamped="true"] .sec__content {
+  max-height: 15rem;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+}
+.sec__expand {
+  display: inline-block; margin-top: .35rem;
+  background: none; border: 0; padding: 0;
+  color: var(--accent); font-size: .8rem; cursor: pointer;
+}
+.msg--new .msg__bubble { animation: flash 1.6s ease-out; }
+@keyframes flash {
+  from { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  to { background: transparent; }
+}
+
+/* "N new sections ↑" — shown instead of yanking the viewport when a section arrives
+   while the person is reading further back in the history. */
+.newpill {
+  position: sticky; top: 3.2rem; z-index: 6;
+  display: block; width: fit-content; margin: 0 auto .5rem;
+  padding: .3rem .8rem; border-radius: var(--radius-full, 999px);
+  background: var(--accent); color: var(--accent-fg, #fff);
+  border: 0; font-size: .8rem; cursor: pointer;
+}
+
+.loadmore { display: block; margin: 1rem auto; }
+.muted { color: var(--muted); font-size: .85rem; }
+/* The delete confirmation is written in lines — what is being destroyed, then how
+   much of it — so keep the line breaks the text puts there. */
+.puredashboard-dialog__message { white-space: pre-line; }
+
+/* The pad header's overflow trigger: square, so "⋯" sits next to Copy ref as an
+   icon rather than as a second labelled button competing with it. */
+.icon-btn {
+  padding: .25rem; width: 1.85rem; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}

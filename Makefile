@@ -15,7 +15,12 @@ LDFLAGS := -X github.com/madnh/scratchpad/internal/buildinfo.Version=$(VERSION) 
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build-dev build-release install run test fmt fmt-check vet tidy check clean
+# Nguồn của thư viện UI được vendor vào internal/webui/assets/vendor/puredashboard.
+PD_REPO ?= https://github.com/madnh/puredashboard.git
+PD_REF  ?= main
+PD_DIR  := internal/webui/assets/vendor/puredashboard
+
+.PHONY: help build-dev build-release install run ui test fmt fmt-check vet tidy check clean vendor-ui
 
 help: ## In danh sách lệnh (mặc định)
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -31,6 +36,21 @@ install: ## Cài binary vào $GOBIN (hoặc $GOPATH/bin)
 
 run: ## Chạy server (serve) — thêm ARGS="..." để truyền cờ, vd: make run ARGS="--stdio"
 	go run -ldflags "$(LDFLAGS)" $(PKG) serve $(ARGS)
+
+ui: ## Chạy Web UI (ui) — thêm ARGS="..." để truyền cờ, vd: make ui ARGS="--port 7000"
+	go run -ldflags "$(LDFLAGS)" $(PKG) ui $(ARGS)
+
+vendor-ui: ## Cập nhật thư viện UI đã vendor từ puredashboard (PD_REF=<branch|tag|commit>)
+	@tmp=$$(mktemp -d) && \
+	git clone --quiet --depth 1 --branch $(PD_REF) $(PD_REPO) $$tmp && \
+	rm -rf $(PD_DIR) && mkdir -p $(PD_DIR)/theme && \
+	cp $$tmp/src/*.js $$tmp/src/*.css $(PD_DIR)/ && \
+	cp $$tmp/src/theme/*.css $(PD_DIR)/theme/ && \
+	cp $$tmp/LICENSE $(PD_DIR)/LICENSE && \
+	printf 'source: %s\ncommit: %s\ndate:   %s\n' \
+		"$(PD_REPO)" "$$(git -C $$tmp rev-parse HEAD)" "$$(git -C $$tmp log -1 --date=short --format=%ad)" > $(PD_DIR)/VERSION && \
+	rm -rf $$tmp && \
+	echo "vendored $(PD_REF) → $(PD_DIR) (nhớ ghi lại phần ghi chú trong VERSION rồi commit)"
 
 test: ## Chạy toàn bộ test
 	go test ./...

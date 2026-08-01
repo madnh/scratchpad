@@ -41,6 +41,45 @@ const idLength = 6
 // source of truth (no push channel), so waiting is periodic re-parse.
 const waitPollInterval = 750 * time.Millisecond
 
+// padSizeSlack covers the per-section framing this store writes around content — the
+// header line, the ts comment and the blank separators — plus the pad header, so the
+// ceiling below is never tighter than what an honest writer can legitimately produce.
+const padSizeSlack = 1024
+
+// maxPadBytes is the largest pad file this store will read into memory. It is DERIVED
+// from the deployment's own limits rather than configured: a pad that exceeds
+// (title + content + framing) x MaxSectionsPerPad cannot have been produced through
+// Post, so it was hand-written or corrupted, and reading it is all cost and no value.
+//
+// Without this, a pad file is an unbounded allocation triggered by anyone who can
+// append — and a single oversized pad would take down every listing that walks the
+// store, not just its own page.
+func (s *Store) maxPadBytes() int64 {
+	perSection := int64(s.limits.MaxContentKB+s.limits.MaxTitleKB)*1024 + padSizeSlack
+	return perSection*int64(s.limits.MaxSectionsPerPad) + padSizeSlack
+}
+
+// readPadFile reads a pad file with that ceiling enforced, so an oversized file fails
+// with a clear error instead of an OOM. The size is checked twice: once from the
+// file's own metadata (cheap, catches the normal case) and once by reading one byte
+// past the limit (authoritative, and immune to the file growing between the two).
+func (s *Store) readPadFile(f *os.File, ref string) ([]byte, error) {
+	limit := s.maxPadBytes()
+	if st, err := f.Stat(); err == nil && st.Size() > limit {
+		return nil, coded(CodeContentTooLarge,
+			"pad %s is %d bytes; this deployment reads at most %d (raise limits, or split the pad)", ref, st.Size(), limit)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, coded(CodeContentTooLarge,
+			"pad %s exceeds the %d byte read limit for this deployment", ref, limit)
+	}
+	return data, nil
+}
+
 // Store reads and writes pads under a projects directory, enforcing the deployment's
 // limits. It holds no open handles or caches — every operation goes to disk, which is
 // what lets separate processes (CLI, server) share one store safely.
@@ -220,11 +259,13 @@ func (s *Store) Post(ref, author, title, content, password string) (*Pad, error)
 	}
 	defer f.Close() // closing the fd releases the flock
 
-	data, err := io.ReadAll(f)
+	data, err := s.readPadFile(f, ref)
 	if err != nil {
 		return nil, err
 	}
-	pad, err := parsePad(project, id, data)
+	// Appending needs the turn holder, the section count and the password hash — never
+	// the bodies, so they are not materialised on the write path.
+	pad, err := parsePadMeta(project, id, data)
 	if err != nil {
 		return nil, fmt.Errorf("pad %s is corrupt: %w", ref, err)
 	}
@@ -267,7 +308,7 @@ func (s *Store) Get(ref, password string) (*Pad, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(f)
+	data, err := s.readPadFile(f, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -376,18 +417,45 @@ func (s *Store) List(project string) (pads []PadMeta, warnings []string, err err
 	return pads, warnings, nil
 }
 
-// readNoPassword parses a pad without the password gate — for metadata listings only.
+// Meta returns ONE pad's listing metadata, plus the title of its last section. Like
+// List it applies no password gate: the password gates a pad's CONTENT, not its
+// existence, and this is exactly the level List already publishes.
+//
+// The last section's title is the one thing beyond that level, so it is returned
+// EMPTY for a protected pad — a change notification for a protected pad says no more
+// than its listing entry does.
+func (s *Store) Meta(ref string) (PadMeta, string, error) {
+	project, id, err := ParseRef(ref)
+	if err != nil {
+		return PadMeta{}, "", err
+	}
+	pad, err := s.readNoPassword(project, id)
+	if err != nil {
+		return PadMeta{}, "", err
+	}
+	lastTitle := ""
+	if !pad.Protected() {
+		lastTitle = pad.Last().Title
+	}
+	return meta(pad), lastTitle, nil
+}
+
+// readNoPassword parses a pad without the password gate — for metadata listings only,
+// so it never materialises section bodies. That is what keeps List() over a directory
+// of large pads proportional to their SIZE rather than to their prose, and what stops
+// one huge pad from making every listing expensive.
 func (s *Store) readNoPassword(project, id string) (*Pad, error) {
-	f, err := openPad(s.padPath(project, id), project+"-"+id, os.O_RDONLY, unix.LOCK_SH)
+	ref := project + "-" + id
+	f, err := openPad(s.padPath(project, id), ref, os.O_RDONLY, unix.LOCK_SH)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(f)
+	data, err := s.readPadFile(f, ref)
 	if err != nil {
 		return nil, err
 	}
-	return parsePad(project, id, data)
+	return parsePadMeta(project, id, data)
 }
 
 // ProjectInfo is one project's listing entry.

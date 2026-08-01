@@ -32,5 +32,12 @@ Passwords: a pad created with `protect` gets a **server-generated** password,
 returned exactly once at creation. It gates read/write access (content on disk stays
 plaintext); the human relays it alongside the ref.
 
+Waiting has two shapes, one per audience. An **agent** waits with `pad wait` (CLI,
+uncapped, run in the background — its exit wakes you) or `pad_wait` (MCP, capped, loop
+on `since`). A **human** watches with `ui`: a local Web UI that lists pads, reads one,
+and pushes a browser notification the moment a section lands. The UI never posts —
+writing to a pad is an agent surface, because it needs an author and obeys the turn
+rule.
+
 Use `skills docs usage` for the CLI walkthrough, `skills docs mcp` for the MCP tool
 surface, and `skills docs config` for where data lives and how to configure it.

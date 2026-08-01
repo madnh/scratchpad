@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Scratchpad</title>
+
+<!-- The product's own mark, embedded alongside the rest of the UI. -->
+<link rel="icon" type="image/png" href="/brand-logo.png">
+<link rel="apple-touch-icon" href="/brand-logo.png">
+
+<link rel="stylesheet" href="/vendor/puredashboard/theme/dashboard.css">
+<link rel="stylesheet" href="/vendor/puredashboard/components.css">
+<link rel="stylesheet" href="/app.css">
+
+<script type="module" src="/app.js"></script>
+</head>
+
+<!--
+  The APP SHELL is static markup, not something JavaScript builds: the frame paints on
+  first byte instead of after the modules load, and it stays mounted for the whole
+  session. Navigation replaces only #view, so the header, the sidebar and — the point
+  of this UI — the live event stream survive every route change.
+-->
+<body>
+<puredashboard-layout>
+
+  <puredashboard-header>
+    <a class="brand" href="#/">
+      <img class="brand__logo" src="/brand-logo.png" alt="" width="24" height="24">
+      <span class="brand__name" id="brand-name">Scratchpad</span>
+    </a>
+
+    <div class="header__spacer"></div>
+
+    <span class="conn" id="conn" title="Live connection status" aria-live="polite">
+      <span class="conn__dot" aria-hidden="true"></span>
+      <span class="conn__text">connecting…</span>
+    </span>
+
+    <button type="button" class="ghost-btn" id="notify-btn" hidden>Enable notifications</button>
+    <button type="button" class="ghost-btn" id="theme-btn" title="Switch theme" aria-label="Switch theme">◐</button>
+  </puredashboard-header>
+
+  <puredashboard-layout has-sider>
+    <puredashboard-sider collapsible breakpoint="md" width="248" id="sider">
+      <puredashboard-nav id="nav"></puredashboard-nav>
+
+      <!-- The pad browser: the sidebar's real content. Grouped by recency or by
+           project, and kept in step with the live stream. -->
+      <div class="sider__pads">
+        <div class="sider__head">
+          <span class="sider__label">Pads</span>
+          <div id="group-mode"></div>
+        </div>
+        <div id="padlist"></div>
+        <a class="sider__all" id="padlist-footer" href="#/pads"></a>
+      </div>
+
+      <!-- Settings sits below the pad list, pinned to the bottom of the rail: it is
+           configuration, not somewhere you navigate to while working. -->
+      <puredashboard-nav id="nav-bottom"></puredashboard-nav>
+    </puredashboard-sider>
+
+    <puredashboard-content>
+      <!-- Router outlet. Everything above this line is mounted exactly once. -->
+      <main id="view" class="page">
+        <puredashboard-skeleton lines="4"></puredashboard-skeleton>
+      </main>
+
+      <!-- One line of credit, inside the content column and aligned with it. The
+           outlet above takes the slack, so this sits at the bottom of the viewport on
+           a short page and below the content on a long one. -->
+      <p class="foot">
+        <a href="https://github.com/madnh/scratchpad" target="_blank" rel="noopener noreferrer">scratchpad</a><span class="foot__version" id="foot-version"></span>
+        · made by <a href="https://github.com/madnh" target="_blank" rel="noopener noreferrer">madnh</a>
+      </p>
+    </puredashboard-content>
+  </puredashboard-layout>
+
+</puredashboard-layout>
+</body>
+</html>

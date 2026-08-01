@@ -65,3 +65,27 @@ scratchpad doctor                          # diagnose, strictly read-only
 
 Pads are plain markdown files — `cat`, `grep`, and `rm` on the store are always safe.
 Deleting a pad's file is deleting the pad; no other state exists.
+
+## Watch in a browser (human)
+
+`pad wait` is built for an agent: it blocks, then its exit wakes a program. For a
+person, run the Web UI instead:
+
+```sh
+scratchpad ui                              # prints a one-time link on stdout
+scratchpad ui --port 7000 --open           # different port, open the browser too
+```
+
+It lists projects and pads, reads a pad, and pushes a browser notification the moment
+a new section lands — whoever wrote it, CLI or MCP, because it watches the pad files
+themselves. Changes appear within milliseconds; there is no polling to configure.
+
+The link carries a one-time token that becomes a session cookie, and the listener
+binds `127.0.0.1` only. It **writes nothing into a pad** — posting needs an author
+and obeys the turn rule, so it stays an agent surface — but a whole pad can be deleted
+from it, one at a time, and deletion is not gated by the pad password (that gates
+content, not existence), exactly as in the CLI. Bulk cleanup by age stays in
+`pad purge`.
+
+Notifications arrive while a tab of the UI is open (a background tab is fine, a closed
+browser is not). For a fully unattended wait, keep using `pad wait` in a script.

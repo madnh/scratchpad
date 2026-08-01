@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -109,11 +110,30 @@ func renderSection(n int, author, title string, ts time.Time, content string) st
 // parsePad parses a pad file's full text. project/id are taken from the file's
 // location (they are not repeated inside the file).
 func parsePad(project, id string, data []byte) (*Pad, error) {
-	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 || !strings.HasPrefix(lines[0], padHeaderPrefix) {
+	return scanPad(project, id, data, true)
+}
+
+// parsePadMeta parses everything EXCEPT section bodies: same sections, same order,
+// same turn state, with Content left empty. Listings, change notifications and the
+// append path all need only that, and skipping the bodies means a directory of large
+// pads costs a scan rather than a copy of every pad's prose.
+func parsePadMeta(project, id string, data []byte) (*Pad, error) {
+	return scanPad(project, id, data, false)
+}
+
+// scanPad walks the file line by line over the ORIGINAL bytes, holding only offsets.
+// It deliberately never splits the file into a []string: pad content is written by
+// agents, and a file that is mostly newlines would turn into one 16-byte string header
+// per line — tens of times the file's size in live heap, for every read.
+//
+// Each body is materialised (when withContent) as exactly one string sliced out of
+// data, so parsing costs the file's size once, not a multiple of it.
+func scanPad(project, id string, data []byte, withContent bool) (*Pad, error) {
+	firstLine, rest := splitLine(data)
+	if !strings.HasPrefix(string(firstLine), padHeaderPrefix) {
 		return nil, fmt.Errorf("not a scratchpad file: missing %q header on line 1", strings.TrimSpace(padHeaderPrefix))
 	}
-	header := strings.TrimSuffix(strings.TrimPrefix(lines[0], padHeaderPrefix), " -->")
+	header := strings.TrimSuffix(strings.TrimPrefix(string(firstLine), padHeaderPrefix), " -->")
 	createdStr, passwordHash, _ := strings.Cut(header, "; password: ")
 	created, err := time.Parse(time.RFC3339, strings.TrimSpace(createdStr))
 	if err != nil {
@@ -123,39 +143,64 @@ func parsePad(project, id string, data []byte) (*Pad, error) {
 	pad := &Pad{Project: project, ID: id, CreatedTS: created.Unix(), PasswordHash: strings.TrimSpace(passwordHash)}
 
 	var cur *Section
-	var content []string
+	// Byte range of the current section's body within data. bodyStart < 0 means the
+	// body has not begun yet (we are still on the header or the ts comment).
+	bodyStart, bodyEnd := -1, -1
 	flush := func() {
 		if cur == nil {
 			return
 		}
-		cur.Content = strings.TrimRight(strings.TrimPrefix(strings.Join(content, "\n"), "\n"), "\n")
-		if cur.Content != "" {
-			cur.Content += "\n"
+		if withContent && bodyStart >= 0 && bodyEnd > bodyStart {
+			// The same trims the line-joining parser applied: one leading newline is
+			// the blank line renderSection writes, trailing ones are the separator
+			// before the next section.
+			body := strings.TrimRight(strings.TrimPrefix(string(data[bodyStart:bodyEnd]), "\n"), "\n")
+			if body != "" {
+				body += "\n"
+			}
+			cur.Content = body
 		}
 		pad.Sections = append(pad.Sections, *cur)
-		cur, content = nil, nil
+		cur, bodyStart, bodyEnd = nil, -1, -1
 	}
 
-	for _, line := range lines[1:] {
-		if m := sectionHeaderRe.FindStringSubmatch(line); m != nil {
-			if author, title, ok := strings.Cut(m[2], " - "); ok {
-				flush()
-				n, _ := strconv.Atoi(m[1])
-				cur = &Section{N: n, Author: author, Title: title}
-				continue
-			}
-		}
-		if cur != nil {
-			// The ts comment directly after the header line carries the timestamp.
-			if cur.TS == 0 && len(content) == 0 && strings.HasPrefix(line, tsCommentPrefix) {
-				tsStr := strings.TrimSuffix(strings.TrimPrefix(line, tsCommentPrefix), " -->")
-				if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(tsStr)); err == nil {
-					cur.TS = ts.Unix()
-					continue
+	// A file with no newline at all has no lines after the header, and therefore no
+	// sections — the check below reports that.
+	for rest != nil {
+		line, next := splitLine(rest)
+		lineStart := len(data) - len(rest)
+		// A body ends where this line ends, WITHOUT its trailing newline — exactly the
+		// text strings.Join(lines, "\n") produced from the same lines.
+		lineEnd := lineStart + len(line)
+		handled := false
+
+		if isSectionHeader(line) {
+			if m := sectionHeaderRe.FindSubmatch(line); m != nil {
+				if author, title, ok := strings.Cut(string(m[2]), " - "); ok {
+					flush()
+					n, _ := strconv.Atoi(string(m[1]))
+					cur = &Section{N: n, Author: author, Title: title}
+					handled = true
 				}
 			}
-			content = append(content, line)
 		}
+		if !handled && cur != nil {
+			// The ts comment directly after the header line carries the timestamp.
+			if cur.TS == 0 && bodyStart < 0 && bytes.HasPrefix(line, tsCommentBytes) {
+				tsStr := strings.TrimSuffix(strings.TrimPrefix(string(line), tsCommentPrefix), " -->")
+				if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(tsStr)); err == nil {
+					cur.TS = ts.Unix()
+					handled = true
+				}
+			}
+			if !handled {
+				if bodyStart < 0 {
+					bodyStart = lineStart
+				}
+				bodyEnd = lineEnd
+			}
+		}
+		rest = next
 	}
 	flush()
 
@@ -164,3 +209,23 @@ func parsePad(project, id string, data []byte) (*Pad, error) {
 	}
 	return pad, nil
 }
+
+// splitLine returns the next line (without its newline) and everything after that
+// newline. rest is nil when the line was the last one — i.e. the data ran out without
+// a newline — which is how the loop above knows to stop. Data ending in "\n" yields a
+// final empty line, matching strings.Split's behaviour.
+func splitLine(b []byte) (line, rest []byte) {
+	if i := bytes.IndexByte(b, '\n'); i >= 0 {
+		return b[:i], b[i+1:]
+	}
+	return b, nil
+}
+
+// isSectionHeader is the cheap pre-filter that keeps the regexp off the ~99% of lines
+// that are ordinary prose.
+func isSectionHeader(line []byte) bool {
+	return len(line) > 2 && line[0] == '#' && line[1] == ' '
+}
+
+// tsCommentBytes is tsCommentPrefix as bytes, so the scan compares without allocating.
+var tsCommentBytes = []byte(tsCommentPrefix)

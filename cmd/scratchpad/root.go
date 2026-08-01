@@ -26,7 +26,7 @@ func newRootCmd() *cobra.Command {
 	// A single switch shared by every subcommand: force non-interactive (never prompt).
 	root.PersistentFlags().BoolVar(&flagNonInteractive, "non-interactive", false,
 		"never prompt; fail instead of asking (also via "+config.EnvNonInteractive+")")
-	root.AddCommand(newInitCmd(), newServeCmd(), newDoctorCmd(), newSkillsCmd(), newVersionCmd(),
+	root.AddCommand(newInitCmd(), newServeCmd(), newUICmd(), newDoctorCmd(), newSkillsCmd(), newVersionCmd(),
 		newPadCmd(), newProjectCmd())
 	return root
 }
