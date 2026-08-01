@@ -61,6 +61,9 @@ api.status()
   .then((s) => {
     document.getElementById("brand-name").textContent = s.display_name || "Scratchpad";
     document.title = `${s.display_name || "Scratchpad"} — pads`;
+    // The running binary's version in the footer: the first thing worth knowing when
+    // reporting something from this UI.
+    if (s.version) document.getElementById("foot-version").textContent = s.version;
   })
   .catch(() => { /* the pages surface their own errors */ });
 

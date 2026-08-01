@@ -104,6 +104,20 @@ a.padgroup__label:hover { color: var(--accent); }
 /* Entries are two lines tall, so the nav's single-line row height would clip them. */
 .padgroup puredashboard-nav { --pd-nav-item-height: auto; }
 
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+puredashboard-footer {
+  display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+  padding: .55rem 1rem;
+  font-size: .78rem; color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+.foot__spacer { flex: 1; }
+.foot__sep { opacity: .5; }
+puredashboard-footer a { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; }
+puredashboard-footer a:hover { color: var(--accent); border-bottom-color: currentColor; }
+.foot__version { font-family: var(--mono, ui-monospace, monospace); opacity: .7; margin-left: .25rem; }
+
 .page { padding: 1.25rem; max-width: 72rem; margin: 0 auto; }
 
 /* Cards stacked straight down a page need air between them; the ones inside
@@ -174,3 +188,9 @@ a.padgroup__label:hover { color: var(--accent); }
 .loadmore { display: block; margin: 1rem auto; }
 .muted { color: var(--muted); font-size: .85rem; }
 .danger-zone { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.danger-zone .muted { margin: 0 0 .5rem; }
+/* The delete confirmation is written in lines — what is being destroyed, then how
+   much of it — so keep the line breaks the text puts there. */
+.puredashboard-dialog__message { white-space: pre-line; }
+.danger-btn { color: var(--red, #ef4444); border-color: color-mix(in srgb, var(--red, #ef4444) 45%, transparent); }
+.danger-btn:hover { background: color-mix(in srgb, var(--red, #ef4444) 12%, transparent); }

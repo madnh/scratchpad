@@ -5,7 +5,6 @@
 
 import "/vendor/puredashboard/table.js";
 import { toast } from "/vendor/puredashboard/toast.js";
-import { confirm } from "/vendor/puredashboard/dialog.js";
 
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
@@ -29,10 +28,10 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
   table.pageSize = 25;
   table.rowKey = (r) => r.ref;
   table.getHref = (r) => `#/pads/${r.ref}`;
-  // Deletion is ONE pad at a time, deliberately: no row selection, no bulk action.
-  // Wiping a batch of transcripts is irreversible and belongs to `pad purge`, where a
-  // person types the age threshold and reads the list before confirming.
-  table.actions = [{ name: "watch", label: "Watch" }, { name: "delete", label: "Delete", danger: true }];
+  // No Delete here. A destructive action a row away from a mis-click, on a table where
+  // the rows reorder themselves as sections land, is the wrong place for it: deleting
+  // lives on the pad's own page, where you can see what you are about to destroy.
+  table.actions = [{ name: "watch", label: "Watch" }];
   table.columns = [
     { key: "ref", label: "Ref", sortable: true, render: (r) => el("span", { class: "ref", text: r.ref }) },
     { key: "project", label: "Project", sortable: true },
@@ -46,29 +45,14 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
     { key: "flags", label: "", render: (r) => flags(r) },
   ];
 
-  table.addEventListener("rowaction", async (e) => {
+  table.addEventListener("rowaction", (e) => {
     const { name, row } = e.detail;
-    if (name === "watch") {
-      const on = !wl.isWatched(row.ref);
-      wl.setWatched(row.ref, on);
-      toast(on ? `Watching ${row.ref}` : `Stopped watching ${row.ref}`, { type: "info" });
-      repaint();
-      return;
-    }
-    if (name === "delete") await removePad(row);
+    if (name !== "watch") return;
+    const on = !wl.isWatched(row.ref);
+    wl.setWatched(row.ref, on);
+    toast(on ? `Watching ${row.ref}` : `Stopped watching ${row.ref}`, { type: "info" });
+    repaint();
   });
-
-  async function removePad(pad) {
-    if (!(await confirm(`Delete ${pad.ref}? This cannot be undone.`))) return;
-    try {
-      await api.deletePad(pad.ref);
-      wl.setWatched(pad.ref, false);
-      toast(`Deleted ${pad.ref}`, { type: "success" });
-    } catch (err) {
-      toast(`Could not delete ${pad.ref}: ${err.message}`, { type: "error" });
-    }
-    load();
-  }
 
   function repaint() {
     table.rows = rows.map((r) => ({ ...r }));

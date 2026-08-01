@@ -302,12 +302,23 @@ export default function mount(outlet, ctx) {
     return wrap;
   }
 
+  // The pad's page is the ONLY place a pad can be deleted. A destructive action
+  // belongs where the thing it destroys is on screen — the title, the participants and
+  // how much history there is — not behind a button in a list that reorders itself.
   function dangerZone() {
     return el("div", { class: "danger-zone" },
+      el("p", { class: "muted", text: "Deleting removes the pad file and its whole history. There is no undo." }),
       el("button", {
-        type: "button", class: "ghost-btn", text: "Delete this pad",
+        type: "button", class: "ghost-btn danger-btn", text: "Delete this pad",
         onclick: async () => {
-          if (!(await confirm(`Delete ${ref}? This cannot be undone.`))) return;
+          const authors = [...new Set(pad.sections.map((s) => s.author))].join(", ");
+          const ok = await confirm(
+            `${ref} — “${pad.title || "untitled"}”\n` +
+            `${pad.section_count} section${pad.section_count === 1 ? "" : "s"} between ${authors}.\n\n` +
+            "The file and its whole history are removed. This cannot be undone.",
+            { title: "Delete this pad?", okText: "Delete", danger: true },
+          );
+          if (!ok) return;
           try {
             await api.deletePad(ref);
             wl.setWatched(ref, false);
