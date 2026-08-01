@@ -405,9 +405,9 @@ export default function mount(outlet, ctx) {
     if (!showingLatest) {
       bar.append(el("button", { type: "button", class: "ghost-btn", text: "Latest", onclick: () => loadLatest() }));
     }
-    // The pad's own actions, duplicated into the toolbar for when the header is gone.
-    // Hidden until then, so they never appear twice on screen at once.
-    const menu = padMenuButton();
+    // The full menu, for when the header — and with it Copy ref and the Watch switch —
+    // has scrolled away. Hidden until that happens, so nothing is on screen twice.
+    const menu = padMenuButton({ full: true });
     menu.classList.add("stuck-only");
     bar.append(menu);
     return bar;
@@ -582,37 +582,42 @@ export default function mount(outlet, ctx) {
   // how much history there is — not behind a button in a list that reorders itself.
   // It lives in the header's overflow menu rather than under the transcript: deleting
   // is rare, and the confirm dialog — not proximity to the text — is what guards it.
-  function padMenuButton() {
+  // padMenuButton builds the overflow menu — and an overflow menu holds what is NOT
+  // already on screen, which differs by where the button is. Beside the header, Copy
+  // ref is a button and Watch is a switch an inch away, so the menu is the one action
+  // that has neither: delete. In the sticky toolbar the header is gone, so the same
+  // menu is the only way to reach any of them and carries all three.
+  function padMenuButton({ full = false } = {}) {
     const btn = el("button", {
       type: "button", class: "ghost-btn icon-btn", text: "⋯",
       title: "Pad actions", "aria-label": "Pad actions", "aria-haspopup": "menu",
     });
     btn.addEventListener("click", async () => {
-      // Everything the pad's own header offers, in one list. It is what the sticky
-      // toolbar shows once that header has scrolled away, so the menu has to be the
-      // whole set rather than just the destructive leftover — a menu holding nothing
-      // but "Delete" is a menu you learn to avoid opening.
       const watching = wl.isWatched(ref);
-      const picked = await menu(btn, [
-        { label: "Copy ref", value: "copy", icon: ICON_COPY, shortcut: ref },
-        {
-          label: "Watch this pad", value: "watch", icon: ICON_BELL,
-          // A checkbox item states what IS, so the label stays put while the tick moves.
-          checked: watching,
-          // Checkbox items deliberately keep the menu open (you may be ticking several),
-          // which means the menu's promise does not resolve for them — the work belongs
-          // in onSelect. Closing anyway: there is only one thing to tick here.
-          closeOnSelect: true,
-          onSelect: () => {
-            wl.setWatched(ref, !watching);
-            toast(!watching ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
-            render(); // the header's switch shows the same state
+      const items = [];
+      if (full) {
+        items.push(
+          { label: "Copy ref", value: "copy", icon: ICON_COPY, shortcut: ref },
+          {
+            label: "Watch this pad", value: "watch", icon: ICON_BELL,
+            // A checkbox item states what IS, so the label stays put while the tick moves.
+            checked: watching,
+            // Checkbox items deliberately keep the menu open (you may be ticking
+            // several), which means the menu's promise does not resolve for them — the
+            // work belongs in onSelect. Closing anyway: only one thing to tick here.
+            closeOnSelect: true,
+            onSelect: () => {
+              wl.setWatched(ref, !watching);
+              toast(!watching ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
+              render(); // the header's switch shows the same state
+            },
           },
-        },
-        { separator: true },
-        { label: "Delete this pad", value: "delete", icon: ICON_TRASH, danger: true },
-      ], { placement: "bottom-end" });
+          { separator: true },
+        );
+      }
+      items.push({ label: "Delete this pad", value: "delete", icon: ICON_TRASH, danger: true });
 
+      const picked = await menu(btn, items, { placement: "bottom-end" });
       if (picked === "copy") {
         try {
           await navigator.clipboard.writeText(ref);
