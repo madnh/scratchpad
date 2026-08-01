@@ -48,7 +48,7 @@ vendor-ui: ## Cập nhật thư viện UI đã vendor từ puredashboard (PD_REF
 	cp $$tmp/src/theme/*.css $(PD_DIR)/theme/ && \
 	cp $$tmp/LICENSE $(PD_DIR)/LICENSE && \
 	printf 'source: %s\ncommit: %s\ndate:   %s\n' \
-		"$(PD_REPO)" "$$(git -C $$tmp rev-parse HEAD)" "$$(git -C $$tmp log -1 --format=%%cs)" > $(PD_DIR)/VERSION && \
+		"$(PD_REPO)" "$$(git -C $$tmp rev-parse HEAD)" "$$(git -C $$tmp log -1 --date=short --format=%ad)" > $(PD_DIR)/VERSION && \
 	rm -rf $$tmp && \
 	echo "vendored $(PD_REF) → $(PD_DIR) (nhớ ghi lại phần ghi chú trong VERSION rồi commit)"
 
