@@ -59,7 +59,11 @@ function groupByProject(pads) {
 }
 
 // padLabel is a DOM node, not a string: two lines fit a 220px column and turn a bare
-// list of titles into something scannable — which pad, whose turn, how long ago.
+// list of titles into something scannable — which pad, and how long ago it moved.
+//
+// The title and the age are all this list needs to point at the right pad. The ref
+// and the exact timestamp are on the tooltip, and the section count is on the pad's
+// own page — a number in the rail is noise you cannot act on.
 function padLabel(pad) {
   const unread = wl.isWatched(pad.ref) && pad.section_count > wl.seenCount(pad.ref);
   return el("span", { class: "padnav", title: `${pad.ref}\n${pad.title}\nlast activity ${absTime(pad.last_ts)}` },
@@ -71,7 +75,7 @@ function padLabel(pad) {
     // coloured dot next to the unread dot reads as a second unread state.
     el("span", {
       class: "padnav__meta",
-      text: `${pad.ref} · ${shortRel(pad.last_ts)}${pad.protected ? " · locked" : ""}`,
+      text: `${shortRel(pad.last_ts)}${pad.protected ? " · locked" : ""}`,
     }),
   );
 }
@@ -132,7 +136,6 @@ export function initSidebar() {
       groupNav.items = g.pads.map((pad) => ({
         label: padLabel(pad),
         href: `#/pads/${pad.ref}`,
-        badge: String(pad.section_count),
       }));
       return el("div", { class: "padgroup" }, head, groupNav);
     }));

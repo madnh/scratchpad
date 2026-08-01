@@ -1,7 +1,7 @@
 // Pad detail — reading one conversation.
 //
 // Two constraints shape this page. A pad is a TURN-TAKING transcript, so it reads as
-// a timeline rather than a document. And a pad grows without bound — hundreds of
+// a chat rather than a document. And a pad grows without bound — hundreds of
 // sections, each of them potentially thousands of words of agent prose — so nothing
 // here ever loads a whole pad:
 //
@@ -16,9 +16,7 @@
 // DOWNWARD, so the page never has to preserve scroll position around content
 // inserted above the viewport.
 
-import "/vendor/puredashboard/timeline.js";
 import "/vendor/puredashboard/md.js";
-import "/vendor/puredashboard/alert.js";
 import "/vendor/puredashboard/switch.js";
 import "/vendor/puredashboard/tag.js";
 import "/vendor/puredashboard/input.js";
@@ -26,12 +24,13 @@ import "/vendor/puredashboard/select.js";
 import "/vendor/puredashboard/result.js";
 import { toast } from "/vendor/puredashboard/toast.js";
 import { confirm } from "/vendor/puredashboard/dialog.js";
+import { menu } from "/vendor/puredashboard/menu.js";
 
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
 import { el, pageHead, skeleton, errorView, copyButton } from "/lib/ui.js";
-import { relTime, absTime, clockTime, bytes, authorColor } from "/lib/fmt.js";
+import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex } from "/lib/fmt.js";
 
 // CLAMP_BYTES is where a section stops being rendered in full. Roughly a screenful of
 // prose: below it the whole point is visible, above it the fold plus an explicit
@@ -53,8 +52,8 @@ export default function mount(outlet, ctx) {
   let authorFilter = "";
   let expandAll = false;
   // Sections that arrived while this page was open, so they can be flashed. The
-  // timeline renders on a microtask, so the marker is applied while BUILDING each
-  // node rather than by querying the DOM after render().
+  // marker is applied while BUILDING each node rather than by querying the DOM
+  // after render(), so it survives a re-render from any source.
   const justArrived = new Set();
 
   const body = el("div");
@@ -110,7 +109,11 @@ export default function mount(outlet, ctx) {
     showingLatest = page.sections.at(-1)?.n === pad.section_count;
     render();
     const target = body.querySelector(`[data-section="${n}"]`);
-    if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+    // Instant, not smooth: the jump can span twenty screens of history, and a smooth
+    // run through them is both useless to watch and unreliable — the animation
+    // competes with the bodies being parsed along the way and can end short of the
+    // target. Landing directly is what "jump" means anyway.
+    if (target) target.scrollIntoView({ block: "center" });
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -158,20 +161,10 @@ export default function mount(outlet, ctx) {
       }));
     }
 
-    const timeline = el("puredashboard-timeline");
-    // "right" puts the rail on the left and the prose to the right of it, reading
-    // left-aligned like a transcript; "left" mirrors that and right-aligns the body,
-    // which is unreadable for long agent prose.
-    timeline.mode = "right";
     // The API hands back ascending sections; reverse for a newest-first read.
-    timeline.items = [...visible].reverse().map((sec) => ({
-      color: authorColor(sec.author, authors),
-      // The section number lives in the header line below; the rail label carries
-      // only the clock, so the two do not repeat each other.
-      label: clockTime(sec.ts),
-      content: sectionNode(sec),
-    }));
-    body.append(timeline);
+    const chat = el("div", { class: "chat" },
+      [...visible].reverse().map((sec) => sectionNode(sec)));
+    body.append(chat);
 
     if (!visible.length) {
       body.append(el("p", { class: "muted", text: "No sections match this filter." }));
@@ -187,13 +180,13 @@ export default function mount(outlet, ctx) {
     }
 
     outlet.replaceChildren(
-      pageHead(pad.title || ref, null, copyButton(ref)),
+      pageHead(pad.title || ref, null, copyButton(ref), padMenuButton()),
       metaRow(),
-      turnBanner(),
       toolbar(authors),
       body,
-      dangerZone(),
     );
+    // Only now are the bodies in the document and measurable against the viewport.
+    observeLazy();
   }
 
   function metaRow() {
@@ -215,26 +208,15 @@ export default function mount(outlet, ctx) {
     return row;
   }
 
-  // turnBanner states the rule the pad actually enforces: the last author is blocked,
-  // anyone else may post. That is the single most useful line on the page.
-  function turnBanner() {
-    const last = pad.turn?.last_author || "—";
-    const a = el("puredashboard-alert");
-    a.type = "info";
-    a.showIcon = true;
-    a.title = `Turn: waiting on anyone but ${last}`;
-    a.message = `${last} posted section ${pad.section_count} ${relTime(pad.sections.at(-1)?.ts)}.`;
-    return a;
-  }
-
   function toolbar(authors) {
     const range = loaded.length
       ? `showing #${loaded[0].n}–#${loaded.at(-1).n} of ${pad.section_count}`
       : `${pad.section_count} sections`;
 
+    // The placeholder IS the empty option — adding a second "All authors" entry would
+    // put two identical, identically-valued rows in the list.
     const filter = el("puredashboard-select", { placeholder: "All authors" });
-    filter.options = [{ value: "", label: "All authors" },
-      ...authors.map((a) => ({ value: a, label: a }))];
+    filter.options = authors.map((a) => ({ value: a, label: a }));
     filter.value = authorFilter;
     filter.addEventListener("change", (e) => { authorFilter = e.target.value; render(); });
 
@@ -263,27 +245,111 @@ export default function mount(outlet, ctx) {
     return bar;
   }
 
-  // sectionNode builds one entry: a compact header line, then the body — clamped when
-  // it is long, so a 5000-word section does not bury the sections around it.
+  // ── lazy markdown ──────────────────────────────────────────────────────────
+  //
+  // Parsing markdown is the expensive part of this page: a section can be thousands
+  // of words, and a page of them lands at once. So a body is parsed only when it is
+  // about to be seen — the box goes into the DOM empty and an IntersectionObserver
+  // fills it in as the message approaches the viewport. Once parsed it STAYS parsed:
+  // this defers work, it never throws it away and redoes it on the way back.
+  //
+  // The empty box reserves a height guessed from the section's byte count, so the
+  // scrollbar and "load older" do not lurch as bodies materialise above the reader.
+  const LAZY_MARGIN = "800px 0px";   // start parsing roughly a screen ahead
+  const pendingMarkdown = new WeakMap();
+  let lazyObserver = null;
+
+  function deferMarkdown(box, content, clamped) {
+    // No observer (very old engine, jsdom): parse immediately — correctness first.
+    if (typeof IntersectionObserver !== "function") {
+      paintMarkdown(box, content);
+      return;
+    }
+    box.dataset.lazy = "pending";
+    box.style.minHeight = estimateHeight(content.length, clamped);
+    pendingMarkdown.set(box, content);
+  }
+
+  // A clamped body is capped at the clamp height; an open one is guessed from its
+  // length. Both are rough on purpose — the box shrinks to its real height the
+  // moment it is parsed, and over-reserving is worse than under-reserving.
+  function estimateRem(len, clamped) {
+    if (clamped) return 15;
+    const lines = Math.min(40, Math.max(2, Math.ceil(len / 90)));
+    return lines * 1.5;
+  }
+
+  function estimateHeight(len, clamped) {
+    return `${estimateRem(len, clamped).toFixed(1)}rem`;
+  }
+
+  function paintMarkdown(box, content) {
+    const md = el("puredashboard-markdown", { class: "sec__content" });
+    md.value = content;
+    box.replaceChildren(md);
+    box.style.minHeight = "";
+    box.dataset.lazy = "done";
+  }
+
+  // Called after each render(): the previous observer's targets are detached nodes,
+  // so it is dropped wholesale rather than unobserved one by one.
+  //
+  // The observed element is the MESSAGE, not the body inside it. Off-screen messages
+  // carry `content-visibility: auto`, which skips their subtree's layout — a body
+  // inside a skipped subtree has no box to intersect with, so watching it directly
+  // would defeat the head start rootMargin is there to buy. The message itself always
+  // has a box, because `contain-intrinsic-size` gives it one.
+  function observeLazy() {
+    if (typeof IntersectionObserver !== "function") return;
+    lazyObserver?.disconnect();
+    lazyObserver = new IntersectionObserver((entries, obs) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        obs.unobserve(e.target);
+        const box = e.target.querySelector('.sec__body[data-lazy="pending"]');
+        const content = box && pendingMarkdown.get(box);
+        // Gone from the map = a re-render replaced this node while it was queued.
+        if (content != null) {
+          pendingMarkdown.delete(box);
+          paintMarkdown(box, content);
+        }
+      }
+    }, { rootMargin: LAZY_MARGIN });
+    const fold = window.innerHeight;
+    for (const msg of body.querySelectorAll('.msg:has(.sec__body[data-lazy="pending"])')) {
+      // Anything already on screen is parsed NOW, synchronously. Observer callbacks
+      // only run after the next frame, and waiting one frame to fill in the message
+      // the reader is looking at shows them a skeleton for no reason.
+      if (msg.getBoundingClientRect().top < fold) {
+        const box = msg.querySelector('.sec__body[data-lazy="pending"]');
+        const content = pendingMarkdown.get(box);
+        if (content != null) {
+          pendingMarkdown.delete(box);
+          paintMarkdown(box, content);
+          continue;
+        }
+      }
+      lazyObserver.observe(msg);
+    }
+  }
+
+  // sectionNode builds one message: the author's avatar, then a bubble holding the
+  // section's title and prose — clamped when it is long, so a 5000-word section does
+  // not bury the messages around it.
+  //
+  // Every message sits on the same side. A pad is a group conversation between N
+  // agents with no "me" to mirror against, so the left/right split of a two-party
+  // chat has nothing to encode here; the avatar carries the identity instead, on a
+  // colour hashed from the author's name so an agent looks the same in every pad.
   function sectionNode(sec) {
     const long = sec.content.length > CLAMP_BYTES;
     const clamped = long && !expandAll && sec.n !== pad.section_count;
 
-    const md = el("puredashboard-markdown", { class: "sec__content" });
-    md.value = sec.content;
+    const bodyBox = el("div", { class: "sec__body", dataset: { clamped: String(clamped) } });
+    deferMarkdown(bodyBox, sec.content, clamped);
 
-    const bodyBox = el("div", { class: "sec__body", dataset: { clamped: String(clamped) } }, md);
-
-    const wrap = el("div", {
-      dataset: { section: String(sec.n) },
-      class: justArrived.has(sec.n) ? "sec--new" : null,
-    },
-      el("div", { class: "sec__head" },
-        el("span", { class: "sec__n", text: `#${sec.n}` }),
-        el("span", { class: "sec__author", text: sec.author }),
-        el("span", { class: "sec__title", text: sec.title }),
-        el("span", { text: bytes(sec.content.length) }),
-      ),
+    const bubble = el("div", { class: "msg__bubble" },
+      sec.title ? el("div", { class: "msg__title", text: sec.title }) : null,
       bodyBox,
     );
 
@@ -293,43 +359,91 @@ export default function mount(outlet, ctx) {
         text: clamped ? "Expand" : "Collapse",
       });
       toggle.addEventListener("click", () => {
+        // Expanding is a request to read this body now, so stop deferring it — the
+        // observer may not have reached it if the click came from a keyboard focus.
+        const queued = pendingMarkdown.get(bodyBox);
+        if (queued != null) {
+          pendingMarkdown.delete(bodyBox);
+          lazyObserver?.unobserve(bodyBox);
+          paintMarkdown(bodyBox, queued);
+        }
         const nowClamped = bodyBox.dataset.clamped !== "true";
         bodyBox.dataset.clamped = String(nowClamped);
         toggle.textContent = nowClamped ? "Expand" : "Collapse";
       });
-      wrap.append(toggle);
+      bubble.append(toggle);
     }
-    return wrap;
+
+    // The avatar is written by hand rather than taken from the component library:
+    // that one derives initials from a PERSON's name (first + last word), which for
+    // a one-word handle like "backend" yields a bare "B". agentInitials knows what
+    // agent handles look like. It is aria-hidden — the author's name is right next
+    // to it, so a screen reader would only hear the same thing twice.
+    const avatar = el("span", {
+      class: "msg__avatar", text: agentInitials(sec.author),
+      title: sec.author, "aria-hidden": "true",
+    });
+    avatar.style.setProperty("--avatar-bg", `var(--avatar-c${agentColorIndex(sec.author)})`);
+
+    const node = el("article", {
+      class: justArrived.has(sec.n) ? "msg msg--new" : "msg",
+      dataset: { section: String(sec.n) },
+    },
+      avatar,
+      el("div", { class: "msg__col" },
+        el("div", { class: "msg__head" },
+          el("span", { class: "msg__author", text: sec.author }),
+          el("span", { class: "msg__n", text: `#${sec.n}` }),
+          el("span", { class: "msg__time", title: absTime(sec.ts), text: clockTime(sec.ts) }),
+          el("span", { text: bytes(sec.content.length) }),
+        ),
+        bubble,
+      ),
+    );
+    // Placeholder height for `contain-intrinsic-size` while the message is off-screen
+    // and its rendering is skipped: the body's estimate plus the header, the title and
+    // the bubble's padding. The browser replaces it with the real height on first
+    // render and remembers that afterwards.
+    node.style.setProperty("--msg-est", `${(estimateRem(sec.content.length, clamped) + 4.5).toFixed(1)}rem`);
+    return node;
   }
 
   // The pad's page is the ONLY place a pad can be deleted. A destructive action
   // belongs where the thing it destroys is on screen — the title, the participants and
   // how much history there is — not behind a button in a list that reorders itself.
-  function dangerZone() {
-    return el("div", { class: "danger-zone" },
-      el("p", { class: "muted", text: "Deleting removes the pad file and its whole history. There is no undo." }),
-      el("button", {
-        type: "button", class: "ghost-btn danger-btn", text: "Delete this pad",
-        onclick: async () => {
-          const authors = [...new Set(pad.sections.map((s) => s.author))].join(", ");
-          const ok = await confirm(
-            `${ref} — “${pad.title || "untitled"}”\n` +
-            `${pad.section_count} section${pad.section_count === 1 ? "" : "s"} between ${authors}.\n\n` +
-            "The file and its whole history are removed. This cannot be undone.",
-            { title: "Delete this pad?", okText: "Delete", danger: true },
-          );
-          if (!ok) return;
-          try {
-            await api.deletePad(ref);
-            wl.setWatched(ref, false);
-            toast(`Deleted ${ref}`, { type: "success" });
-            location.hash = "#/pads";
-          } catch (err) {
-            toast(err.message, { type: "error" });
-          }
-        },
-      }),
+  // It lives in the header's overflow menu rather than under the transcript: deleting
+  // is rare, and the confirm dialog — not proximity to the text — is what guards it.
+  function padMenuButton() {
+    const btn = el("button", {
+      type: "button", class: "ghost-btn icon-btn", text: "⋯",
+      title: "Pad actions", "aria-label": "Pad actions", "aria-haspopup": "menu",
+    });
+    btn.addEventListener("click", async () => {
+      const picked = await menu(btn, [
+        { label: "Delete this pad", value: "delete", danger: true },
+      ], { placement: "bottom-end" });
+      if (picked === "delete") await deletePad();
+    });
+    return btn;
+  }
+
+  async function deletePad() {
+    const authors = [...new Set(pad.sections.map((s) => s.author))].join(", ");
+    const ok = await confirm(
+      `${ref} — “${pad.title || "untitled"}”\n` +
+      `${pad.section_count} section${pad.section_count === 1 ? "" : "s"} between ${authors}.\n\n` +
+      "The file and its whole history are removed. This cannot be undone.",
+      { title: "Delete this pad?", okText: "Delete", danger: true },
     );
+    if (!ok) return;
+    try {
+      await api.deletePad(ref);
+      wl.setWatched(ref, false);
+      toast(`Deleted ${ref}`, { type: "success" });
+      location.hash = "#/pads";
+    } catch (err) {
+      toast(err.message, { type: "error" });
+    }
   }
 
   // ── live ───────────────────────────────────────────────────────────────────
@@ -374,5 +488,5 @@ export default function mount(outlet, ctx) {
 
   loadPad();
 
-  return () => { disposed = true; off(); };
+  return () => { disposed = true; off(); lazyObserver?.disconnect(); };
 }
