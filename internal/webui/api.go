@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/madnh/scratchpad/internal/buildinfo"
 	"github.com/madnh/scratchpad/internal/store"
@@ -147,6 +148,91 @@ type tocEntry struct {
 	Title  string `json:"title"`
 	TS     int64  `json:"ts"`
 	Bytes  int    `json:"bytes"`
+}
+
+// previewChars and previewLines bound the opening excerpt of a section: a few lines
+// is enough to answer "what is in here?" without the response becoming the section.
+const (
+	previewChars = 280
+	previewLines = 4
+)
+
+// sectionPreview reduces a section body to the opening excerpt that introduces it.
+//
+// It collects the first lines carrying actual prose — skipping blank lines, fence
+// markers, and the leading punctuation of headings, quotes and bullets, none of which
+// says anything about the section — and cuts the result to previewChars RUNES, so a
+// multi-byte character is never split in half.
+//
+// `title` is the section's own title, and is dropped from the front of the excerpt
+// when the body opens by repeating it as a heading — which agents commonly do. The
+// popup shows the title directly above, and saying it twice wastes the two lines that
+// would have told the reader something new.
+//
+// Lines are taken one at a time rather than via strings.Split: a section can be
+// thousands of lines and the answer is always in the first few.
+func sectionPreview(content, title string) string {
+	var lines []string
+	total := 0
+	for rest := content; rest != "" && len(lines) < previewLines && total < previewChars; {
+		var line string
+		line, rest, _ = strings.Cut(rest, "\n")
+		s := strings.TrimSpace(line)
+		if s == "" || strings.HasPrefix(s, "```") || strings.HasPrefix(s, "~~~") {
+			continue
+		}
+		// Markdown's own furniture, not content. A rule ("---") trims away to nothing
+		// and is skipped with everything else that turns out to be empty.
+		s = strings.TrimSpace(strings.TrimLeft(s, "#>-*+ \t"))
+		if s == "" {
+			continue
+		}
+		// Only the FIRST line can be the repeated title; the same words appearing
+		// later in the prose are part of what the section says.
+		if len(lines) == 0 && strings.EqualFold(s, strings.TrimSpace(title)) {
+			continue
+		}
+		lines = append(lines, s)
+		total += len([]rune(s))
+	}
+
+	out := strings.Join(lines, "\n")
+	r := []rune(out)
+	if len(r) <= previewChars {
+		return out
+	}
+	return strings.TrimRight(string(r[:previewChars-1]), " \n") + "…"
+}
+
+// handleSectionPreview answers with the opening excerpt of ONE section.
+//
+// The outline in the UI shows a popup when a person hovers an entry, and this is what
+// fills it. It is a separate, tiny response rather than a field on the TOC because the
+// TOC is fetched for every pad view while a preview is wanted for the handful of
+// entries someone actually points at — putting it in the TOC would make every pad
+// load pay for excerpts nobody reads.
+func (s *Server) handleSectionPreview(r *http.Request, sess *session) (any, error) {
+	ref := r.PathValue("ref")
+	n, err := strconv.Atoi(r.PathValue("n"))
+	if err != nil {
+		return nil, badInput("section must be an integer")
+	}
+	pad, err := s.store.Get(ref, sess.unlocked(ref))
+	if err != nil {
+		return nil, err
+	}
+	for _, sec := range pad.Sections {
+		if sec.N == n {
+			return map[string]any{
+				"n":       sec.N,
+				"author":  sec.Author,
+				"title":   sec.Title,
+				"bytes":   len(sec.Content),
+				"preview": sectionPreview(sec.Content, sec.Title),
+			}, nil
+		}
+	}
+	return nil, badInput("no section " + strconv.Itoa(n) + " in this pad")
 }
 
 // padResponse is the compact pad view: header, turn state, and the full TOC. For a
