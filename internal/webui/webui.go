@@ -1,7 +1,7 @@
 // Package webui serves the human-facing Web UI: a read-only view of the pad store
-// with live updates, plus the management operations the CLI already has (delete,
-// purge). It exists because `pad wait` is an AGENT ergonomic — a blocking command
-// whose exit code wakes a program — and gives a person nothing to look at.
+// with live updates, plus deleting a pad. It exists because `pad wait` is an AGENT
+// ergonomic — a blocking command whose exit code wakes a program — and gives a person
+// nothing to look at.
 //
 // It is a separate listener from `serve`, not another MCP transport:
 //
@@ -12,7 +12,9 @@
 //     for an HttpOnly session cookie, rather than MCP's bearer tokens.
 //   - The surface is READ-ONLY for pad content. A person watching a conversation is
 //     not a participant in it: posting requires an author identity and would have to
-//     obey the turn rule, which belongs to the agents' surfaces.
+//     obey the turn rule, which belongs to the agents' surfaces. Pads can be deleted,
+//     one at a time; bulk cleanup by age stays in the CLI's `pad purge`, where the
+//     victim list is printed and confirmed first.
 //
 // Everything goes through internal/store, so the UI observes the same flock discipline
 // and password gate as the CLI and the MCP server — there is no second disk path.
@@ -134,7 +136,6 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/pads/{ref}/sections", s.api(s.handleSections))
 	mux.HandleFunc("POST /api/pads/{ref}/unlock", s.api(s.handleUnlock))
 	mux.HandleFunc("DELETE /api/pads/{ref}", s.api(s.handleDelete))
-	mux.HandleFunc("POST /api/purge", s.api(s.handlePurge))
 	mux.HandleFunc("GET /api/events", s.requireSession(http.HandlerFunc(s.handleEvents)))
 
 	mux.Handle("GET /", s.requireSession(s.assetHandler()))

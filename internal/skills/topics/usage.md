@@ -83,7 +83,7 @@ themselves. Changes appear within milliseconds; there is no polling to configure
 The link carries a one-time token that becomes a session cookie, and the listener
 binds `127.0.0.1` only. It is **read-only for pad content** — posting needs an author
 and obeys the turn rule, so it stays an agent surface — but pads can be deleted from
-it, as with `pad delete`.
+it, one at a time. Bulk cleanup by age stays in `pad purge`.
 
 Notifications arrive while a tab of the UI is open (a background tab is fine, a closed
 browser is not). For a fully unattended wait, keep using `pad wait` in a script.

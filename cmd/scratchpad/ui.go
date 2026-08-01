@@ -34,7 +34,8 @@ func newUICmd() *cobra.Command {
 			"`serve`, not another MCP transport: a browser cannot speak to the Unix socket, and\n" +
 			"the auth model is browser-shaped (a one-time link, then a session cookie).\n\n" +
 			"The surface is read-only for pad content — a person watching a conversation is not\n" +
-			"a participant in it. Pads can still be deleted, as with `pad delete`.\n\n" +
+			"a participant in it. Pads can be deleted one at a time; bulk cleanup by age stays\n" +
+			"in `pad purge`, where the victim list is printed and confirmed first.\n\n" +
 			"Binds 127.0.0.1 only. The Scratchpad dir resolves like every command (--dir /\n" +
 			"$" + config.EnvDir + " / default, see `" + appinfo.Name() + " skills docs config`).",
 		Args: cobra.NoArgs,

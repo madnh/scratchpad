@@ -253,7 +253,10 @@ state-changing methods, and serve a strict CSP (`script-src 'self'`).
 
 **Read-only for pad content.** A person watching a conversation is not a participant
 in it: posting needs an author identity and would have to obey the turn rule, which
-belongs to the agents' surfaces. Delete and purge are available, matching the CLI.
+belongs to the agents' surfaces. Deleting a pad is available — **one at a time**, with
+no row selection and no bulk endpoint: wiping a batch of transcripts is irreversible,
+and `pad purge` already does that where a person states an age threshold and reads the
+victim list before confirming.
 
 ### Change detection — push, not poll
 
@@ -290,7 +293,7 @@ reconnects by itself, so a server restart heals with no client retry logic.
 | `GET /api/pads/{ref}` | header + turn + full TOC, **no section bodies** |
 | `GET /api/pads/{ref}/sections[?before=&limit=&section=]` | one page of bodies |
 | `POST /api/pads/{ref}/unlock` | verify a protected pad's password once per session |
-| `DELETE /api/pads/{ref}`, `POST /api/purge` | management, mirroring the CLI |
+| `DELETE /api/pads/{ref}` | delete one pad (no bulk counterpart, by design) |
 | `GET /api/events` | SSE stream of pad changes |
 
 **Sizing for real pads drove this shape.** A pad reaches hundreds of sections of long

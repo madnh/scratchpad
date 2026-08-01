@@ -29,8 +29,9 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
   table.pageSize = 25;
   table.rowKey = (r) => r.ref;
   table.getHref = (r) => `#/pads/${r.ref}`;
-  table.selectable = true;
-  table.bulkActions = [{ name: "delete", label: "Delete", danger: true }];
+  // Deletion is ONE pad at a time, deliberately: no row selection, no bulk action.
+  // Wiping a batch of transcripts is irreversible and belongs to `pad purge`, where a
+  // person types the age threshold and reads the list before confirming.
   table.actions = [{ name: "watch", label: "Watch" }, { name: "delete", label: "Delete", danger: true }];
   table.columns = [
     { key: "ref", label: "Ref", sortable: true, render: (r) => el("span", { class: "ref", text: r.ref }) },
@@ -54,25 +55,18 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
       repaint();
       return;
     }
-    if (name === "delete") await removePads([row]);
+    if (name === "delete") await removePad(row);
   });
 
-  table.addEventListener("bulkaction", async (e) => {
-    if (e.detail.name === "delete") await removePads(e.detail.rows);
-  });
-
-  async function removePads(victims) {
-    const what = victims.length === 1 ? victims[0].ref : `${victims.length} pads`;
-    if (!(await confirm(`Delete ${what}? This cannot be undone.`))) return;
-    for (const v of victims) {
-      try {
-        await api.deletePad(v.ref);
-        wl.setWatched(v.ref, false);
-      } catch (err) {
-        toast(`Could not delete ${v.ref}: ${err.message}`, { type: "error" });
-      }
+  async function removePad(pad) {
+    if (!(await confirm(`Delete ${pad.ref}? This cannot be undone.`))) return;
+    try {
+      await api.deletePad(pad.ref);
+      wl.setWatched(pad.ref, false);
+      toast(`Deleted ${pad.ref}`, { type: "success" });
+    } catch (err) {
+      toast(`Could not delete ${pad.ref}: ${err.message}`, { type: "error" });
     }
-    toast(`Deleted ${what}`, { type: "success" });
     load();
   }
 

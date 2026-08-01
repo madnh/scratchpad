@@ -58,11 +58,7 @@ export const api = {
       body: JSON.stringify({ password }),
     }),
 
+  // One pad at a time. Bulk cleanup by age stays in the CLI (`pad purge`), where the
+  // victim list is printed and confirmed before anything is removed.
   deletePad: (ref) => request(`/api/pads/${encodeURIComponent(ref)}`, { method: "DELETE" }),
-
-  purge: (project, olderThanSeconds) =>
-    request("/api/purge", {
-      method: "POST",
-      body: JSON.stringify({ project: project || "", older_than_s: olderThanSeconds }),
-    }),
 };

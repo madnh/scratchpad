@@ -108,7 +108,8 @@ configure.
 
 It binds `127.0.0.1` only, the link carries a one-time token that becomes a session
 cookie, and it is **read-only for pad content**: posting needs an author and obeys the
-turn rule, so that stays an agent surface. Pads can still be deleted, as with the CLI.
+turn rule, so that stays an agent surface. Pads can be deleted one at a time; bulk
+cleanup by age stays in `pad purge`.
 
 ## Features
 

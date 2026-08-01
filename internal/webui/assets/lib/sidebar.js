@@ -78,6 +78,7 @@ function padLabel(pad) {
 
 export function initSidebar() {
   const nav = document.getElementById("nav");
+  const navBottom = document.getElementById("nav-bottom");
   const modeBox = document.getElementById("group-mode");
   const list = document.getElementById("padlist");
   const footer = document.getElementById("padlist-footer");
@@ -90,12 +91,14 @@ export function initSidebar() {
     { label: "Overview", href: "#/" },
     { label: "Pads", href: "#/pads" },
     { label: "Projects", href: "#/projects" },
-    { label: "Settings", href: "#/settings" },
   ];
+  navBottom.items = [{ label: "Settings", href: "#/settings" }];
 
   const mark = () => {
-    nav.current = location.hash || "#/";
-    for (const n of list.querySelectorAll("puredashboard-nav")) n.current = location.hash || "#/";
+    const here = location.hash || "#/";
+    nav.current = here;
+    navBottom.current = here;
+    for (const n of list.querySelectorAll("puredashboard-nav")) n.current = here;
   };
 
   // ── grouping switch ────────────────────────────────────────────────────────

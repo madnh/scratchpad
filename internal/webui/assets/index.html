@@ -6,6 +6,10 @@
 <meta name="color-scheme" content="light dark">
 <title>Scratchpad</title>
 
+<!-- The product's own mark, embedded alongside the rest of the UI. -->
+<link rel="icon" type="image/png" href="/brand-logo.png">
+<link rel="apple-touch-icon" href="/brand-logo.png">
+
 <link rel="stylesheet" href="/vendor/puredashboard/theme/dashboard.css">
 <link rel="stylesheet" href="/vendor/puredashboard/components.css">
 <link rel="stylesheet" href="/app.css">
@@ -23,10 +27,10 @@
 <puredashboard-layout>
 
   <puredashboard-header>
-    <div class="brand">
-      <span class="brand__logo" aria-hidden="true">▤</span>
+    <a class="brand" href="#/">
+      <img class="brand__logo" src="/brand-logo.png" alt="" width="24" height="24">
       <span class="brand__name" id="brand-name">Scratchpad</span>
-    </div>
+    </a>
 
     <div class="header__spacer"></div>
 
@@ -53,6 +57,10 @@
         <div id="padlist"></div>
         <a class="sider__all" id="padlist-footer" href="#/pads"></a>
       </div>
+
+      <!-- Settings sits below the pad list, pinned to the bottom of the rail: it is
+           configuration, not somewhere you navigate to while working. -->
+      <puredashboard-nav id="nav-bottom"></puredashboard-nav>
     </puredashboard-sider>
 
     <puredashboard-content>

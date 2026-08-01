@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/madnh/scratchpad/internal/buildinfo"
 	"github.com/madnh/scratchpad/internal/store"
@@ -273,43 +272,15 @@ func (s *Server) handleUnlock(r *http.Request, sess *session) (any, error) {
 	return map[string]any{"ref": ref, "unlocked": true}, nil
 }
 
+// handleDelete removes ONE pad. There is deliberately no bulk endpoint: wiping a
+// batch of transcripts is irreversible, and `pad purge` already does it in the place
+// where a person states an age threshold and reads the victim list before confirming.
 func (s *Server) handleDelete(r *http.Request, _ *session) (any, error) {
 	ref := r.PathValue("ref")
 	if err := s.store.Delete(ref); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ref": ref, "deleted": true}, nil
-}
-
-// handlePurge bulk-deletes by last activity, mirroring `pad purge`. The UI confirms
-// before calling; the server re-derives the victim list itself so the decision is
-// never taken from client-supplied refs.
-func (s *Server) handlePurge(r *http.Request, _ *session) (any, error) {
-	var body struct {
-		Project    string `json:"project"`
-		OlderThanS int64  `json:"older_than_s"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4096)).Decode(&body); err != nil {
-		return nil, badInput("expected a JSON body with project and older_than_s fields")
-	}
-	if body.OlderThanS <= 0 {
-		return nil, badInput("older_than_s must be a positive number of seconds")
-	}
-	pads, _, err := s.store.List(body.Project)
-	if err != nil {
-		return nil, err
-	}
-	cutoff := time.Now().Add(-time.Duration(body.OlderThanS) * time.Second).Unix()
-	deleted := []string{}
-	for _, p := range pads {
-		if p.LastTS < cutoff {
-			if err := s.store.Delete(p.Ref); err != nil {
-				return nil, err
-			}
-			deleted = append(deleted, p.Ref)
-		}
-	}
-	return map[string]any{"deleted": deleted, "count": len(deleted)}, nil
 }
 
 // badInput builds the store-shaped error for a malformed request parameter, so the

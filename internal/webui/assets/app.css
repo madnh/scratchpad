@@ -9,8 +9,11 @@ puredashboard-header {
   padding: 0 1rem;
 }
 
-.brand { display: flex; align-items: center; gap: .5rem; font-weight: 600; }
-.brand__logo { color: var(--accent); font-size: 1.1rem; }
+.brand {
+  display: flex; align-items: center; gap: .5rem;
+  font-weight: 600; color: inherit; text-decoration: none;
+}
+.brand__logo { display: block; width: 24px; height: 24px; border-radius: 5px; }
 .header__spacer { flex: 1; }
 
 /* Connection indicator — the answer to "am I actually seeing updates?" */
@@ -33,16 +36,28 @@ puredashboard-header {
 
 /* ── Sidebar pad browser ──────────────────────────────────────────────────── */
 
+/* Lay the rail out as a column so the pad list takes the slack and Settings is
+   pushed to the bottom, above the sider's own collapse trigger. */
+.puredashboard-sider__inner { display: flex; flex-direction: column; }
+
 .sider__pads {
+  flex: 1 1 auto;
+  min-height: 0;
   border-top: 1px solid var(--border);
   margin-top: .5rem;
   padding: .6rem .5rem 1rem;
-  /* The list can outgrow the viewport; scroll it rather than the whole shell, so
-     the section menu above stays reachable. */
+  /* The list can outgrow the rail; scroll it rather than the whole shell, so the
+     section menu above and Settings below both stay put. */
   overflow-y: auto;
 }
+#nav-bottom { flex: 0 0 auto; border-top: 1px solid var(--border); padding-top: .25rem; }
+
 /* Collapsed to a 64px rail there is no room for any of this. */
 puredashboard-sider[collapsed] .sider__pads { display: none; }
+
+/* Square rows: rounded pills read as buttons floating in the rail, and with the
+   two-line pad entries they left ragged gaps down both edges. */
+puredashboard-sider .puredashboard-nav__link { border-radius: 0; }
 
 .sider__head { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .5rem; }
 /* Full width with a small label, so neither choice gets ellipsised in a narrow rail. */
