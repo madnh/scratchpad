@@ -12,9 +12,11 @@
 //   * a long section renders CLAMPED, because a screen of unbroken prose hides the
 //     structure of the conversation.
 //
-// Newest-first ordering is not only about relevance: it means "load older" appends
-// DOWNWARD, so the page never has to preserve scroll position around content
-// inserted above the viewport.
+// Newest-first is the default because opening a pad to see what just happened is the
+// common visit, and because it means "load older" appends DOWNWARD, away from the
+// reader. A person reading a pad as a conversation wants the other direction, so the
+// order is switchable — at the cost of anchoring the scroll position by hand when an
+// older page lands above the viewport (captureScroll below).
 
 import "/vendor/puredashboard/lazy.js";
 import "/vendor/puredashboard/md.js";
@@ -30,8 +32,19 @@ import { menu } from "/vendor/puredashboard/menu.js";
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
+import * as prefs from "/lib/prefs.js";
 import { el, pageHead, skeleton, errorView, copyButton } from "/lib/ui.js";
 import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex } from "/lib/fmt.js";
+
+// Menu icons. Inline SVG, following the library's own rule that a component carries
+// its own icons rather than pulling in an icon set — three glyphs do not justify a
+// dependency, and these are ours, not author input.
+const icon = (body) =>
+  `<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" ` +
+  `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICON_COPY = icon('<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16V4a2 2 0 0 1 2-2h10"/>');
+const ICON_BELL = icon('<path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>');
+const ICON_TRASH = icon('<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>');
 
 // CLAMP_BYTES is where a section stops being rendered in full. Roughly a screenful of
 // prose: below it the whole point is visible, above it the fold plus an explicit
@@ -52,6 +65,11 @@ export default function mount(outlet, ctx) {
   let pendingNew = 0;       // sections that arrived while reading further back
   let authorFilter = "";
   let expandAll = false;
+  // Reading direction. Newest-first is the default — opening a pad to see what just
+  // happened is the common visit — but a pad read from the start is a conversation,
+  // and some people want it that way round. The choice is per person, not per pad, so
+  // it is remembered across pads and sessions.
+  let order = prefs.order();
   // Sections that arrived while this page was open, so they can be flashed. The
   // marker is applied while BUILDING each node rather than by querying the DOM
   // after render(), so it survives a re-render from any source.
@@ -125,6 +143,7 @@ export default function mount(outlet, ctx) {
       pendingNew = 0;
       wl.markSeen(ref, pad.section_count);
       render();
+      scrollToNewest();
     } catch (err) {
       if (!disposed) outlet.replaceChildren(errorView(err, loadPad));
     }
@@ -136,7 +155,75 @@ export default function mount(outlet, ctx) {
     if (disposed) return;
     loaded = [...page.sections, ...loaded];
     hasOlder = page.has_older;
+    // Reading oldest-first, the older page lands ABOVE what is on screen: without
+    // this the reader's place would jump down by however tall the new page turned out
+    // to be. Reading newest-first it lands below, and nothing moves.
+    const keep = order === "oldest" ? captureScroll() : null;
     render();
+    keep?.restore();
+  }
+
+  // ── scroll position ────────────────────────────────────────────────────────
+  //
+  // The page scrolls in the layout's own container, not the window, so the anchoring
+  // helpers have to find it. It is the nearest ancestor that actually scrolls.
+  function scroller() {
+    for (let n = body.parentElement; n; n = n.parentElement) {
+      const oy = getComputedStyle(n).overflowY;
+      if ((oy === "auto" || oy === "scroll") && n.scrollHeight > n.clientHeight) return n;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+
+  // captureScroll pins the reader to a SECTION rather than to a scroll offset: the
+  // sections arriving above it start at an estimated height and grow to their real one
+  // as they are parsed, so an offset computed once would be wrong a moment later.
+  // Re-pinning on every height change holds the section still through all of it.
+  function captureScroll() {
+    const first = [...body.querySelectorAll(".msg")].find((m) => m.getBoundingClientRect().bottom > 0);
+    const sec = first?.dataset.section;
+    const top = first ? first.getBoundingClientRect().top : 0;
+    return { restore: () => { if (sec) holdSection(sec, top); } };
+  }
+
+  // holdSection keeps one section at a fixed distance from the top of the viewport
+  // while the content above it settles — then gets out of the way. It stops the moment
+  // the reader scrolls themselves: their intent outranks the anchor.
+  function holdSection(sec, top, ms = 2500) {
+    const sc = scroller();
+    let expected = -1;
+    const fix = () => {
+      if (expected >= 0 && Math.abs(sc.scrollTop - expected) > 2) return stop(); // they scrolled
+      const el = body.querySelector(`[data-section="${sec}"]`);
+      if (!el) return;
+      const delta = el.getBoundingClientRect().top - top;
+      if (Math.abs(delta) > 1) sc.scrollTop += delta;
+      expected = sc.scrollTop;
+    };
+    let ro = null;
+    const stop = () => { ro?.disconnect(); ro = null; };
+    fix();
+    if (typeof ResizeObserver === "function") {
+      ro = new ResizeObserver(fix);
+      ro.observe(body);
+      setTimeout(stop, ms);
+    }
+  }
+
+  // scrollToNewest puts the newest section in view. Reading oldest-first that is the
+  // BOTTOM of the transcript — the same place a chat app opens at, because the latest
+  // turn is what a person came to see.
+  function scrollToNewest() {
+    if (order !== "oldest") return;
+    const sc = scroller();
+    sc.scrollTop = sc.scrollHeight;
+  }
+
+  // atBottom allows a little slack: a reader who stopped a line short of the end is
+  // still "at the end" as far as following new turns goes.
+  function atBottom(slack = 120) {
+    const sc = scroller();
+    return sc.scrollHeight - sc.scrollTop - sc.clientHeight <= slack;
   }
 
   // jumpTo centres the history on one section: load the page ENDING at it, so the
@@ -190,43 +277,53 @@ export default function mount(outlet, ctx) {
   function render() {
     const authors = [...new Set(pad.sections.map((s) => s.author))];
     const visible = authorFilter ? loaded.filter((s) => s.author === authorFilter) : loaded;
+    const newestFirst = order === "newest";
 
     body.replaceChildren();
 
     if (pendingNew > 0) {
       body.append(el("button", {
         class: "newpill", type: "button",
-        text: `${pendingNew} new section${pendingNew === 1 ? "" : "s"} ↑`,
+        text: `${pendingNew} new section${pendingNew === 1 ? "" : "s"} ${newestFirst ? "↑" : "↓"}`,
         onclick: () => loadLatest(),
       }));
     }
 
-    // The API hands back ascending sections; reverse for a newest-first read.
-    const chat = el("div", { class: "chat" },
-      [...visible].reverse().map((sec) => sectionNode(sec)));
+    // Where the history continues, and where the pad begins, swap ends with the order:
+    // "older" is always AWAY from the newest section, so the control sits below the
+    // transcript reading newest-first and above it reading oldest-first.
+    const edge = el("div");
+    if (hasOlder) {
+      edge.append(el("button", {
+        class: "loadmore", type: "button", text: "Load 20 older sections",
+        onclick: (e) => { e.currentTarget.disabled = true; loadOlder(); },
+      }));
+    } else if (loaded.length) {
+      edge.append(el("p", { class: "muted", text: "Beginning of the pad." }));
+    }
+    if (!newestFirst) body.append(edge);
+
+    // The API hands back ascending sections; reverse them for a newest-first read.
+    const ordered = newestFirst ? [...visible].reverse() : visible;
+    const chat = el("div", { class: "chat", dataset: { order } },
+      ordered.map((sec) => sectionNode(sec)));
     body.append(chat);
 
     if (!visible.length) {
       body.append(el("p", { class: "muted", text: "No sections match this filter." }));
     }
-
-    if (hasOlder) {
-      body.append(el("button", {
-        class: "loadmore", type: "button", text: "Load 20 older sections",
-        onclick: (e) => { e.currentTarget.disabled = true; loadOlder(); },
-      }));
-    } else if (loaded.length) {
-      body.append(el("p", { class: "muted", text: "Beginning of the pad." }));
-    }
+    if (newestFirst) body.append(edge);
 
     outlet.replaceChildren(
       pageHead(pad.title || ref, null, copyButton(ref), padMenuButton()),
       metaRow(),
+      el("div", { class: "pad__sticky-sentinel" }),
       toolbar(authors),
       body,
     );
     // Only now are the bodies in the document and measurable against the viewport.
     observeLazy();
+    observeStuck();
   }
 
   function metaRow() {
@@ -268,11 +365,37 @@ export default function mount(outlet, ctx) {
       else toast(`This pad has sections 1–${pad.section_count}`, { type: "warn" });
     });
 
-    const bar = el("div", { class: "pad__toolbar" },
-      el("span", { class: "muted", text: range }),
+    // The pad's name, shown only once the real title has scrolled away: the toolbar is
+    // then the only thing on screen, and a row of controls with no subject is a row of
+    // controls for whatever you last had open.
+    const stuckTitle = el("span", { class: "pad__toolbar-title stuck-only", text: pad.title || ref, title: pad.title || ref });
+
+    const bar = el("div", {
+      class: "pad__toolbar",
+      dataset: { sticky: String(prefs.stickyBar()) },
+    },
+      stuckTitle,
+      el("span", { class: "muted pad__toolbar-range", text: range }),
       el("span", { class: "page__spacer" }),
       filter,
       jump,
+      // Labelled with what it DOES, like "Expand all" beside it, rather than with the
+      // state it is in — the current order is visible in the transcript itself.
+      el("button", {
+        type: "button", class: "ghost-btn",
+        text: order === "newest" ? "Oldest first" : "Newest first",
+        title: order === "newest"
+          ? "Read the pad from its first section"
+          : "Read the pad newest section first",
+        onclick: () => {
+          order = order === "newest" ? "oldest" : "newest";
+          prefs.setOrder(order);   // Settings shows the same choice
+          render();
+          // Flipping to oldest-first would otherwise leave the reader at the top of a
+          // long history; the newest turn is what they were just looking at.
+          scrollToNewest();
+        },
+      }),
       el("button", {
         type: "button", class: "ghost-btn",
         text: expandAll ? "Collapse long" : "Expand all",
@@ -282,7 +405,33 @@ export default function mount(outlet, ctx) {
     if (!showingLatest) {
       bar.append(el("button", { type: "button", class: "ghost-btn", text: "Latest", onclick: () => loadLatest() }));
     }
+    // The full menu, for when the header — and with it Copy ref and the Watch switch —
+    // has scrolled away. Hidden until that happens, so nothing is on screen twice.
+    const menu = padMenuButton({ full: true });
+    menu.classList.add("stuck-only");
+    bar.append(menu);
     return bar;
+  }
+
+  // ── sticky toolbar ─────────────────────────────────────────────────────────
+  //
+  // The toolbar is sticky, but "am I stuck?" is not something CSS can answer, and the
+  // bar has to look and contain different things once it is: a shadow to lift it off
+  // the transcript, the pad's name, and the pad's actions that scrolled away with the
+  // header. A zero-height sentinel just above it goes out of view exactly when the bar
+  // reaches the top, which is the signal.
+  let stuckObserver = null;
+
+  function observeStuck() {
+    stuckObserver?.disconnect();
+    if (!prefs.stickyBar() || typeof IntersectionObserver !== "function") return;
+    const sentinel = body.parentElement?.querySelector(".pad__sticky-sentinel");
+    const bar = body.parentElement?.querySelector(".pad__toolbar");
+    if (!sentinel || !bar) return;
+    stuckObserver = new IntersectionObserver(([e]) => {
+      bar.dataset.stuck = String(!e.isIntersecting);
+    }, { root: scroller(), threshold: 0 });
+    stuckObserver.observe(sentinel);
   }
 
   // ── lazy markdown ──────────────────────────────────────────────────────────
@@ -433,16 +582,52 @@ export default function mount(outlet, ctx) {
   // how much history there is — not behind a button in a list that reorders itself.
   // It lives in the header's overflow menu rather than under the transcript: deleting
   // is rare, and the confirm dialog — not proximity to the text — is what guards it.
-  function padMenuButton() {
+  // padMenuButton builds the overflow menu — and an overflow menu holds what is NOT
+  // already on screen, which differs by where the button is. Beside the header, Copy
+  // ref is a button and Watch is a switch an inch away, so the menu is the one action
+  // that has neither: delete. In the sticky toolbar the header is gone, so the same
+  // menu is the only way to reach any of them and carries all three.
+  function padMenuButton({ full = false } = {}) {
     const btn = el("button", {
       type: "button", class: "ghost-btn icon-btn", text: "⋯",
       title: "Pad actions", "aria-label": "Pad actions", "aria-haspopup": "menu",
     });
     btn.addEventListener("click", async () => {
-      const picked = await menu(btn, [
-        { label: "Delete this pad", value: "delete", danger: true },
-      ], { placement: "bottom-end" });
-      if (picked === "delete") await deletePad();
+      const watching = wl.isWatched(ref);
+      const items = [];
+      if (full) {
+        items.push(
+          { label: "Copy ref", value: "copy", icon: ICON_COPY, shortcut: ref },
+          {
+            label: "Watch this pad", value: "watch", icon: ICON_BELL,
+            // A checkbox item states what IS, so the label stays put while the tick moves.
+            checked: watching,
+            // Checkbox items deliberately keep the menu open (you may be ticking
+            // several), which means the menu's promise does not resolve for them — the
+            // work belongs in onSelect. Closing anyway: only one thing to tick here.
+            closeOnSelect: true,
+            onSelect: () => {
+              wl.setWatched(ref, !watching);
+              toast(!watching ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
+              render(); // the header's switch shows the same state
+            },
+          },
+          { separator: true },
+        );
+      }
+      items.push({ label: "Delete this pad", value: "delete", icon: ICON_TRASH, danger: true });
+
+      const picked = await menu(btn, items, { placement: "bottom-end" });
+      if (picked === "copy") {
+        try {
+          await navigator.clipboard.writeText(ref);
+          toast(`Copied ${ref}`, { type: "success" });
+        } catch {
+          toast("The browser blocked the clipboard; the ref is in the page header", { type: "warn" });
+        }
+      } else if (picked === "delete") {
+        await deletePad();
+      }
     });
     return btn;
   }
@@ -497,13 +682,32 @@ export default function mount(outlet, ctx) {
       const page = await api.sections(ref, { limit: added });
       if (disposed) return;
       const fresh = page.sections.filter((s) => !loaded.some((l) => l.n === s.n));
+      // Reading oldest-first the new turn lands at the BOTTOM, so follow it only if
+      // the reader was already there — someone who scrolled up is reading, not
+      // waiting, and yanking them down mid-sentence is worse than a missed line.
+      const follow = order === "oldest" && atBottom();
       loaded = [...loaded, ...fresh];
       wl.markSeen(ref, pad.section_count);
       // Flash what just arrived, so a reply landing mid-read is obvious.
       for (const s of fresh) justArrived.add(s.n);
       render();
+      if (follow) scrollToNewest();
       setTimeout(() => { for (const s of fresh) justArrived.delete(s.n); }, 3000);
     } catch { /* the next event will resync */ }
+  });
+
+  // Settings is a different route, so a change made there has to be pushed here — the
+  // pad page does not re-mount when the person navigates back to it from the same tab.
+  const offPrefs = prefs.onChange((name, value) => {
+    if (disposed || !pad || pad.locked) return;
+    if (name === "order") {
+      if (value === order) return;
+      order = value;
+      render();
+      scrollToNewest();
+    } else if (name === "stickyBar") {
+      render();
+    }
   });
 
   loadPad();
@@ -511,7 +715,9 @@ export default function mount(outlet, ctx) {
   return () => {
     disposed = true;
     off();
+    offPrefs();
     // The lazy elements disconnect their own observers as they leave the DOM.
+    stuckObserver?.disconnect();
     if (idleHandle && typeof cancelIdleCallback === "function") cancelIdleCallback(idleHandle);
   };
 }
