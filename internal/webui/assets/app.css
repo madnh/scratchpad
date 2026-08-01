@@ -311,9 +311,12 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
    much of it — so keep the line breaks the text puts there. */
 .puredashboard-dialog__message { white-space: pre-line; }
 
-/* The pad header's overflow trigger: square, so "⋯" sits next to Copy ref as an
-   icon rather than as a second labelled button competing with it. */
+/* The pad header's overflow trigger: narrow, so "⋯" reads as an icon next to Copy ref
+   rather than as a second labelled button competing with it — but the SAME HEIGHT as
+   the button it stands beside. Only the horizontal padding is reduced; the line-height
+   is left inherited, because overriding it is what made this button shorter than its
+   neighbour rather than merely narrower. */
 .icon-btn {
-  padding: .25rem; width: 1.85rem; line-height: 1;
+  padding-left: .25rem; padding-right: .25rem; min-width: 1.85rem;
   display: inline-flex; align-items: center; justify-content: center;
 }
