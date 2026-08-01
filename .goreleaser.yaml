@@ -32,24 +32,27 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# Commit subject ở repo này thường mang tiền tố branch — "[pad-outline] feat(ui): …" —
+# nên mọi regexp dưới đây phải bỏ qua được phần "[…] " ở đầu, nếu không thì toàn bộ
+# commit rơi vào nhóm "Others" và filter exclude cũng không bắt được gì.
 changelog:
   sort: asc
   groups:
     - title: Features
-      regexp: '^feat(\(.+\))?!?:'
+      regexp: '^(\[[^]]*\] )?feat(\(.+\))?!?:'
       order: 0
     - title: Bug fixes
-      regexp: '^fix(\(.+\))?!?:'
+      regexp: '^(\[[^]]*\] )?fix(\(.+\))?!?:'
       order: 1
     - title: Documentation
-      regexp: '^docs(\(.+\))?!?:'
+      regexp: '^(\[[^]]*\] )?docs(\(.+\))?!?:'
       order: 2
     - title: Others
       order: 999
   filters:
     exclude:
-      - "^test"
-      - "^chore"
+      - '^(\[[^]]*\] )?test(\(.+\))?!?:'
+      - '^(\[[^]]*\] )?chore(\(.+\))?!?:'
       - "^Merge"
 
 release:
