@@ -112,12 +112,12 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
 
 .page { flex: 1 0 auto; padding: 1.25rem; max-width: 72rem; width: 100%; margin: 0 auto; }
 
-/* One quiet line, aligned with the page above it — not a bar. */
+/* One quiet centred line under the page — not a bar. */
 .foot {
   flex: 0 0 auto;
   max-width: 72rem; width: 100%; margin: 0 auto;
   padding: .5rem 1.25rem 1rem;
-  font-size: .74rem; color: var(--muted);
+  font-size: .74rem; color: var(--muted); text-align: center;
 }
 .foot a { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; }
 .foot a:hover { color: var(--accent); border-bottom-color: currentColor; }
