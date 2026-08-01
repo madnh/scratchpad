@@ -33,6 +33,25 @@ write a second disk path.
 The MCP surface is **append-only by design**: no delete/update tools. Deletion/purge
 exist only in the CLI.
 
+## Surfaces — who each one is for
+
+- **CLI** (`internal/store` directly) — the primary path; an agent with a shell needs
+  nothing else.
+- **MCP** (`serve`) — hosts that can't spawn a CLI, or cross-machine over TCP.
+- **Web UI** (`ui`, `internal/webui`) — for a PERSON: browse, read, watch. Separate
+  loopback listener, not a fourth MCP transport (browsers can't use the Unix socket,
+  and its auth is a one-time link → session cookie). **Read-only for pad content** —
+  posting needs an author and obeys the turn rule, so it stays an agent surface.
+
+`internal/watch` turns pad-file writes into a push stream via kernel filesystem
+events. It watches the STORE, never the writers: any writer — CLI, MCP, or a person
+with `rm` — is noticed identically, and `internal/store` stays ignorant of listeners.
+Do not add a writer-side notification hook; it would miss every uncooperative writer.
+
+The UI's assets are `go:embed`-ed, so **rebuild the binary after editing anything under
+`internal/webui/assets/`** — a running server keeps serving the old copy. The vendored
+puredashboard library there is refreshed with `make vendor-ui`, never hand-edited.
+
 ## HARD RULE — keep the config guide in sync
 
 `internal/config/config.md` is embedded (`go:embed`) and written into every

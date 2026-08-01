@@ -30,6 +30,7 @@ There is no working-directory inference at all.
 | `SCRATCHPAD_PROJECT_NAME` | default project when a command/tool omits one (set per repo, e.g. via direnv) |
 | `SCRATCHPAD_AUTHOR` | default author for the CLI `--as` |
 | `SCRATCHPAD_NONINTERACTIVE` | truthy = never prompt |
+| `SCRATCHPAD_UI_PORT` | loopback port for the Web UI (`ui`), default 6711 |
 
 Every env var has a matching flag; conflicts resolve flag > env > marker > default.
 

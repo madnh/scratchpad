@@ -66,6 +66,11 @@ a typo can never silently seed a store in the wrong place.
     "port": 6710,
     "token_digests": ["sha256:..."],
     "allowed_origins": []
+  },
+
+  "ui": {
+    "port": 6711,
+    "no_auth": false
   }
 }
 ```
@@ -97,6 +102,16 @@ Field reference:
   allow-list for browser-based clients; empty rejects cross-origin browsers).
   Having a `tcp` group here does NOT start TCP — only `serve --tcp` does; the group
   just supplies its settings.
+- **`ui`** — optional settings for the Web UI (`ui`): the loopback `port` (default
+  6711, alongside the MCP TCP port but a separate listener with a different audience
+  and auth model) and `no_auth`.
+
+  The UI normally prints a one-time link at startup; opening it exchanges the token
+  for a session cookie. `no_auth: true` drops that, leaving only the loopback bind
+  and the Host/Origin guard — which means **every local process that can reach the
+  port can read every pad**, so set it only on a machine you are the sole user of.
+  There is no origin allow-list here: the UI binds loopback, so the browser's own
+  origin is the only one that can ever reach it.
 
 Only `type`, `version`, `display_name`, and `instance` are written at init; add the
 optional groups when you need them.
@@ -114,6 +129,7 @@ the pad file's header — removing the file removes every trace of it).
 | `SCRATCHPAD_PROJECT_NAME` | default project when none is passed | `default` |
 | `SCRATCHPAD_AUTHOR` | default author for the CLI `--as` flag | — |
 | `SCRATCHPAD_NONINTERACTIVE` | truthy = never prompt (automation) | — |
+| `SCRATCHPAD_UI_PORT` | loopback port for the Web UI (`ui`) | `6711` |
 
 Every variable has a matching flag; on conflict **flag > env > marker file > default**.
 

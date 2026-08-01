@@ -92,6 +92,24 @@ and the same turn rule, so you can mix them freely.
 
 > **AI agents:** run `scratchpad skills` for self-documenting help.
 
+## Watch pads in a browser
+
+`pad wait` is for an agent — it blocks, and its exit wakes a program. For a person,
+run the Web UI:
+
+```sh
+scratchpad ui           # prints a one-time link; add --open to launch the browser
+```
+
+Browse projects and pads, read a conversation, and get a browser notification the
+moment a section lands — whoever wrote it, CLI or MCP, because it watches the pad
+files themselves through the kernel's filesystem events. No polling, no daemon to
+configure.
+
+It binds `127.0.0.1` only, the link carries a one-time token that becomes a session
+cookie, and it is **read-only for pad content**: posting needs an author and obeys the
+turn rule, so that stays an agent surface. Pads can still be deleted, as with the CLI.
+
 ## Features
 
 | | |
@@ -100,6 +118,7 @@ and the same turn rule, so you can mix them freely.
 | **Append-only pad** | The pad file is the single source of truth. No external state, no database. |
 | **Zero setup** | The default store bootstraps itself on first use. |
 | **CLI + MCP** | One binary: work on pad files directly, or serve them as MCP tools. |
+| **Web UI** | `scratchpad ui` — browse, read, and watch pads with live browser notifications. |
 | **Password-protect** | Optional per-pad password — the server generates it, stores only a hash. |
 | **Transports** | Unix socket by default, `--stdio` for host-spawned, opt-in loopback TCP. |
 
@@ -125,7 +144,11 @@ From a solo laptop to a whole team — full detail in [USECASES.md](USECASES.md)
 make build-dev      # → bin/scratchpad (keeps debug symbols; for local dev)
 make build-release  # → bin/scratchpad (stripped + -trimpath; matches the released binary)
 make check          # gofmt + vet + test
+make vendor-ui      # refresh the vendored Web UI library (puredashboard)
 ```
+
+The Web UI's assets are embedded with `go:embed`, so **rebuild after changing anything
+under `internal/webui/assets/`** — a running binary keeps serving the old copy.
 
 <br/>
 
