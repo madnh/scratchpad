@@ -68,11 +68,26 @@ export default function mount(outlet, ctx) {
       return;
     }
     if (disposed) return;
+    setDocTitle();
     if (pad.locked) {
       renderLocked();
       return;
     }
     await loadLatest();
+  }
+
+  // The router can only title this page with the ref, because the ref is all the URL
+  // carries — the title arrives with the pad. A tab strip of "default-b5i2cj" tells a
+  // person nothing, so name the tab after the pad as soon as we know its name, cut
+  // short: a browser tab shows a few words and the ref stays in the page itself.
+  function setDocTitle() {
+    const t = (pad.title || "").trim();
+    if (!t) return;
+    const short = t.length > 48 ? `${t.slice(0, 47).trimEnd()}…` : t;
+    // The deployment's own name, which the shell already put in the brand mark — an
+    // operator who renamed this instance sees that name in the tab too.
+    const app = document.getElementById("brand-name")?.textContent.trim() || "Scratchpad";
+    document.title = `${short} · ${app}`;
   }
 
   async function loadLatest() {
