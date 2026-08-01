@@ -212,7 +212,9 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
   background: var(--avatar-bg, var(--accent)); color: var(--accent-ink, #fff);
   font-size: .72rem; font-weight: 700; letter-spacing: .01em;
   /* No text-transform: agentInitials already decides the casing, and a few labels
-     are cased deliberately ("iOS"). */
+     are cased deliberately ("iOS"). overflow:hidden because the text comes from an
+     agent-written handle: nothing it can be named may spill across the row. */
+  overflow: hidden;
 }
 /* min-width:0 lets wide children (tables, code blocks) shrink instead of stretching
    the row — they scroll inside the bubble rather than the page. */

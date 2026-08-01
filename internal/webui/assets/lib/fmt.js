@@ -68,7 +68,11 @@ export function bytes(n) {
 //
 // Keys are matched against the normalised handle and against each of its words, so
 // "backend", "Backend-2", "farmi_backend" and "backend agent" all land on BE.
-const ROLES = {
+//
+// Null-prototype: handles are written by agents, i.e. untrusted, and a plain object
+// literal would resolve an author named "constructor" through Object.prototype and
+// hand back a FUNCTION where a two-letter string was expected.
+const ROLES = Object.assign(Object.create(null), {
   backend: "BE", back: "BE", server: "BE", api: "API", srv: "BE",
   frontend: "FE", front: "FE", client: "FE", web: "FE", webapp: "FE", ui: "UI",
   fullstack: "FS", full: "FS",
@@ -86,7 +90,7 @@ const ROLES = {
   security: "SEC", sec: "SEC", infosec: "SEC",
   docs: "DOC", doc: "DOC", writer: "DOC",
   support: "SUP", mcp: "MCP", cli: "CLI", sdk: "SDK", bot: "BOT", agent: "AG",
-};
+});
 
 // words splits a handle the way handles are actually written: spaces, dashes,
 // underscores, dots, slashes and camelCase humps are all word boundaries.
