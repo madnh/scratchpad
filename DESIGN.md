@@ -292,6 +292,7 @@ reconnects by itself, so a server restart heals with no client retry logic.
 | `GET /api/pads[?project=]` | pad metadata listing |
 | `GET /api/pads/{ref}` | header + turn + full TOC, **no section bodies** |
 | `GET /api/pads/{ref}/sections[?before=&limit=&section=]` | one page of bodies |
+| `GET /api/pads/{ref}/sections/{n}/preview` | the opening excerpt of one section |
 | `POST /api/pads/{ref}/unlock` | verify a protected pad's password once per session |
 | `DELETE /api/pads/{ref}` | delete one pad (no bulk counterpart, by design) |
 | `GET /api/events` | SSE stream of pad changes |
@@ -324,6 +325,23 @@ first — which also means "load older" appends *downward*, so the page never ha
 preserve scroll position around content inserted above the viewport. A long section
 renders clamped with an explicit expand. A section arriving while the person is
 reading history offers a jump pill instead of moving the viewport.
+
+Beside the transcript sits the **outline**: every section of the pad — not just the
+loaded page — as one row each, in whichever order the transcript is showing, marking
+where the reader is and which sections currently have bodies on screen. It is what
+makes a 300-section pad navigable, since scrolling only ever covers the loaded page.
+Hovering a row fetches that section's opening excerpt for a popup; that is a separate
+endpoint rather than a field on the TOC because it is wanted for the two or three rows
+a person points at, not for all three hundred. Below 1100px the rail becomes a
+dismissable overlay — a fact about the window, so it never overwrites the reader's
+stored preference.
+
+The outline is the one part of the page built on puredashboard's `Reactive` base with
+a keyed `repeat()`: it changes on every arriving section, every order flip and every
+scroll, and rebuilding it would throw away its own scroll position each time. For the
+same reason the rest of the page is mounted ONCE and updated in place — the transcript
+is the only subtree that is rebuilt, so a half-typed "Jump to #" survives an agent
+posting mid-sentence.
 
 Notifications are turn-aware — who moved and who it is on now, the one fact that
 matters in a turn-taking protocol. The Notification API needs a secure context and

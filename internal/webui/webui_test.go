@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/madnh/scratchpad/internal/config"
 	"github.com/madnh/scratchpad/internal/store"
@@ -471,5 +472,90 @@ func TestSessionTableIsBounded(t *testing.T) {
 	srv.auth.mu.Unlock()
 	if n > maxSessions {
 		t.Fatalf("session table holds %d entries, want at most %d", n, maxSessions)
+	}
+}
+
+// TestSectionPreviewSkipsMarkdownFurniture pins what the outline's hover popup shows.
+// A section written by an agent usually opens with a heading, a fence or a bullet, and
+// none of those say anything about the section — the preview has to reach the prose.
+func TestSectionPreviewSkipsMarkdownFurniture(t *testing.T) {
+	cases := []struct {
+		name, content, title, want string
+	}{
+		{"plain", "the first line\nthe second", "", "the first line\nthe second"},
+		{"leading blanks", "\n\n  real content\n", "", "real content"},
+		{"heading", "## Heading\nprose below", "", "Heading\nprose below"},
+		{"fence", "```go\nfunc main() {}\n```\nafter", "", "func main() {}\nafter"},
+		{"bullets", "- one\n- two", "", "one\ntwo"},
+		{"rule only", "---\n***\ncontent", "", "content"},
+		{"empty", "", "", ""},
+		{"whitespace only", "   \n\t\n", "", ""},
+		// Agents routinely open a section by repeating its title as a heading. The
+		// popup already shows the title, so the excerpt starts below it.
+		{"title repeated", "## Rate limits\nfive per minute", "Rate limits", "five per minute"},
+		{"title later is content", "first\nRate limits", "Rate limits", "first\nRate limits"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := sectionPreview(c.content, c.title); got != c.want {
+				t.Fatalf("sectionPreview(%q) = %q, want %q", c.content, got, c.want)
+			}
+		})
+	}
+
+	// The cut is made on RUNES: a preview that split a multi-byte character would put
+	// a replacement glyph in the popup.
+	long := strings.Repeat("á", previewChars*2)
+	got := sectionPreview(long, "")
+	if r := []rune(got); len(r) != previewChars || r[len(r)-1] != '…' {
+		t.Fatalf("long preview is %d runes ending %q, want %d ending in an ellipsis", len(r), string(r[len(r)-1]), previewChars)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("preview is not valid UTF-8: %q", got)
+	}
+}
+
+// TestSectionPreviewEndpoint covers the route the outline calls on hover: it answers
+// for a real section, refuses one that does not exist, and — the part that matters —
+// stays behind the same lock as the content it excerpts.
+func TestSectionPreviewEndpoint(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+
+	pad, _, err := st.CreatePad("demo", "alice", "s1", "## Heading\nthe opening prose", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := pad.Ref()
+
+	var got struct {
+		N       int    `json:"n"`
+		Author  string `json:"author"`
+		Title   string `json:"title"`
+		Preview string `json:"preview"`
+	}
+	if code := getJSON(t, client, ts.URL+"/api/pads/"+ref+"/sections/1/preview", &got); code != http.StatusOK {
+		t.Fatalf("GET preview gave %d", code)
+	}
+	if got.N != 1 || got.Author != "alice" || got.Title != "s1" {
+		t.Fatalf("preview identifies the wrong section: %+v", got)
+	}
+	if got.Preview != "Heading\nthe opening prose" {
+		t.Fatalf("preview = %q, want the prose without the heading marks", got.Preview)
+	}
+
+	var missing map[string]any
+	if code := getJSON(t, client, ts.URL+"/api/pads/"+ref+"/sections/99/preview", &missing); code != http.StatusBadRequest {
+		t.Fatalf("preview of a nonexistent section gave %d, want 400", code)
+	}
+
+	// A protected pad the session has not unlocked must not leak an excerpt.
+	locked, _, err := st.CreatePad("demo", "alice", "secret talk", "the secret itself", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var denied map[string]any
+	if code := getJSON(t, client, ts.URL+"/api/pads/"+locked.Ref()+"/sections/1/preview", &denied); code != http.StatusForbidden {
+		t.Fatalf("preview of a locked pad gave %d, want 403", code)
 	}
 }

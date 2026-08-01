@@ -77,6 +77,19 @@ function readingCard() {
       : "The pad toolbar stays at the top of the page", { type: "info" });
   });
 
+  const outline = el("puredashboard-segmented");
+  outline.options = [
+    { value: "on", label: "Show the outline" },
+    { value: "off", label: "Transcript only" },
+  ];
+  outline.value = prefs.outline() ? "on" : "off";
+  outline.addEventListener("change", (e) => {
+    prefs.setOutline(e.target.value === "on");
+    toast(e.target.value === "on"
+      ? "Pads show their section outline"
+      : "Pads open without the outline", { type: "info" });
+  });
+
   card.append(
     el("p", { class: "muted", text: "Which end of a pad to start reading from:" }),
     order,
@@ -91,6 +104,14 @@ function readingCard() {
       class: "muted",
       text: "Following the page keeps those controls reachable in a pad hundreds of sections " +
         "long, and carries the pad's name and actions once its header has scrolled away.",
+    }),
+    el("p", { class: "muted", text: "The index of sections beside a pad:" }),
+    outline,
+    el("p", {
+      class: "muted",
+      text: "The outline lists every section of the pad, not just the ones loaded, and marks " +
+        "where you are. A narrow window hides it whatever this says — the pad's toolbar has " +
+        "an “Outline” button to bring it back.",
     }),
   );
   return card;

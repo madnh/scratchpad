@@ -29,12 +29,14 @@ import { toast } from "/vendor/puredashboard/toast.js";
 import { confirm } from "/vendor/puredashboard/dialog.js";
 import { menu } from "/vendor/puredashboard/menu.js";
 
+import "/components/pad-outline.js";
+
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
 import * as prefs from "/lib/prefs.js";
 import { el, pageHead, skeleton, errorView, copyButton } from "/lib/ui.js";
-import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex } from "/lib/fmt.js";
+import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex, safeText, cutChars } from "/lib/fmt.js";
 
 // Menu icons. Inline SVG, following the library's own rule that a component carries
 // its own icons rather than pulling in an icon set — three glyphs do not justify a
@@ -70,12 +72,36 @@ export default function mount(outlet, ctx) {
   // and some people want it that way round. The choice is per person, not per pad, so
   // it is remembered across pads and sessions.
   let order = prefs.order();
+  let outlineOpen = prefs.outline();
   // Sections that arrived while this page was open, so they can be flashed. The
   // marker is applied while BUILDING each node rather than by querying the DOM
   // after render(), so it survives a re-render from any source.
   const justArrived = new Set();
 
-  const body = el("div");
+  // The page is built ONCE and then updated in place. Only the transcript is rebuilt
+  // on a re-render; the frame around it — the header, the toolbar and the outline —
+  // are long-lived nodes. That is not an optimisation: rebuilding them was throwing
+  // away the outline's scroll position, the half-typed number in "Jump to #" and the
+  // focus of whoever was typing it, every time an agent posted a section.
+  const body = el("div", { class: "pad__transcript" });
+  const outline = el("pad-outline");
+  // The way back. A rail that closes with a « and leaves nothing behind is a rail you
+  // have to go looking for — the toolbar's toggle is across the page and reads like
+  // its neighbours. This puts the opener exactly where the closer was.
+  const outlineReopen = el("button", {
+    type: "button", class: "outline-reopen", text: "»",
+    title: "Show the outline", "aria-label": "Show the outline",
+    onclick: () => setOutline(true),
+  });
+  const layout = el("div", { class: "pad__layout" }, outline, outlineReopen, body);
+  // The toolbar's live parts, filled in by mountFrame().
+  let frame = null;
+  let watchSwitch = null;
+  let authorOptions = "";   // the author list the filter was last built from
+
+  outline.loadPreview = (n, opts) => api.sectionPreview(ref, n, opts);
+  outline.addEventListener("pick", (e) => pickSection(e.detail));
+  outline.addEventListener("close", () => setOutline(false));
 
   // ── data ───────────────────────────────────────────────────────────────────
 
@@ -118,19 +144,12 @@ export default function mount(outlet, ctx) {
   }
 
   const TAB_TITLE_CHARS = 48;
-  // C0/C1 controls, the bidi overrides and isolates, and the zero-width/BOM characters
-  // that let a string render as something other than what it contains.
-  const UNSAFE_TITLE_CHARS =
-    /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
 
+  // safeText strips the controls, bidi overrides and zero-width characters; cutChars
+  // cuts by code point, so an emoji is never left as half a surrogate pair. Both live
+  // in fmt.js because the outline shows the same agent-written titles.
   function padTitleForTab(raw) {
-    const cleaned = String(raw ?? "").replace(UNSAFE_TITLE_CHARS, " ").replace(/\s+/g, " ").trim();
-    if (!cleaned) return "";
-    // Array.from splits by code point, so an emoji or a non-BMP character counts once
-    // and is never cut in half.
-    const chars = Array.from(cleaned);
-    if (chars.length <= TAB_TITLE_CHARS) return cleaned;
-    return `${chars.slice(0, TAB_TITLE_CHARS - 1).join("").trimEnd()}\u2026`;
+    return cutChars(safeText(raw), TAB_TITLE_CHARS);
   }
 
   async function loadLatest() {
@@ -189,7 +208,14 @@ export default function mount(outlet, ctx) {
   // holdSection keeps one section at a fixed distance from the top of the viewport
   // while the content above it settles — then gets out of the way. It stops the moment
   // the reader scrolls themselves: their intent outranks the anchor.
+  // The anchor is short-lived, but the page can be left while one is still running —
+  // so it is registered here and torn down with everything else. Left alone it would
+  // keep an observer on a transcript nobody is reading, and hold that whole subtree
+  // alive, until its timer happened to fire.
+  let holdStop = null;
+
   function holdSection(sec, top, ms = 2500) {
+    holdStop?.();               // only ever one anchor at a time
     const sc = scroller();
     let expected = -1;
     const fix = () => {
@@ -201,22 +227,32 @@ export default function mount(outlet, ctx) {
       expected = sc.scrollTop;
     };
     let ro = null;
-    const stop = () => { ro?.disconnect(); ro = null; };
+    let timer = 0;
+    const stop = () => {
+      ro?.disconnect();
+      ro = null;
+      if (timer) { clearTimeout(timer); timer = 0; }
+      holdStop = null;
+    };
+    holdStop = stop;
     fix();
     if (typeof ResizeObserver === "function") {
       ro = new ResizeObserver(fix);
       ro.observe(body);
-      setTimeout(stop, ms);
+      timer = setTimeout(stop, ms);
     }
   }
 
-  // scrollToNewest puts the newest section in view. Reading oldest-first that is the
-  // BOTTOM of the transcript — the same place a chat app opens at, because the latest
-  // turn is what a person came to see.
+  // scrollToNewest puts the newest section in view — which END that is depends on the
+  // reading order: the BOTTOM of the transcript oldest-first (the same place a chat app
+  // opens at), the TOP newest-first. Flipping the order and pressing "Latest" both mean
+  // "show me the latest turn", and before this they only did so in one direction.
   function scrollToNewest() {
-    if (order !== "oldest") return;
     const sc = scroller();
-    sc.scrollTop = sc.scrollHeight;
+    sc.scrollTop = order === "oldest" ? sc.scrollHeight : 0;
+    // The reading line has moved, and assigning scrollTop is not guaranteed to have
+    // told the listener yet.
+    updateActive();
   }
 
   // atBottom allows a little slack: a reader who stopped a line short of the end is
@@ -226,21 +262,32 @@ export default function mount(outlet, ctx) {
     return sc.scrollHeight - sc.scrollTop - sc.clientHeight <= slack;
   }
 
-  // jumpTo centres the history on one section: load the page ENDING at it, so the
-  // section and what led up to it arrive together.
+  // jumpTo centres the history ON one section: the page ends a few sections PAST it,
+  // so what led up to it and what came after both arrive. Ending the page at the
+  // target instead would land a jump to #1 on a screen holding exactly one section,
+  // with no way forward except going back to the latest — and with the outline beside
+  // the transcript, jumping is no longer the rare case it was.
   async function jumpTo(n) {
-    const page = await api.sections(ref, { before: n + 1, limit: PAGE });
+    const after = Math.floor(PAGE / 3);
+    const before = Math.min(n + 1 + after, pad.section_count + 1);
+    const page = await api.sections(ref, { before, limit: PAGE });
     if (disposed) return;
     loaded = page.sections;
     hasOlder = page.has_older;
     showingLatest = page.sections.at(-1)?.n === pad.section_count;
+    outline.active = n;
     render();
     const target = body.querySelector(`[data-section="${n}"]`);
     // Instant, not smooth: the jump can span twenty screens of history, and a smooth
     // run through them is both useless to watch and unreliable — the animation
     // competes with the bodies being parsed along the way and can end short of the
     // target. Landing directly is what "jump" means anyway.
-    if (target) target.scrollIntoView({ block: "center" });
+    //
+    // To the TOP of the reading area, not the middle: the outline highlights whatever
+    // is up there, so landing a jump mid-screen lit up a different section than the
+    // one that was asked for. `scroll-margin-top` on .msg keeps it clear of the
+    // sticky toolbar.
+    if (target) target.scrollIntoView({ block: "start" });
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -274,8 +321,22 @@ export default function mount(outlet, ctx) {
     );
   }
 
+  // render() is the whole-page update. The frame is mounted once; after that this
+  // brings the parts that can change into line with the state — and only the
+  // transcript is actually rebuilt.
   function render() {
-    const authors = [...new Set(pad.sections.map((s) => s.author))];
+    if (!frame) mountFrame();
+    syncToolbar();
+    syncOutline();
+    renderTranscript();
+    // Only now are the bodies in the document and measurable against the viewport.
+    observeLazy();
+    observeStuck();
+    // The bodies just changed height, so where the reading line falls has changed too.
+    updateActive();
+  }
+
+  function renderTranscript() {
     const visible = authorFilter ? loaded.filter((s) => s.author === authorFilter) : loaded;
     const newestFirst = order === "newest";
 
@@ -313,18 +374,168 @@ export default function mount(outlet, ctx) {
       body.append(el("p", { class: "muted", text: "No sections match this filter." }));
     }
     if (newestFirst) body.append(edge);
+  }
 
+  // mountFrame builds everything that is NOT the transcript, exactly once.
+  function mountFrame() {
+    const sentinel = el("div", { class: "pad__sticky-sentinel" });
+    frame = { sentinel, ...buildToolbar() };
     outlet.replaceChildren(
       pageHead(pad.title || ref, null, copyButton(ref), padMenuButton()),
       metaRow(),
-      el("div", { class: "pad__sticky-sentinel" }),
-      toolbar(authors),
-      body,
+      sentinel,
+      frame.toolbar,
+      layout,
     );
-    // Only now are the bodies in the document and measurable against the viewport.
-    observeLazy();
-    observeStuck();
   }
+
+  // ── the outline ────────────────────────────────────────────────────────────
+  //
+  // The outline is handed the TOC and the two choices the transcript is showing, and
+  // works out the rest itself. It is a property assignment rather than a render: the
+  // component diffs its own keyed rows, so a section arriving inserts one row and
+  // leaves the rail's scroll position — and the reader's place in it — alone.
+  function syncOutline() {
+    outline.sections = pad.sections;
+    outline.order = order;
+    outline.filter = authorFilter;
+    outline.range = loaded.length ? { from: loaded[0].n, to: loaded.at(-1).n } : null;
+    applyOutline();
+  }
+
+  // Below the breakpoint there is no room for a rail beside the transcript, so the
+  // outline becomes something you open OVER the page. That is a fact about the window,
+  // not a decision by the reader: it is tracked separately and never written to the
+  // preference, or one narrow window would erase the choice for every screen.
+  const narrow = window.matchMedia("(max-width: 1100px)");
+  let overlayOpen = false;
+
+  const outlineShown = () => (narrow.matches ? overlayOpen : outlineOpen);
+
+  function applyOutline() {
+    layout.dataset.outline = String(outlineShown());
+    layout.dataset.narrow = String(narrow.matches);
+  }
+
+  function setOutline(on) {
+    if (narrow.matches) overlayOpen = !!on;
+    else {
+      outlineOpen = !!on;
+      prefs.setOutline(outlineOpen);   // Settings shows the same choice
+    }
+    applyOutline();
+  }
+
+  // As an overlay the rail covers the page, so it dismisses like one: a click anywhere
+  // outside it, or Escape, puts it away. As a rail neither does anything — it is part
+  // of the page, and closing it because someone clicked the transcript would be absurd.
+  function dismissOverlay(e) {
+    if (!narrow.matches || !overlayOpen) return;
+    if (e.type === "keydown") {
+      if (e.key === "Escape") setOutline(false);
+      return;
+    }
+    if (outline.contains(e.target) || outlineReopen.contains(e.target)) return;
+    setOutline(false);
+  }
+  document.addEventListener("pointerdown", dismissOverlay, true);
+  document.addEventListener("keydown", dismissOverlay);
+
+  // Crossing the breakpoint closes an overlay that would otherwise reopen itself as a
+  // rail — and vice versa.
+  const onNarrowChange = () => { overlayOpen = false; applyOutline(); };
+  narrow.addEventListener("change", onNarrowChange);
+
+  // pickSection is what a click in the outline means. A section whose body is already
+  // on screen is one scroll away; anything else needs its page of history fetched
+  // first, which is exactly what "jump to #N" already does.
+  function pickSection(n) {
+    if (!Number.isInteger(n)) return;
+    outline.active = n;
+    // As an overlay it is covering the very thing it just jumped to.
+    if (narrow.matches) setOutline(false);
+    const target = body.querySelector(`[data-section="${n}"]`);
+    if (target) {
+      target.scrollIntoView({ block: "start" });
+      return;
+    }
+    jumpTo(n);
+  }
+
+  // ── which section is being read ────────────────────────────────────────────
+  //
+  // "Where am I?" is answered against a READING LINE — the first line of transcript
+  // the reader can actually see, just under the sticky toolbar — and the section being
+  // read is the one that line falls inside.
+  //
+  // The obvious implementation, an IntersectionObserver over a band with the topmost
+  // intersecting section winning, is wrong in the case that matters: a section scrolled
+  // almost entirely behind the toolbar still pokes into the band, so it keeps the
+  // highlight while the section actually filling the screen does not get it. Measuring
+  // against a line has no such ambiguity — exactly one section contains it.
+  //
+  // Rects have to be read at scroll time (a section's height changes as its markdown
+  // is parsed), so this runs from a scroll listener throttled to one frame. It is a
+  // loop over the ~20 loaded messages, not the whole pad.
+  let activeFrame = 0;
+
+  // readingLine is where the transcript starts being visible: below the toolbar when
+  // it is stuck to the top, otherwise at the top edge of the scrolling area.
+  function readingLine() {
+    const sc = scroller();
+    const top = sc === document.scrollingElement ? 0 : sc.getBoundingClientRect().top;
+    const bar = frame?.toolbar;
+    const barBottom = bar && prefs.stickyBar() ? bar.getBoundingClientRect().bottom : -Infinity;
+    return Math.max(top, barBottom) + 8;
+  }
+
+  function updateActive() {
+    const msgs = [...body.querySelectorAll(".msg")];
+    if (!msgs.length) return;
+    const line = readingLine();
+
+    let pick = null;
+    for (const m of msgs) {
+      const r = m.getBoundingClientRect();
+      if (r.top <= line && r.bottom > line) { pick = m; break; }
+    }
+    // Nothing contains the line — a short pad whose sections all sit below it, or a
+    // scroll position past the last one. Fall back to the nearest section on the side
+    // where the reader is looking, so a pad with two sections still highlights one.
+    if (!pick) {
+      const below = msgs.filter((m) => m.getBoundingClientRect().top > line);
+      pick = below.length
+        ? below.reduce((a, b) => (b.getBoundingClientRect().top < a.getBoundingClientRect().top ? b : a))
+        : msgs.reduce((a, b) => (b.getBoundingClientRect().bottom > a.getBoundingClientRect().bottom ? b : a));
+    }
+    const n = Number(pick.dataset.section);
+    if (n && n !== outline.active) outline.active = n;
+  }
+
+  // At most one recomputation per frame, however many events arrive in it.
+  const scheduleActive = () => {
+    if (activeFrame) return;
+    activeFrame = requestAnimationFrame(() => { activeFrame = 0; updateActive(); });
+  };
+
+  // Capture phase: the transcript scrolls in the layout's container, not the window,
+  // and scroll events do not bubble — so this listener sees EVERY scrollable element
+  // on the page, including the outline's own list. Scrolling the index moves the
+  // index; the transcript has not moved, so the reading line still falls on the same
+  // section and there is nothing to work out. Only a scroller that CONTAINS the
+  // transcript can have changed the answer.
+  const onAnyScroll = (e) => {
+    const t = e.target;
+    if (t && t.nodeType === 1 && !t.contains(body)) return;
+    scheduleActive();
+  };
+  document.addEventListener("scroll", onAnyScroll, true);
+  window.addEventListener("resize", scheduleActive);
+
+  // Sections grow as their markdown is parsed and when one is expanded, which moves
+  // every section below them past the reading line without anyone scrolling.
+  const sizeWatch = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleActive) : null;
+  sizeWatch?.observe(body);
 
   function metaRow() {
     const row = el("div", { class: "pad__meta" },
@@ -334,27 +545,24 @@ export default function mount(outlet, ctx) {
     );
     if (pad.protected) row.append(el("puredashboard-tag", { color: "warning", size: "sm", text: "protected" }));
 
-    const sw = el("puredashboard-switch");
-    sw.label = "Watch this pad";
-    sw.checked = wl.isWatched(ref);
-    sw.addEventListener("change", (e) => {
+    watchSwitch = el("puredashboard-switch");
+    watchSwitch.label = "Watch this pad";
+    watchSwitch.checked = wl.isWatched(ref);
+    watchSwitch.addEventListener("change", (e) => {
       wl.setWatched(ref, e.target.checked);
       toast(e.target.checked ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
     });
-    row.append(sw);
+    row.append(watchSwitch);
     return row;
   }
 
-  function toolbar(authors) {
-    const range = loaded.length
-      ? `showing #${loaded[0].n}–#${loaded.at(-1).n} of ${pad.section_count}`
-      : `${pad.section_count} sections`;
-
+  // buildToolbar creates the controls ONCE and hands back the parts that later have
+  // something to say. Nothing in here is rebuilt afterwards — which is what lets a
+  // person keep typing into "Jump to #" while an agent is posting.
+  function buildToolbar() {
     // The placeholder IS the empty option — adding a second "All authors" entry would
     // put two identical, identically-valued rows in the list.
     const filter = el("puredashboard-select", { placeholder: "All authors" });
-    filter.options = authors.map((a) => ({ value: a, label: a }));
-    filter.value = authorFilter;
     filter.addEventListener("change", (e) => { authorFilter = e.target.value; render(); });
 
     const jump = el("puredashboard-input", { type: "number", placeholder: "Jump to #" });
@@ -369,48 +577,74 @@ export default function mount(outlet, ctx) {
     // then the only thing on screen, and a row of controls with no subject is a row of
     // controls for whatever you last had open.
     const stuckTitle = el("span", { class: "pad__toolbar-title stuck-only", text: pad.title || ref, title: pad.title || ref });
+    const range = el("span", { class: "muted pad__toolbar-range" });
 
-    const bar = el("div", {
-      class: "pad__toolbar",
-      dataset: { sticky: String(prefs.stickyBar()) },
-    },
-      stuckTitle,
-      el("span", { class: "muted pad__toolbar-range", text: range }),
-      el("span", { class: "page__spacer" }),
-      filter,
-      jump,
-      // Labelled with what it DOES, like "Expand all" beside it, rather than with the
-      // state it is in — the current order is visible in the transcript itself.
-      el("button", {
-        type: "button", class: "ghost-btn",
-        text: order === "newest" ? "Oldest first" : "Newest first",
-        title: order === "newest"
-          ? "Read the pad from its first section"
-          : "Read the pad newest section first",
-        onclick: () => {
-          order = order === "newest" ? "oldest" : "newest";
-          prefs.setOrder(order);   // Settings shows the same choice
-          render();
-          // Flipping to oldest-first would otherwise leave the reader at the top of a
-          // long history; the newest turn is what they were just looking at.
-          scrollToNewest();
-        },
-      }),
-      el("button", {
-        type: "button", class: "ghost-btn",
-        text: expandAll ? "Collapse long" : "Expand all",
-        onclick: () => { expandAll = !expandAll; render(); },
-      }),
-    );
-    if (!showingLatest) {
-      bar.append(el("button", { type: "button", class: "ghost-btn", text: "Latest", onclick: () => loadLatest() }));
-    }
+    // No outline toggle here. The rail closes with the « on the rail and opens with
+    // the » left in its place — one control, where the thing it controls is. A second
+    // one in this row said the same thing from across the page, in a button that looked
+    // like the four beside it.
+
+    // Labelled with what it DOES, like "Expand all" beside it, rather than with the
+    // state it is in — the current order is visible in the transcript itself.
+    const orderBtn = el("button", {
+      type: "button", class: "ghost-btn",
+      onclick: () => {
+        order = order === "newest" ? "oldest" : "newest";
+        prefs.setOrder(order);   // Settings shows the same choice
+        render();
+        // Flipping to oldest-first would otherwise leave the reader at the top of a
+        // long history; the newest turn is what they were just looking at.
+        scrollToNewest();
+      },
+    });
+
+    const expandBtn = el("button", {
+      type: "button", class: "ghost-btn",
+      onclick: () => { expandAll = !expandAll; render(); },
+    });
+
+    const latestBtn = el("button", {
+      type: "button", class: "ghost-btn", text: "Latest", hidden: true,
+      onclick: () => loadLatest(),
+    });
+
     // The full menu, for when the header — and with it Copy ref and the Watch switch —
     // has scrolled away. Hidden until that happens, so nothing is on screen twice.
     const menu = padMenuButton({ full: true });
     menu.classList.add("stuck-only");
-    bar.append(menu);
-    return bar;
+
+    const bar = el("div", { class: "pad__toolbar" },
+      stuckTitle, range, el("span", { class: "page__spacer" }),
+      filter, jump, orderBtn, expandBtn, latestBtn, menu,
+    );
+    return { toolbar: bar, filter, jump, range, stuckTitle, orderBtn, expandBtn, latestBtn };
+  }
+
+  // syncToolbar writes the current state onto controls that already exist. Everything
+  // here is a string, a flag or a value — never a new node.
+  function syncToolbar() {
+    const f = frame;
+    f.range.textContent = loaded.length
+      ? `showing #${loaded[0].n}–#${loaded.at(-1).n} of ${pad.section_count}`
+      : `${pad.section_count} sections`;
+
+    // Authors only ever grow, and re-assigning the list would close an open dropdown,
+    // so it is written only when it actually changed.
+    const authors = [...new Set(pad.sections.map((s) => s.author))];
+    if (authors.join(" ") !== authorOptions) {
+      authorOptions = authors.join(" ");
+      f.filter.options = authors.map((a) => ({ value: a, label: a }));
+    }
+    if (f.filter.value !== authorFilter) f.filter.value = authorFilter;
+
+    f.orderBtn.textContent = order === "newest" ? "Oldest first" : "Newest first";
+    f.orderBtn.title = order === "newest"
+      ? "Read the pad from its first section"
+      : "Read the pad newest section first";
+    f.expandBtn.textContent = expandAll ? "Collapse long" : "Expand all";
+    f.latestBtn.hidden = showingLatest;
+    f.toolbar.dataset.sticky = String(prefs.stickyBar());
+    if (watchSwitch) watchSwitch.checked = wl.isWatched(ref);
   }
 
   // ── sticky toolbar ─────────────────────────────────────────────────────────
@@ -424,10 +658,8 @@ export default function mount(outlet, ctx) {
 
   function observeStuck() {
     stuckObserver?.disconnect();
-    if (!prefs.stickyBar() || typeof IntersectionObserver !== "function") return;
-    const sentinel = body.parentElement?.querySelector(".pad__sticky-sentinel");
-    const bar = body.parentElement?.querySelector(".pad__toolbar");
-    if (!sentinel || !bar) return;
+    if (!prefs.stickyBar() || typeof IntersectionObserver !== "function" || !frame) return;
+    const { sentinel, toolbar: bar } = frame;
     stuckObserver = new IntersectionObserver(([e]) => {
       bar.dataset.stuck = String(!e.isIntersecting);
     }, { root: scroller(), threshold: 0 });
@@ -707,6 +939,10 @@ export default function mount(outlet, ctx) {
       scrollToNewest();
     } else if (name === "stickyBar") {
       render();
+    } else if (name === "outline") {
+      if (value === outlineOpen) return;
+      outlineOpen = value;
+      applyOutline();
     }
   });
 
@@ -718,6 +954,17 @@ export default function mount(outlet, ctx) {
     offPrefs();
     // The lazy elements disconnect their own observers as they leave the DOM.
     stuckObserver?.disconnect();
+    holdStop?.();
+    if (activeFrame) cancelAnimationFrame(activeFrame);
+    sizeWatch?.disconnect();
+    document.removeEventListener("scroll", onAnyScroll, true);
+    window.removeEventListener("resize", scheduleActive);
+    narrow.removeEventListener("change", onNarrowChange);
+    document.removeEventListener("pointerdown", dismissOverlay, true);
+    document.removeEventListener("keydown", dismissOverlay);
+    // The outline's hover popup lives on document.body, so it does not leave with the
+    // page's own subtree — the component removes it when it disconnects.
+    outline.remove();
     if (idleHandle && typeof cancelIdleCallback === "function") cancelIdleCallback(idleHandle);
   };
 }
