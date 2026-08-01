@@ -36,6 +36,16 @@ import * as prefs from "/lib/prefs.js";
 import { el, pageHead, skeleton, errorView, copyButton } from "/lib/ui.js";
 import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex } from "/lib/fmt.js";
 
+// Menu icons. Inline SVG, following the library's own rule that a component carries
+// its own icons rather than pulling in an icon set — three glyphs do not justify a
+// dependency, and these are ours, not author input.
+const icon = (body) =>
+  `<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" ` +
+  `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICON_COPY = icon('<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16V4a2 2 0 0 1 2-2h10"/>');
+const ICON_BELL = icon('<path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>');
+const ICON_TRASH = icon('<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>');
+
 // CLAMP_BYTES is where a section stops being rendered in full. Roughly a screenful of
 // prose: below it the whole point is visible, above it the fold plus an explicit
 // expand keeps the conversation's shape readable.
@@ -578,10 +588,41 @@ export default function mount(outlet, ctx) {
       title: "Pad actions", "aria-label": "Pad actions", "aria-haspopup": "menu",
     });
     btn.addEventListener("click", async () => {
+      // Everything the pad's own header offers, in one list. It is what the sticky
+      // toolbar shows once that header has scrolled away, so the menu has to be the
+      // whole set rather than just the destructive leftover — a menu holding nothing
+      // but "Delete" is a menu you learn to avoid opening.
+      const watching = wl.isWatched(ref);
       const picked = await menu(btn, [
-        { label: "Delete this pad", value: "delete", danger: true },
+        { label: "Copy ref", value: "copy", icon: ICON_COPY, shortcut: ref },
+        {
+          label: "Watch this pad", value: "watch", icon: ICON_BELL,
+          // A checkbox item states what IS, so the label stays put while the tick moves.
+          checked: watching,
+          // Checkbox items deliberately keep the menu open (you may be ticking several),
+          // which means the menu's promise does not resolve for them — the work belongs
+          // in onSelect. Closing anyway: there is only one thing to tick here.
+          closeOnSelect: true,
+          onSelect: () => {
+            wl.setWatched(ref, !watching);
+            toast(!watching ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
+            render(); // the header's switch shows the same state
+          },
+        },
+        { separator: true },
+        { label: "Delete this pad", value: "delete", icon: ICON_TRASH, danger: true },
       ], { placement: "bottom-end" });
-      if (picked === "delete") await deletePad();
+
+      if (picked === "copy") {
+        try {
+          await navigator.clipboard.writeText(ref);
+          toast(`Copied ${ref}`, { type: "success" });
+        } catch {
+          toast("The browser blocked the clipboard; the ref is in the page header", { type: "warn" });
+        }
+      } else if (picked === "delete") {
+        await deletePad();
+      }
     });
     return btn;
   }
