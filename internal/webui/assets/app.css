@@ -198,10 +198,13 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
    code. --msg-est (set per message from its byte count) stands in for the height
    while skipped, so the scrollbar does not jump; `auto` lets the browser use the real
    height once it has rendered the message even once.
-   Deliberately NOT applied to the first two messages: they are inside the initial
-   fold, where content-visibility only adds work to the critical path. Unsupported
-   browsers ignore the whole rule and simply render everything, which is correct. */
-.chat > .msg:nth-child(n+3) {
+   Deliberately NOT applied to the two messages the page opens on — they are inside the
+   initial fold, where content-visibility only adds work to the critical path. Which two
+   those are depends on the reading direction: newest-first opens at the top of the
+   transcript, oldest-first at the bottom. Unsupported browsers ignore the whole rule
+   and simply render everything, which is correct. */
+.chat[data-order="newest"] > .msg:nth-child(n+3),
+.chat[data-order="oldest"] > .msg:nth-last-child(n+3) {
   content-visibility: auto;
   contain-intrinsic-size: auto none auto var(--msg-est, 20rem);
 }
