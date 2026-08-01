@@ -32,6 +32,7 @@ import { menu } from "/vendor/puredashboard/menu.js";
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
+import * as prefs from "/lib/prefs.js";
 import { el, pageHead, skeleton, errorView, copyButton } from "/lib/ui.js";
 import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex } from "/lib/fmt.js";
 
@@ -41,24 +42,6 @@ import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex } fr
 const CLAMP_BYTES = 1200;
 
 const PAGE = 20;
-
-// Where the reading direction is remembered. localStorage rather than the URL: it is a
-// property of the reader, not of the pad being linked to.
-const ORDER_KEY = "scratchpad.ui.order";
-
-function readOrder() {
-  try {
-    return localStorage.getItem(ORDER_KEY) === "oldest" ? "oldest" : "newest";
-  } catch {
-    return "newest"; // storage disabled (private mode, or a locked-down browser)
-  }
-}
-
-function writeOrder(v) {
-  try {
-    localStorage.setItem(ORDER_KEY, v);
-  } catch { /* the session still works, it just will not be remembered */ }
-}
 
 export default function mount(outlet, ctx) {
   const ref = ctx.params.ref;
@@ -76,7 +59,7 @@ export default function mount(outlet, ctx) {
   // happened is the common visit — but a pad read from the start is a conversation,
   // and some people want it that way round. The choice is per person, not per pad, so
   // it is remembered across pads and sessions.
-  let order = readOrder();
+  let order = prefs.order();
   // Sections that arrived while this page was open, so they can be flashed. The
   // marker is applied while BUILDING each node rather than by querying the DOM
   // after render(), so it survives a re-render from any source.
@@ -324,11 +307,13 @@ export default function mount(outlet, ctx) {
     outlet.replaceChildren(
       pageHead(pad.title || ref, null, copyButton(ref), padMenuButton()),
       metaRow(),
+      el("div", { class: "pad__sticky-sentinel" }),
       toolbar(authors),
       body,
     );
     // Only now are the bodies in the document and measurable against the viewport.
     observeLazy();
+    observeStuck();
   }
 
   function metaRow() {
@@ -370,8 +355,17 @@ export default function mount(outlet, ctx) {
       else toast(`This pad has sections 1–${pad.section_count}`, { type: "warn" });
     });
 
-    const bar = el("div", { class: "pad__toolbar" },
-      el("span", { class: "muted", text: range }),
+    // The pad's name, shown only once the real title has scrolled away: the toolbar is
+    // then the only thing on screen, and a row of controls with no subject is a row of
+    // controls for whatever you last had open.
+    const stuckTitle = el("span", { class: "pad__toolbar-title stuck-only", text: pad.title || ref, title: pad.title || ref });
+
+    const bar = el("div", {
+      class: "pad__toolbar",
+      dataset: { sticky: String(prefs.stickyBar()) },
+    },
+      stuckTitle,
+      el("span", { class: "muted pad__toolbar-range", text: range }),
       el("span", { class: "page__spacer" }),
       filter,
       jump,
@@ -385,7 +379,7 @@ export default function mount(outlet, ctx) {
           : "Read the pad newest section first",
         onclick: () => {
           order = order === "newest" ? "oldest" : "newest";
-          writeOrder(order);
+          prefs.setOrder(order);   // Settings shows the same choice
           render();
           // Flipping to oldest-first would otherwise leave the reader at the top of a
           // long history; the newest turn is what they were just looking at.
@@ -401,7 +395,33 @@ export default function mount(outlet, ctx) {
     if (!showingLatest) {
       bar.append(el("button", { type: "button", class: "ghost-btn", text: "Latest", onclick: () => loadLatest() }));
     }
+    // The pad's own actions, duplicated into the toolbar for when the header is gone.
+    // Hidden until then, so they never appear twice on screen at once.
+    const menu = padMenuButton();
+    menu.classList.add("stuck-only");
+    bar.append(menu);
     return bar;
+  }
+
+  // ── sticky toolbar ─────────────────────────────────────────────────────────
+  //
+  // The toolbar is sticky, but "am I stuck?" is not something CSS can answer, and the
+  // bar has to look and contain different things once it is: a shadow to lift it off
+  // the transcript, the pad's name, and the pad's actions that scrolled away with the
+  // header. A zero-height sentinel just above it goes out of view exactly when the bar
+  // reaches the top, which is the signal.
+  let stuckObserver = null;
+
+  function observeStuck() {
+    stuckObserver?.disconnect();
+    if (!prefs.stickyBar() || typeof IntersectionObserver !== "function") return;
+    const sentinel = body.parentElement?.querySelector(".pad__sticky-sentinel");
+    const bar = body.parentElement?.querySelector(".pad__toolbar");
+    if (!sentinel || !bar) return;
+    stuckObserver = new IntersectionObserver(([e]) => {
+      bar.dataset.stuck = String(!e.isIntersecting);
+    }, { root: scroller(), threshold: 0 });
+    stuckObserver.observe(sentinel);
   }
 
   // ── lazy markdown ──────────────────────────────────────────────────────────
@@ -630,12 +650,28 @@ export default function mount(outlet, ctx) {
     } catch { /* the next event will resync */ }
   });
 
+  // Settings is a different route, so a change made there has to be pushed here — the
+  // pad page does not re-mount when the person navigates back to it from the same tab.
+  const offPrefs = prefs.onChange((name, value) => {
+    if (disposed || !pad || pad.locked) return;
+    if (name === "order") {
+      if (value === order) return;
+      order = value;
+      render();
+      scrollToNewest();
+    } else if (name === "stickyBar") {
+      render();
+    }
+  });
+
   loadPad();
 
   return () => {
     disposed = true;
     off();
+    offPrefs();
     // The lazy elements disconnect their own observers as they leave the DOM.
+    stuckObserver?.disconnect();
     if (idleHandle && typeof cancelIdleCallback === "function") cancelIdleCallback(idleHandle);
   };
 }

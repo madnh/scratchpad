@@ -117,7 +117,12 @@ a.padgroup__label:hover { color: var(--accent); }
    lands at the bottom of the viewport rather than floating under the content. */
 puredashboard-content { display: flex; flex-direction: column; padding: 0; }
 
-.page { flex: 1 0 auto; padding: 1.25rem; max-width: 72rem; width: 100%; margin: 0 auto; }
+/* The library's shell gives every <main> `overflow: auto`, which makes this element a
+   scrollport of its own — one that never actually scrolls, because the content column
+   outside it does. Anything `position: sticky` inside then anchors to a container that
+   cannot move, i.e. it silently does nothing. Handing the overflow back lets sticky
+   anchor to the element that really scrolls. */
+.page { flex: 1 0 auto; padding: 1.25rem; max-width: 72rem; width: 100%; margin: 0 auto; overflow: visible; }
 
 /* One quiet centred line under the page — not a bar. */
 .foot {
@@ -165,12 +170,36 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
 .pad__meta puredashboard-switch { display: inline-flex; align-items: center; }
 
 /* The section toolbar sticks: on a pad hundreds of sections long, the controls that
-   filter and jump must not scroll away. */
+   filter, jump and reorder must not scroll away — otherwise using them means scrolling
+   back up first, which is the whole reason to have them. */
 .pad__toolbar {
-  position: sticky; top: 0; z-index: 5;
   display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
   padding: .5rem 0; margin-bottom: .5rem;
   background: var(--bg); border-bottom: 1px solid var(--border);
+}
+/* Sticky is a preference (Settings → Reading): someone on a short screen may prefer
+   the extra rows of transcript over controls that are always there. */
+.pad__toolbar[data-sticky="true"] { position: sticky; top: 0; z-index: 5; }
+/* Once it is the only thing left of the header, the bar has to stand on its own: it
+   lifts off the transcript, spans the padding the content column would otherwise cut
+   it at, and takes on the pad's name and actions. */
+.pad__toolbar[data-stuck="true"] {
+  margin-left: -1.25rem; margin-right: -1.25rem;
+  padding-left: 1.25rem; padding-right: 1.25rem;
+  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, .5);
+}
+.pad__sticky-sentinel { height: 1px; margin-bottom: -1px; }
+.pad__toolbar-title {
+  font-weight: 600; font-size: .9rem; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22rem;
+}
+/* Shown only while stuck, so nothing is on screen twice. */
+.pad__toolbar .stuck-only { display: none; }
+.pad__toolbar[data-stuck="true"] .stuck-only { display: inline-flex; }
+/* The range is the first thing to go when the row gets crowded — the title matters
+   more, and the range is repeated at the top of the transcript anyway. */
+@media (max-width: 1100px) {
+  .pad__toolbar[data-stuck="true"] .pad__toolbar-range { display: none; }
 }
 
 /* ── Transcript as a chat ─────────────────────────────────────────────────────
