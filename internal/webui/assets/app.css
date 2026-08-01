@@ -31,7 +31,71 @@ puredashboard-header {
 }
 .ghost-btn:hover { background: var(--panel-2, var(--panel)); }
 
+/* ── Sidebar pad browser ──────────────────────────────────────────────────── */
+
+.sider__pads {
+  border-top: 1px solid var(--border);
+  margin-top: .5rem;
+  padding: .6rem .5rem 1rem;
+  /* The list can outgrow the viewport; scroll it rather than the whole shell, so
+     the section menu above stays reachable. */
+  overflow-y: auto;
+}
+/* Collapsed to a 64px rail there is no room for any of this. */
+puredashboard-sider[collapsed] .sider__pads { display: none; }
+
+.sider__head { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .5rem; }
+/* Full width with a small label, so neither choice gets ellipsised in a narrow rail. */
+#group-mode puredashboard-segmented { display: block; width: 100%; font-size: .74rem; }
+.sider__label {
+  font-size: .7rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.sider__all {
+  display: block; margin-top: .6rem; padding: .25rem .5rem;
+  font-size: .78rem; color: var(--accent); text-decoration: none;
+}
+
+.padgroup + .padgroup { margin-top: .7rem; }
+.padgroup__head {
+  display: flex; align-items: baseline; gap: .4rem;
+  padding: .15rem .5rem .25rem;
+}
+.padgroup__label {
+  font-size: .72rem; font-weight: 600; color: var(--muted);
+  text-decoration: none; text-transform: uppercase; letter-spacing: .04em;
+}
+a.padgroup__label:hover { color: var(--accent); }
+.padgroup__count { font-size: .68rem; color: var(--muted); opacity: .75; }
+
+/* Two lines per entry: which pad, then who and how long ago. That is what makes the
+   sidebar answer "what moved?" without opening anything. */
+.padnav { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.padnav__row { display: flex; align-items: center; gap: .35rem; min-width: 0; }
+.padnav__title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .82rem;
+}
+.padnav__meta {
+  font-size: .68rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.padnav__dot {
+  flex: none; width: .45rem; height: .45rem; border-radius: 50%;
+  background: var(--accent);
+}
+.padlist__empty { padding: .5rem; font-size: .8rem; color: var(--muted); }
+
+/* Entries are two lines tall, so the nav's single-line row height would clip them. */
+.padgroup puredashboard-nav { --pd-nav-item-height: auto; }
+
 .page { padding: 1.25rem; max-width: 72rem; margin: 0 auto; }
+
+/* Cards stacked straight down a page need air between them; the ones inside
+   .stat-row are spaced by that grid's gap instead, so only direct children match. */
+.page > puredashboard-card { display: block; margin-bottom: .9rem; }
+.page > puredashboard-card:last-child { margin-bottom: 0; }
+
 .page__head { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .page__title { font-size: 1.25rem; font-weight: 650; margin: 0; }
 .page__sub { color: var(--muted); font-size: .85rem; }

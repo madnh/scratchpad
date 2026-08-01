@@ -24,6 +24,20 @@ export function relTime(unixSeconds) {
   return "just now";
 }
 
+// shortRel is relTime compressed to a couple of characters ("15m", "4d", "3w"), for
+// the sidebar — a 248px rail has no room for "15 minutes ago" beside a ref.
+export function shortRel(unixSeconds) {
+  if (!unixSeconds) return "—";
+  const diff = Math.max(0, Math.round(Date.now() / 1000) - unixSeconds);
+  if (diff < 60) return "now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
+  if (diff < 2592000) return `${Math.floor(diff / 604800)}w`;
+  if (diff < 31536000) return `${Math.floor(diff / 2592000)}mo`;
+  return `${Math.floor(diff / 31536000)}y`;
+}
+
 // absTime is the exact local timestamp, used as the title of a relative one.
 export function absTime(unixSeconds) {
   if (!unixSeconds) return "";

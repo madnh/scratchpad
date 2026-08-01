@@ -7,15 +7,14 @@
 import { Router } from "/vendor/puredashboard/router.js";
 import { toast } from "/vendor/puredashboard/toast.js";
 import "/vendor/puredashboard/layout.js";
-import "/vendor/puredashboard/nav.js";
 import "/vendor/puredashboard/skeleton.js";
 
 import { api } from "/lib/api.js";
 import { connect, onPad, onStatus } from "/lib/bus.js";
+import { initSidebar } from "/lib/sidebar.js";
 import * as notify from "/lib/notify.js";
 import * as wl from "/lib/watchlist.js";
 
-const nav = document.getElementById("nav");
 const conn = document.getElementById("conn");
 const themeBtn = document.getElementById("theme-btn");
 const notifyBtn = document.getElementById("notify-btn");
@@ -57,43 +56,6 @@ notifyBtn.addEventListener("click", async () => {
   syncNotifyButton();
 });
 
-// ── Sidebar ──────────────────────────────────────────────────────────────────
-// Rebuilt whenever the set of projects changes; the watch list deliberately does NOT
-// appear here — watching is a per-pad control on the pads table and the pad page.
-let projects = [];
-
-function renderNav() {
-  const items = [
-    { label: "Overview", href: "#/" },
-    { label: "Pads", href: "#/pads" },
-  ];
-  if (projects.length) {
-    items.push({
-      label: "Projects",
-      children: projects.map((p) => ({
-        label: p.name,
-        href: `#/projects/${encodeURIComponent(p.name)}`,
-        badge: String(p.pad_count),
-      })),
-    });
-  }
-  items.push({ label: "Settings", href: "#/settings" });
-  nav.items = items;
-  nav.current = location.hash || "#/";
-}
-
-async function refreshProjects() {
-  try {
-    const data = await api.projects();
-    projects = data.projects || [];
-  } catch {
-    projects = [];
-  }
-  renderNav();
-}
-
-window.addEventListener("hashchange", () => { nav.current = location.hash || "#/"; });
-
 // ── Brand ────────────────────────────────────────────────────────────────────
 api.status()
   .then((s) => {
@@ -106,11 +68,10 @@ api.status()
 // The shell handles the ANNOUNCEMENT side (toast + OS notification + sidebar counts).
 // Pages subscribe separately for their own in-place updates.
 connect();
+initSidebar();
+
 onPad((ev) => {
-  if (ev.type === "removed") {
-    refreshProjects();
-    return;
-  }
+  if (ev.type === "removed") return;
   const watching = wl.isWatched(ev.ref);
   const scope = wl.notifyScope();
   const onPadPage = location.hash === `#/pads/${ev.ref}`;
@@ -123,11 +84,6 @@ onPad((ev) => {
   const who = ev.last_author || "someone";
   toast(`${ev.ref}: ${who} posted section ${ev.section_count}`, { type: "info" });
   notify.notify(ev);
-});
-
-// A new pad in a new project should show up in the sidebar without a reload.
-onPad((ev) => {
-  if (ev.type === "changed" && !projects.some((p) => p.name === ev.project)) refreshProjects();
 });
 
 // ── Router ───────────────────────────────────────────────────────────────────
@@ -153,5 +109,4 @@ const router = new Router({
   },
 });
 
-refreshProjects();
 router.start();

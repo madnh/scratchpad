@@ -40,8 +40,19 @@
   </puredashboard-header>
 
   <puredashboard-layout has-sider>
-    <puredashboard-sider collapsible breakpoint="md" id="sider">
+    <puredashboard-sider collapsible breakpoint="md" width="248" id="sider">
       <puredashboard-nav id="nav"></puredashboard-nav>
+
+      <!-- The pad browser: the sidebar's real content. Grouped by recency or by
+           project, and kept in step with the live stream. -->
+      <div class="sider__pads">
+        <div class="sider__head">
+          <span class="sider__label">Pads</span>
+          <div id="group-mode"></div>
+        </div>
+        <div id="padlist"></div>
+        <a class="sider__all" id="padlist-footer" href="#/pads"></a>
+      </div>
     </puredashboard-sider>
 
     <puredashboard-content>
