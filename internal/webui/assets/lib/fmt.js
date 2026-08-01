@@ -58,6 +58,45 @@ export function bytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// ── untrusted display text ────────────────────────────────────────────────────
+//
+// Titles, author handles and section prose are written by AGENTS, so they are
+// untrusted input. Going in through textContent stops them being markup, but not
+// being a decoy: a string containing U+202E renders REVERSED, so a title can display
+// as something other than what it contains, and zero-width characters can hide the
+// difference between two entries entirely. Strip both before showing any of it.
+//
+// \t and \n survive the control-character class so a multiline excerpt keeps its
+// shape; the single-line mode below collapses them along with the rest.
+const UNSAFE_TEXT =
+  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+
+/**
+ * safeText cleans agent-written text for display.
+ * @param {string} raw
+ * @param {{multiline?: boolean}} opts multiline keeps line breaks; the default
+ *   collapses everything onto one line, for a title in a single-line row.
+ */
+export function safeText(raw, { multiline = false } = {}) {
+  const cleaned = String(raw ?? "").replace(UNSAFE_TEXT, " ");
+  if (!multiline) return cleaned.replace(/\s+/g, " ").trim();
+  return cleaned
+    .split("\n")
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+    .join("\n")
+    .trim();
+}
+
+/**
+ * cutChars shortens a string to `max` CHARACTERS — code points, not UTF-16 units, so
+ * an emoji or a non-BMP character is never split in half and left as a lone surrogate.
+ */
+export function cutChars(s, max) {
+  const chars = Array.from(String(s ?? ""));
+  if (chars.length <= max) return String(s ?? "");
+  return `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+}
+
 // ── agent identity ────────────────────────────────────────────────────────────
 //
 // Authors are agent handles, not people's names, so initials-of-a-full-name rules
