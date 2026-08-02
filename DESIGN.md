@@ -7,6 +7,302 @@ See IDEA.md for the overall concept.
 - The primary entity is named **`pad`** (a "file" in IDEA.md) — this avoids clashing with the word "file", which is overloaded in the tool context. On disk it is still a file `<project>/<padid>.md`.
 - **`section`**: a single post within a pad, numbered incrementally starting from 1.
 - **Ref** (the fully-qualified identifier): `<project>-<padid>`, e.g. `projectx-abc123`.
+- **`stream`**: the class a section belongs to — `message` (the conversation) or `task` (the work ledger). Declared per section by the `kind` metadata key; absent means `message`. Streams share one file, one numbering and one append-only sequence, but each defines its own rules.
+- **`task`**: a unit of work opened by one section and moved by later ones. It has its own number, written `T<n>`, in a numbering space separate from section numbers (written `§<n>`).
+
+## Section metadata — routing, threading, tasks
+
+With two agents a pad simply *is* the conversation: every message is for the other one,
+about the last one, and waking on any new section is exactly right. At five agents in
+one pad those collapse into four separate questions, and answering them with one
+mechanism is what makes a long pad unreadable:
+
+| Question | Answered by |
+|---|---|
+| Who is this **for**? | `to` |
+| Who does it **wake**? | the wait selectors — deliberately NOT `to` |
+| What is it **about**? | `re` |
+| Where is the team **at**? | the task fold |
+
+### The metadata line
+
+Every section already carries a timestamp comment directly beneath its header. That
+line becomes the section's metadata line, in the `key: value; key: value` shape the pad
+header line has always used:
+
+```markdown
+# 12 - pm - Order API contract
+<!-- ts: 2026-08-02T10:30:00Z; kind: task; task: 3; to: ios, android; status: open -->
+```
+
+| Key | Meaning | Absent means |
+|---|---|---|
+| `ts` | timestamp — always present, always first | — |
+| `kind` | which stream: `message` \| `task` | `message` |
+| `to` | comma-separated authors this section is addressed to | broadcast (message); **invalid** (task open) |
+| `re` | the section number this one answers | not a reply |
+| `task` | the task number this section concerns | unrelated to any task |
+| `status` | `open` \| `wip` \| `blocked` \| `done` \| `dropped` | no status change |
+
+- Parsing is **forward-compatible**: an unknown key is ignored, never an error, so a
+  key added later does not break a reader that predates it.
+- `to` entries are validated like authors (single line, no `" - "`, no `;`) and bounded
+  (see Limits) — a new key does not get to be an unbounded resource.
+- **Addressing is advisory, never access control.** Everyone can always read
+  everything; `to` decides who is *woken*. That split is the entire point, and it is
+  why `to` is not a permission.
+- `re` names a section whatever its kind — **one parent, not a tree**. A pad is a
+  linear transcript, and a tree would fight both the numbering and the append-only
+  format for a distinction agents rarely need.
+- **`re` implies `to`**: replying to a section addresses its author without having to
+  repeat it.
+
+### Backwards compatibility, in both directions
+
+- **Old pads on the new binary**: every existing section has a bare `ts` line and no
+  other key, so it parses as a broadcast `message` with no `re`. Behaviour is
+  unchanged and **no migration is needed**.
+- **New pads on an older binary**: today's parser trims the prefix and suffix and runs
+  `time.Parse` over the whole remainder, so `ts: …; to: backend` fails to parse and the
+  line falls through into the body. The section keeps its boundary, number, author and
+  title; it loses its timestamp and shows one comment line as text. That degradation is
+  **accepted**, and the pad format stays `scratchpad v1`.
+- Consequently the new parser must **cut on `"; "` first** and parse `ts` from the
+  first field only.
+
+### Why not put `kind` in the section header
+
+`# <n> - <author> - <title>` is the one line whose exact shape defines a section
+boundary, and the parser accepts only `# <digits> - `. A header like `# task:12 - …`
+fails that regexp on an older binary, drops into the body, and **loses the section
+boundary** — a 600-section pad reads as a handful of sections and turn state comes out
+wrong. That failure is silent and lands on the single piece of state every agent relies
+on, whereas the metadata-line degradation above is visible and harmless.
+
+The tempting part of such a change is that it looks additive (`^# (?:(\w+):)?(\d+) - `
+still reads old files). It is not: the damage is in the other direction. If `kind` ever
+moves to the header it must come with a `v2` bump that makes older binaries *refuse*
+the file — never as an "optional additive" change.
+
+## Streams — one sequence, two sets of rules
+
+Physically there is **one** append-only sequence: one numbering, one file, one flock.
+`kind` separates streams *logically*.
+
+That is not a compromise, it is what keeps appends O(1). In a single file only one
+region can be at the end, so a physical `# tasks` / `# messages` split would force a
+read-modify-write of the whole file on every update to whichever region is not last.
+A safe rewrite means temp-file + rename, and rename swaps the inode — while `openPad`
+takes its flock on the pad file itself, so a concurrent writer holding the old lock
+would write into a ghost. Logical streams also extend for free: a future `kind:
+decision` is a new *value*, not a new region — no format migration, no new rewrite path.
+
+Each stream carries its own rules, which is the property a physical split was wanted
+for in the first place:
+
+| | `message` | `task` |
+|---|---|---|
+| Counts for the turn rule | yes | **no** |
+| `to` absent | broadcast | **invalid** on a task open |
+| Wakes `wake_for: me` | yes | only via the task selectors |
+| Changed by | nothing — append a reply with `re` | nothing — append a status event |
+
+The turn rule therefore reads: **the last section whose kind is `message` holds the
+turn.** Still fully derived, still no state outside the file — the derivation just
+filters by kind before taking the last element. Consequence: a coordinator can open
+five tasks in a row without hitting `not_your_turn`, and a progress report never steals
+or grants a turn.
+
+**Honest limit.** Like the turn rule itself, every rule here — ownership included — is
+a **guard rail, not security**. Identity is self-declared (see Identity), so a
+determined agent can label a message as a task or claim any author. These rules stop
+accidents and drift between cooperating agents, which is what they are for.
+
+## Tasks — an append-only ledger, folded
+
+A task is not a row that gets edited. It is **opened** by one section and **moved** by
+later sections, and its current state is a **fold** over those events — exactly as turn
+state is a fold over the transcript. That is what lets a work ledger live in an
+append-only file behind an append-only MCP surface: opening, updating and closing a
+task are all ordinary `pad_post` calls carrying metadata, and **no mutating tool is
+added**.
+
+```markdown
+# 12 - pm - Order API contract
+<!-- ts: 2026-08-02T10:30:00Z; kind: task; task: 3; to: ios, android; status: open -->
+Investigate the crash on resume — both platforms.
+
+# 41 - ios - iOS: background timer
+<!-- ts: 2026-08-02T14:05:00Z; kind: task; task: 3; status: done -->
+Caused by the background timer; fixed in abc123.
+
+# 47 - backend - Anything I can help with here?
+<!-- ts: 2026-08-02T15:10:00Z; task: 3; to: android -->
+```
+
+§47 shows the two layers: `kind: task` marks a section as part of the task's **record**,
+while a bare `task:` merely **cross-references** it. Without that split every remark
+about a task would land in the ledger, and the board would grow back to the size of the
+pad — which is the problem the board exists to solve.
+
+### Numbering
+
+Task numbers are their **own** space, dense and starting at 1, allocated the way
+section numbers already are: `max(existing task numbers) + 1`, computed under the
+exclusive flock `Post` already holds, in the metadata scan it already performs. Nothing
+is stored — the counter is derived, so a hand-deleted section simply frees its number
+back, matching the existing rule for turn state.
+
+Reusing the opening section's number as the task id was considered and rejected: it
+makes task ids sparse and unmemorable (`T288`), and it conflates *which task this
+concerns* with *what I am replying to* — two genuinely independent facts, as §47 shows.
+Numbers are **never recycled**, so an old `task: 3` reference can never come to mean a
+different task.
+
+Everything user-facing writes `T3` for tasks and `§12` for sections: two number spaces
+appear on the same screen, so they must never look alike.
+
+### Ownership
+
+| Role | Who | May |
+|---|---|---|
+| **Owner** | the latest `to` set | report on **their own slice** (`wip` / `blocked` / `done`) |
+| **Opener** | the author of the opening section | reassign (`to`), `dropped`, force-close |
+
+A task open without `to` is invalid: **a task must have an owner.** The opener is
+deliberately *not* an owner — under the per-owner fold below, the owner set means
+precisely "the parties whose completion is required", and a coordinator is not one of
+them. But without the opener's management rights a task assigned to an agent that never
+comes back would be immortal, so those rights are separated rather than dropped.
+Enforcement lives in `Post`, under the flock, next to the turn rule — never in a
+surface. Violations return `not_task_owner`.
+
+### The two-level fold
+
+A task may have several owners, and that is the common case: one investigation covering
+iOS and Android is one piece of work, and splitting it into parallel tasks means two
+threads whose statuses have to be reconciled by hand.
+
+Multi-owner is only honest if completion is tracked **per owner**. With a naive
+last-event-wins fold, the first `done` closes the task and the other owner's work
+disappears from the board — a correctness bug, not a cosmetic one. No extra key is
+needed to fix it, because **every event already records its author**:
+
+1. **Per owner** — that owner's state is the last `kind: task` event *written by them*.
+2. **Aggregate** — `done` only when every current owner is `done`; a `dropped` or
+   force-close by the opener overrides; otherwise the task is open / wip / blocked.
+
+| Field | Taken from |
+|---|---|
+| Title | the **opening** section's title, fixed |
+| Owners | the latest `to` on a `kind: task` event |
+| Status, per owner | that owner's last `kind: task` event |
+| Outcome | the body of the last event |
+| History | the whole event chain |
+
+The title rule is load-bearing: an update's section title describes *the update*
+("iOS: background timer"), not the task. Folding the latest title would silently rename
+a task on every progress report.
+
+Two properties fall out. **History is free** — a mutable table would say T3 is `done`
+and nothing more, while the chain says it went open → wip → done, who moved it, when,
+and what blocked it; across 600 sections that chain *is* the project narrative, which is
+the whole reason to want a board. And **watching a task is free** — because task events
+do not count for the turn, an agent can be woken by T5 reaching `done`, read it, and go
+back to waiting without the turn rule obliging it to say anything.
+
+A hand-deleted opening section leaves an **orphaned** task: status events with no title
+or owner. It renders as orphaned and is never a parse error, matching the existing rule
+that a vanished file is simply a deleted pad.
+
+## Waking — reading is universal, waking is selective
+
+Today `wait` returns on **any** new section, so in a five-agent pad every agent is woken
+by every exchange, including ones between two other agents. Three agents pay a context
+bill for a conversation belonging to two. The fix separates two things that were never
+the same: **reading stays universal** — the pad is fully readable by everyone, always —
+and only **waking** is filtered.
+
+Selectors form a union: a comma list on the CLI, an array over MCP.
+
+| Selector | Wakes on |
+|---|---|
+| `any` | any new section — today's behaviour, and the default |
+| `me` | `to` contains me ∪ `re` points at a section I wrote ∪ broadcast |
+| `mine` | a task event on a task I own |
+| `task:<n>` | a task event on that task, whoever owns it |
+| `tasks` | any task event — for a coordinator |
+
+Broadcast waking `me` is deliberate: a section with no `to` means "the whole team", and
+should behave that way. It is also the migration path — in a pad written before this
+change *everything* is a broadcast, so `me` behaves exactly like `any` and grows quieter
+as agents start addressing. The incentive to address lands on the coordinator, which is
+where it belongs.
+
+`mine` is not covered by `me`: the section that *opens* a task carries `to`, but a
+co-owner's progress update usually does not repeat it — and that update is exactly what
+a co-owner needs to see. `task:<n>` deliberately ignores ownership: an agent blocked on
+someone else's task needs to know when it lands.
+
+The selector is named `wake_for` (`--wake-for`) rather than `for`, because the one thing
+it must not be confused with is what the caller may *read*.
+
+**Catch-up is never filtered.** Whatever wakes a waiter, the result carries the bodies
+of the matching sections *and* the table of contents of every section skipped since
+`since`. Waking selectively must never mean waking blind: an agent answering from stale
+context is the exact failure this feature exists to prevent, and a silent gap would
+cause it.
+
+`since` remains a **section** number regardless of kind — task events advance it even
+when they wake nobody.
+
+**No subscription state exists.** A waiter passes its selectors on every call and the
+store evaluates a predicate; there is no subscriber table to keep, expire or clean up.
+
+## Knowing whether work is moving
+
+An agent assigns work to an agent that is not watching the pad, and waits forever. The
+obvious fix is presence — "who is currently waiting" — and it is the wrong one.
+
+Presence is ephemeral, mutable state that an append-only transcript cannot express: a
+crashed agent never appends "I left". Worse, it answers the wrong question and lies in
+both directions — an agent implementing for two hours is not inside `wait` and shows as
+absent, while an agent parked in `wait` with the wrong selector shows as present. What
+matters is not whether a process is blocked in a syscall; it is whether the work moved.
+And *that* is derivable from the transcript itself:
+
+| Addressed | Acknowledged when |
+|---|---|
+| a message `to: X` | X posts any later section — X is alive and reading |
+| a task owned by X | X posts a `kind: task` event **on that task** |
+
+The task rule is stricter on purpose: an owner can be alive, busy talking about
+something else, and still sitting silently on T7. `status: wip` is the "I have this"
+signal, and this is the rule that gives it a job.
+
+Three layers, all derived, all working over TCP:
+
+1. **At post time.** `Post` already parses the pad's metadata under the flock, so the
+   answer is in hand: posting to an addressee who has been silent for a long time
+   returns a warning beside the successful post — *"android has not posted since §12
+   (4h ago); nobody may be listening"*. This is the immediacy presence was wanted for,
+   at no cost and with no state, delivered at the moment the sender can still act on it.
+2. **At wait time.** `--unacked <duration>` puts a floor under the wait: it also returns
+   when something this author addressed has gone unacknowledged that long, naming what
+   is stuck. This is what bounds a wait that would otherwise never end.
+3. **On demand.** `pad who` renders the board: per author, their last section and its
+   age, plus what they owe.
+
+The real fix sits upstream of all three and lives in the docs, not the code: **an agent
+must not end its turn without arming a background `pad wait`.** That discipline is only
+affordable once waking is filtered — an always-armed wait is expensive today precisely
+because it fires on everything — which is why the selectors ship before tasks do.
+
+If presence is ever built regardless, build it on `flock`: the kernel releases it on
+process death, so it is crash-proof with no heartbeat and no staleness. Keep it out of
+the pad files, and document its two limits plainly — it cannot see an agent connected
+over TCP from another machine, and it cannot tell "busy" from "gone". It is a
+diagnostic, never something an agent bases a decision on.
 
 ## MCP tools
 
@@ -18,13 +314,14 @@ Following the convention: names are `<entity>_<verb>` in snake_case, and **the s
 |---|---|
 | `pad_create` | Create a new pad + post section 1 |
 | `pad_post` | Post a new section (turn-based) |
-| `pad_get` | Compact state: TOC + turn — does NOT return content, cheap to poll |
+| `pad_get` | Compact state: TOC + turn + participants — does NOT return content, cheap to poll |
 | `pad_read` | Read section content |
-| `pad_wait` | Long-poll waiting for a new section (timeout capped) |
+| `pad_wait` | Long-poll waiting for a section that matches the caller's selectors (timeout capped) |
+| `pad_tasks` | The derived task board, or one task with its thread |
 | `pad_list` | List pads |
 | `project_list` | List projects + pad count |
 
-There is no `pad_delete` / `pad_update` over MCP: a pad is append-only, and deletion/cleanup is the user's job via the CLI.
+There is no `pad_delete` / `pad_update` over MCP: a pad is append-only, and deletion/cleanup is the user's job via the CLI. **Tasks do not change this** — `pad_tasks` is read-only, and a task is opened, moved and closed by `pad_post` carrying metadata, so the agent surface stays append-only in the true sense.
 
 ### `pad_create`
 
@@ -40,40 +337,69 @@ output: { ref, project, pad_id, section: 1, next: 2, password?, turn: {...} }
 ### `pad_post`
 
 ```
-input:  { ref, author, title, content, password? }
-output: { ref, section, next, turn: { last_author, blocked: [author], waiting_for: "any other" } }
+input:  { ref, author, title, content, password?,
+           to?: [author], re?: n,
+           kind?: "message" | "task",
+           task?: n | "new", status?: "open"|"wip"|"blocked"|"done"|"dropped" }
+output: { ref, section, next, task?, turn: {...}, warnings?: [string] }
 ```
 
-- Enforces the turn rule: if the author of the last section == `author` → a clear error
-  `"not your turn: you posted section N; wait for another agent (use pad_wait)"`. A timeout or other error does not consume a turn.
+- Enforces the turn rule **against the last `message` section**: if its author ==
+  `author` → a clear error `"not your turn: you posted section N; wait for another
+  agent (use pad_wait)"`. A `kind: task` section is exempt and does not change whose
+  turn it is. A timeout or other error does not consume a turn.
 - Returns the section id just posted + the next id (matching IDEA.md).
+- `task: "new"` opens a task: the server allocates the next task number under the same
+  lock and returns it as `task`. `to` is then **mandatory** — a task must have an owner.
+  `task: <n>` references an existing task.
+- A `kind: task` section carrying `status` must come from an owner (their own slice) or
+  the opener (`dropped` / reassign / force-close), else `not_task_owner`.
+- `warnings` is advisory and never fails the post — it carries the "nobody may be
+  listening" notice when an addressee has been silent (see *Knowing whether work is
+  moving*). A post that succeeded must never look like it failed.
 
 ### `pad_get`
 
 ```
-input:  { ref, password? }
+input:  { ref, password?, author?, kind? }
 output: { ref, project, created_ts, section_count, last_author, last_ts,
-          sections: [ { n, author, title, ts } ] }   # TOC only, no content
+          turn: {...},
+          sections: [ { n, author, title, ts, kind?, to?, re?, task?, status? } ],
+          participants: [ { author, last_section, last_ts, unacked: [...] } ],
+          inbox?: { unread: [n], unacked: [...] } }   # TOC only, no content
 ```
 
 Compact by design: cheap, transfers no content. The agent looks at the TOC and then decides which section to read.
 
+- The TOC carries each section's routing metadata, which turns it from a list of titles
+  into a **map of the conversation**: an agent returning after a long absence can see
+  who addressed whom and which sections belong to its own thread, then read only those.
+  For a 600-section pad that is the difference between one cheap call and a full read.
+- `kind` filters the TOC to one stream.
+- `author` adds `inbox`: sections addressed to that author since their own last post,
+  plus what they owe. Derived, not stored — "unread" means "you have not posted since
+  it", which is the observable fact and the one that matters.
+
 ### `pad_read`
 
 ```
-input:  { ref, password?, section?, since? }
-output: { ref, sections: [ { n, author, title, ts, content } ] }
+input:  { ref, password?, section?, since?, kind?, task? }
+output: { ref, sections: [ { n, author, title, ts, content, kind?, to?, re?, task?, status? } ] }
 ```
 
 - `section` = read exactly 1 section; `since` = every section with n > since; omitting both = the entire pad.
+- `kind` and `task` narrow the same selection: `task: 3` reads that task's thread — the opening section and everything carrying `task: 3` — which is how an agent reads about one piece of work without reading the pad around it.
 - Content is capped at 64KB/section (see Limits), so returning it through the tool result is valid (text, bounded — not out-of-band file bytes).
 
 ### `pad_wait`
 
 ```
-input:  { ref, since, timeout_s?, password? }
-output: { ref, changed: bool, section_count, last_author,
-          sections?: [ { n, author, title, ts, content } ] }   # the new sections if changed
+input:  { ref, since, timeout_s?, password?,
+           author?, wake_for?: ["any"|"me"|"mine"|"tasks"|"task:<n>"], unacked_s? }
+output: { ref, changed: bool, reason?: "match" | "unacked", section_count, last_author,
+          sections?: [ { n, author, title, ts, content, ... } ],   # the MATCHING sections
+          skipped?:  [ { n, author, title, ts, ... } ],            # TOC of everything else
+          unacked?:  [ { what, to, since_section, age_s } ] }
 ```
 
 Following a standard long-poll pattern:
@@ -82,6 +408,36 @@ Following a standard long-poll pattern:
 - Internally it re-checks periodically (~750ms), it does not push.
 - **A timeout is not an error**: it returns `changed: false` + compact state — the agent distinguishes "time ran out" from "broken", and calls again itself if it wants to keep waiting.
 - The description teaches the agent: "Use this instead of polling pad_get in a loop".
+- `wake_for` defaults to `["any"]` — today's behaviour, so an existing caller is
+  unaffected. Anything other than `any` requires `author`; the selectors are a union
+  (see *Waking*). The predicate is evaluated **in the store**, not by the caller:
+  filtering after the round-trip would save no context, which is the entire point.
+- `skipped` is always the full TOC of sections above `since` that did not match. Waking
+  is selective; **catch-up never is**.
+- `unacked_s` adds a second way to return: something this author addressed has gone
+  unacknowledged that long. `reason` says which condition fired, so an agent that wakes
+  to `unacked` knows to escalate to the user rather than to keep waiting.
+
+### `pad_tasks`
+
+```
+input:  { ref, password?, task?: n, open_only?: bool }
+output: { ref, tasks: [ { task, title, status, opener, opened_section, opened_ts,
+                          owners: [ { author, status, last_section, last_ts } ],
+                          last_section, last_ts, outcome?, orphaned?: bool } ],
+          thread?: [ { n, author, title, ts, kind, status? } ] }   # when task is given
+```
+
+The derived board — the answer to "where is the team at" without reading the pad. It is
+a fold over the metadata, so it costs one metadata scan and never materialises a single
+section body; that is what makes it affordable to call often on a 600-section pad.
+
+`task: <n>` returns that task plus its `thread`: the opening section and every section
+carrying `task: <n>`, in order — the per-task transcript an agent can read instead of
+the pad. `owners` carries the per-owner status, so a multi-owner task reports "ios done,
+android outstanding" rather than collapsing to one misleading verdict.
+
+There is no `pad_task_update`. A task moves by `pad_post`.
 
 ### `pad_list`
 
@@ -98,7 +454,10 @@ The author is always **self-declared, from a single source**: the `author` param
 
 ### Common error semantics
 
-- `not_your_turn` — includes who is currently blocked, and suggests `pad_wait`.
+- `not_your_turn` — includes who is currently blocked, and suggests `pad_wait`. Derived from the last `message` section only.
+- `not_task_owner` — names the task's current owners and its opener, so the caller can see whether to ask an owner or the opener.
+- `no_such_task` — `task: <n>` references a task this pad never opened.
+- `task_needs_owner` — a task was opened without `to`.
 - `pad_not_found` — the ref is wrong / it was deleted by the user.
 - `unauthorized` — the pad has a password that is missing or wrong (a single unified message, not distinguishing the two cases).
 - `content_too_large`, `invalid_project_name`, `invalid_ref` — validation, with a message that states the rule clearly.
@@ -112,6 +471,12 @@ The author is always **self-declared, from a single source**: the `author` param
 | Sections / pad | 1000 |
 | Pads / project | 1000 |
 | `timeout_s` of `pad_wait` | cap 300s |
+| `to` targets per section | 20 |
+| `wake_for` selectors per call | 20 |
+
+Tasks need no limit of their own: every task requires a section to open it, so
+`max_sections_per_pad` already bounds them. Adding a config field that can never bind
+would be one more thing to explain in `config.md` for no gain.
 
 ## CLI
 
@@ -132,9 +497,14 @@ scratchpad
 └── pad
     ├── create   --project <p> --as <author> --title <t> [--protect] [content | -]
     ├── post     <ref> --as <author> --title <t> [--password] [content | -]
-    ├── get      <ref>                    # TOC + turn (compact)
-    ├── read     <ref> [--section N | --since N]
+    │              [--to a,b] [--re N]
+    │              [--task-open | --task N] [--status open|wip|blocked|done|dropped]
+    ├── get      <ref> [--as <author>] [--kind message|task]   # TOC + turn (compact)
+    ├── read     <ref> [--section N | --since N] [--kind K] [--task N]
     ├── wait     <ref> --since N [--timeout 10m]   # for a background CLI wait
+    │              [--as <author>] [--wake-for any|me|mine|tasks|task:N,…] [--unacked 15m]
+    ├── tasks    <ref> [--task N] [--open]         # the derived board
+    ├── who      <ref>                             # last activity + what each author owes
     ├── list     [--project <p>]
     ├── delete   <ref>                    # confirm with a human, --yes for automation
     └── purge    [--project <p>] --older-than <dur>   # bulk cleanup, confirm/--yes
@@ -144,6 +514,17 @@ Notes:
 
 - `content` is taken via an arg or stdin (`-`) — this avoids shell-escaping issues with long content.
 - `--as` defaults from env `SCRATCHPAD_AUTHOR` (convenient to set once for a whole agent session).
+- `--task-open` allocates the next task number and prints it (`opened T3`); it requires
+  `--to`. `--task N` moves an existing one. Both imply `kind: task`.
+- `--wake-for` defaults to `any`, so an existing script or skill keeps working
+  unchanged. It is spelled `--wake-for`, not `--for`, because the distinction it
+  encodes — what wakes you versus what you may read — is the one a short name would blur.
+- `pad tasks` and `pad who` are **read-only derived views**; they take the same shared
+  flock as any read and add no state. Both are equally useful to a person at a terminal
+  and to a coordinating agent, which is why they are CLI commands rather than UI-only.
+- `pad who` exists because presence does not: it reports *last activity and outstanding
+  acknowledgements*, which are derivable, instead of *who is currently blocked in a
+  wait*, which is not (see *Knowing whether work is moving*).
 - **`pad wait` via the CLI is not capped at 300s** (`--timeout` is arbitrary, defaulting to infinite until SIGINT) — this is exactly wait style #2 in IDEA.md: the agent runs it in the background (`run_in_background`), the command exits when a new section appears → waking the agent. Exit codes: 0 = a new section exists (printed to stdout), 3 = timed out. The new MCP `pad_wait` needs the cap because of the MCP client's per-request timeout.
 - `delete`/`purge` follow the interactivity convention: prompt with a human (TTY), fail-fast with a process, `--yes`/`--non-interactive` to override; there is a root flag `--non-interactive` + env `SCRATCHPAD_NONINTERACTIVE`.
 - The `pad *` commands operate **directly on disk** through a shared storage layer (flock when writing) — no running server is needed. The server and CLI share the same storage package, so they share the same lock discipline.
@@ -251,9 +632,20 @@ only, reject a non-loopback `Host` (the DNS-rebinding defence — a page resolvi
 own name to 127.0.0.1 still sends its own `Host`), require a same-origin `Origin` on
 state-changing methods, and serve a strict CSP (`script-src 'self'`).
 
+With five agents in one pad the person's role changes: they are no longer a spectator
+of a two-way transcript but the one who **intervenes when coordination breaks** — a
+stale agent, an unclaimed task, an assignment nobody answered. So the UI's first job is
+not "render the transcript" but **"show where the team is stuck"**; the transcript is
+what they open *after* they know where to look.
+
 **Read-only for pad content.** A person watching a conversation is not a participant
 in it: posting needs an author identity and would have to obey the turn rule, which
-belongs to the agents' surfaces. Deleting a pad is available — **one at a time**, with
+belongs to the agents' surfaces. **Tasks do not open a hole in this**: a task event has
+an author too, and now an ownership check as well — a "close T3" button would have to
+post as *somebody*, and the UI deliberately has no identity. The escape hatch already
+exists and is in the right place: a person has a shell, so `pad post --as <them>
+--task 3 --status dropped` is how they intervene. The UI is for looking; the CLI is for
+touching. Deleting a pad is available — **one at a time**, with
 no row selection and no bulk endpoint: wiping a batch of transcripts is irreversible,
 and `pad purge` already does that where a person states an age threshold and reads the
 victim list before confirming.
@@ -290,12 +682,28 @@ reconnects by itself, so a server restart heals with no client retry logic.
 | `GET /api/status` | deployment, store path, watcher mode (`push`/`rescan`) |
 | `GET /api/projects` | projects + pad count + last activity |
 | `GET /api/pads[?project=]` | pad metadata listing |
-| `GET /api/pads/{ref}` | header + turn + full TOC, **no section bodies** |
-| `GET /api/pads/{ref}/sections[?before=&limit=&section=]` | one page of bodies |
+| `GET /api/pads/{ref}` | header + turn + participants + full TOC (with routing metadata), **no section bodies** |
+| `GET /api/pads/{ref}/sections[?before=&limit=&section=&kind=&task=]` | one page of bodies |
 | `GET /api/pads/{ref}/sections/{n}/preview` | the opening excerpt of one section |
+| `GET /api/pads/{ref}/tasks[?task=]` | the derived board, or one task |
+| `GET /api/stuck` | across all pads: assignments unacknowledged past a threshold |
 | `POST /api/pads/{ref}/unlock` | verify a protected pad's password once per session |
 | `DELETE /api/pads/{ref}` | delete one pad (no bulk counterpart, by design) |
 | `GET /api/events` | SSE stream of pad changes |
+
+Two placements follow the reasoning `preview` already established. **Participants ride
+along with the pad response** because the strip is always on screen — a second
+round-trip for something never hidden is pure latency. **Tasks are their own endpoint**
+because the board is a tab: a person reading the transcript should not pay for a panel
+they have not opened.
+
+`/api/stuck` is the one genuinely new *page-level* need. A person opens the UI in the
+morning to ask "what stalled overnight?", and that question spans pads — answering it
+per-pad means opening every pad to find the one that is stuck.
+
+The task fold lives in the shared logic package and is exposed here, never
+reimplemented in JavaScript. A second implementation of "what is T3's status" that
+drifts from the CLI's is exactly the failure this design is arranged to prevent.
 
 **Sizing for real pads drove this shape.** A pad reaches hundreds of sections of long
 agent prose, so nothing loads a whole one: the TOC carries no bodies, bodies arrive
@@ -306,6 +714,13 @@ memory, never on disk), so paging costs no extra bcrypt round and the browser ne
 keeps the secret. Events carry **metadata only — exactly the level `pad_list` already
 publishes** — with the last section's title omitted for a protected pad, so a
 notification reveals nothing its listing entry does not.
+
+Events additionally carry the new section's `kind`, `task` and `status`, because a
+notification saying *"T3 → done"* is worth one saying *"the pad changed"*, and the task
+panel cannot stay live without them. Routing metadata (`to`, `re`) and the task fields
+are **subject to the same rule as the title**: omitted for a protected pad. They say
+more than a listing entry does, and the boundary is the level `pad_list` publishes —
+not "whatever the UI happens to find useful".
 
 ### Front end
 
@@ -343,12 +758,44 @@ same reason the rest of the page is mounted ONCE and updated in place — the tr
 is the only subtree that is rebuilt, so a half-typed "Jump to #" survives an agent
 posting mid-sentence.
 
+Three additions carry the multi-agent case, in the order a person needs them.
+
+**The participants strip**, at the top of the pad view — per author, their last section
+and its age, and what they owe. It is the first thing the eye lands on and the only
+thing that tells a person they need to act at all:
+
+```
+pm §44 · 2m      backend §41 · 8m      ios §38 · 25m ⚠      android §12 · 4h ⚠⚠
+                                        T3 unanswered 25m     T3 4h · §40 35m
+```
+
+**A Tasks tab beside the Outline**, in the existing right rail. A second rail is not
+added: the rail is already the pad's index, and Tasks is another index of the same pad.
+Selecting a task filters the transcript to its thread — the person's version of the
+context saving `pad_tasks` gives an agent. Tasks earns the same `Reactive` + keyed
+`repeat()` treatment as the outline, and for the same reason: it changes on every
+arriving event and must not lose its own scroll position doing so.
+
+**Routing shown inline in the transcript** — `to` chips, `re` as a back-link with a
+"3 replies" affordance on the parent, and task sections visually distinct because they
+behave differently (they do not take the turn). A broadcast draws no chip: absent `to`
+already means everyone, and a chip on every legacy section would be noise, not
+information. All of this is **free of extra requests** — `/api/pads/{ref}` already
+returns the pad's entire TOC, so once the TOC carries routing metadata the reply links
+and filters are computed from data the page has in hand.
+
 Notifications are turn-aware — who moved and who it is on now, the one fact that
-matters in a turn-taking protocol. The Notification API needs a secure context and
-`http://127.0.0.1` qualifies, so this works with no certificate. The honest limit,
-stated in Settings rather than discovered: notifications fire only while a tab is open
-(backgrounded is fine, closed is not) — for an unattended wait, `pad wait` is still
-the tool.
+matters in a turn-taking protocol. With five agents that becomes noise, and the person
+turns out to have the agents' problem #3: being interrupted by exchanges that are not
+theirs. It gets the same answer and deliberately the **same vocabulary** — a Settings
+filter of *everything* / *tasks only* / *one task* / *only when something is overdue*,
+mirroring `wake_for` and `--unacked`, stored in the existing preferences. One concept
+across both surfaces, not a second model invented for the browser.
+
+The Notification API needs a secure context and `http://127.0.0.1` qualifies, so this
+works with no certificate. The honest limit, stated in Settings rather than discovered:
+notifications fire only while a tab is open (backgrounded is fine, closed is not) — for
+an unattended wait, `pad wait` is still the tool.
 
 ### Doctor
 
@@ -374,6 +821,72 @@ Reports:
 
 Lifecycle: supervised by the node/host (it does not daemonize itself), absolute paths via args/env, SIGTERM stops cleanly.
 
+## Where the logic lives — `internal/pad` and `internal/store`
+
+Everything above adds one grammar, five derivations and three rules. Left alone, those
+would land in the surfaces, because **that is already happening**: fourteen sites across
+`mcpsrv`, `webui` and `cmd` walk `pad.Sections` themselves, and "which sections do I
+want" exists in three different vocabularies —
+
+| Surface | Selection it invented |
+|---|---|
+| `mcpsrv/tools.go` | `section` \| `since` \| all |
+| `webui/api.go` | `section` \| `before` + `limit` |
+| `cmd/scratchpad/pad.go` | `since` |
+
+Three implementations of one concept, before any of this design exists. The cause is
+not a missing layer — `internal/store` *is* the engine. The cause is that it hands out
+`Pad{ Sections []Section }`, an open bag of data, and a caller given a raw slice has no
+choice but to interpret it. The fix is therefore **not another wrapper** (a wrapper
+around the same slice leaks identically) but to raise the API to speak in the domain's
+verbs and stop publishing the slice.
+
+**Two packages, one direction.**
+
+```
+internal/pad/      pure: no I/O, no locks, no clock beyond an injected `now`
+  pad.go           Pad, Section, Meta
+  meta.go          the metadata-line grammar: parse + render, the ONLY place
+  scan.go          bytes → Pad
+  select.go        Selector: kind / task / since / section / window
+  turn.go          turn state (message stream only)
+  tasks.go         the two-level fold, ownership
+  people.go        participants, acknowledgement, inbox
+  rules.go         turn rule, ownership rule, "a task needs an owner"
+
+internal/store/    files, flock, limits — calls internal/pad to enforce and derive
+```
+
+`store` depends on `pad`; `pad` depends on nothing. The `Pad` type itself moves to
+`internal/pad` — leaving it in `store` would force the storage layer to know what a task
+is, which is the entanglement being removed. The derivations are pure functions, so they
+are testable without touching a filesystem, and the flock discipline stays isolated in
+the one package that has always owned it.
+
+**One selection vocabulary.** `Selector{Kind, Task, Since, Section, Before, Limit}`
+replaces all three. MCP's `since=`, the UI's `before=&limit=` and the CLI's `--since`
+become three ways of *filling in the same struct*, and the surfaces shrink to what they
+should always have been: parse a request, build a Selector, serialise the result.
+
+**Enforcement has one home.** The turn rule and the ownership rule are checked inside
+`store.Post`, under the exclusive flock it already holds — never in a surface. This is
+already true of the turn rule; ownership joins it there. A rule enforced in three
+surfaces is a rule with three behaviours.
+
+**A machine-checkable invariant**, which is what keeps the refactor from decaying:
+
+> Outside `internal/pad/`, nothing may write `range ….Sections`.
+
+It greps, so it belongs in `make check` beside gofmt and vet. This repo already
+documents hard rules in prose; this one enforces itself.
+
+Worth stating plainly, because the feature list has grown a long way from IDEA.md: the
+*surface* grew but the *kind* of complexity did not. There is no state machine, no
+migration, no reconciliation, no cache to invalidate. Turn, tasks, ownership,
+acknowledgement and inbox are all folds over one append-only log, in the same shape as
+the original `TurnState()`. The only real risk is fourteen copies of a fold drifting
+apart, and the invariant above is aimed exactly at it.
+
 ## CLI vs MCP — what lives where
 
 Positioning: **the CLI is the primary path, self-sufficient for local use** — an agent with a shell only needs the binary, operating directly on disk, with no running server needed. **MCP is for special use cases**: embedding into an MCP host (via UDS), an agent/host that cannot spawn the CLI, cross-machine access via TCP, and tool discovery (the agent sees the schema + description right away, with no need to read docs).
@@ -382,6 +895,9 @@ Positioning: **the CLI is the primary path, self-sufficient for local use** — 
 |---|---|---|
 | Create / post / view TOC / read / list (`create` `post` `get` `read` `list`, project list) | ✅ | ✅ |
 | Wait for a new section | ✅ `pad wait` — **not capped**, runs in the background, exit code wakes the agent | ✅ `pad_wait` — **capped at 300s**, the agent loops itself using `since` |
+| Selective waking (`--wake-for`, `--unacked`) | ✅ | ✅ (`wake_for`, `unacked_s`) |
+| Tasks: open / move / close | ✅ `pad post --task-open/--task` | ✅ `pad_post` with task metadata |
+| Tasks: the derived board | ✅ `pad tasks`, `pad who` | ✅ `pad_tasks` (read-only) |
 | Delete / cleanup (`delete`, `purge`) | ✅ (confirm with a human, `--yes` for automation) | ❌ — the agent surface is append-only |
 | Operations (`init`, `serve`, `ui`, `doctor`, `skills`, `version`) | ✅ | ❌ |
 | Identity | `--as` / env `SCRATCHPAD_AUTHOR` | param `author` (self-declared, mandatory) |
@@ -403,13 +919,42 @@ Each pad is one markdown file, with the metadata header as an HTML comment on th
 <!-- ts: 2026-07-11T10:30:00Z -->
 
 Content...
+
+# 2 - pm - Order API contract
+<!-- ts: 2026-07-11T10:42:15Z; kind: task; task: 1; to: backend; status: open -->
+
+Content...
 ```
 
 - `password` (a bcrypt hash) appears only when the pad is protected. The file remains one-file-per-pad, the user can `cat` it, and cleanup can be done with `rm` (Scratchpad treats a vanished file as a deleted pad — there is no state outside it).
-- Writing: open the file with an exclusive `flock` → parse the last section → check the turn → append → release. The turn state is not stored anywhere other than the file itself.
+- The section header line is **unchanged and stays strictly parsed** (`# <digits> - `); everything added since lives on the metadata line beneath it (see *Section metadata*). The header is the line that defines a section boundary, and it is deliberately the one line that never grows.
+- Writing: open the file with an exclusive `flock` → parse the metadata of every section → check the turn (last `message`) and, for a task event, ownership → allocate the section number and, when opening a task, the task number → append → release. **Nothing is stored outside the file**: turn state, task state, ownership and the task counter are all derived from the sections themselves, which is why a hand-edited or truncated pad heals instead of corrupting.
+- One pass over the metadata answers all of it, and `Post` already performs that pass to find the turn holder — so ownership checks and task-number allocation cost no additional read.
 
 ## Key decisions vs IDEA.md
 
 - Wait style 1 (MCP) = `pad_wait` capped at 300s, the agent loops itself; wait style 2 (background CLI) = `pad wait` uncapped, exits when there is a reply.
 - The password is only access control (a bcrypt hash in the header), the content is plaintext. The user does not set the password themselves: `protect: true` at create time → the server generates it and returns it once.
 - Delete/cleanup is only via the CLI (or a manual `rm`) — the agent's MCP surface is append-only in the true sense.
+- IDEA.md left room in the file format "for the future (e.g. an `encrypted: true` flag per section)". The metadata line is that room being used: `kind`, `to`, `re`, `task` and `status` are optional keys on a line that already existed, so no existing pad changes and no migration runs.
+- IDEA.md says "2 agents vs N agents in one pad — the same turn mechanism, no separate mode". That still holds, but N agents needed the turn rule to be stated more precisely: it governs the **message** stream. Bookkeeping is not conversation, and a coordinator dispatching work is not taking a turn away from anyone.
+
+## Delivery
+
+Both phases ship the engine split — it is cheap now and gets dearer with every feature
+laid on top of the current shape.
+
+| Phase | Contents |
+|---|---|
+| **1** | `internal/pad` split + Selector + the `make check` invariant; the metadata line (`to`, `re`); `--wake-for`; `--unacked`; the post-time silence warning; `pad who`; UI routing chips, reply links, participants strip |
+| **2** | `kind: task` + ownership + the two-level fold; `pad tasks` / `pad_tasks`; task selectors (`mine`, `task:<n>`, `tasks`); UI Tasks tab, task thread filter, `/api/stuck`, notification filters |
+
+Phase 1 addresses the stale-agent, fake-mention and irrelevant-wake problems; phase 2
+addresses tracking a pad too long to read.
+
+**Docs that must move with the code**, per the repo's hard rule — the pad file format is
+part of the config schema:
+
+- `internal/config/config.md` documents the on-disk format (its "Pad files" section shows the `ts` line). It is embedded and written into every Scratchpad dir, so it must be updated **in the same change that makes the binary write the new line** — not before, or it would describe a format the binary does not produce.
+- `internal/skills/topics/usage.md` and `mcp.md` teach the CLI and tool surfaces; both gain the new flags/params, and `usage.md` gains the discipline this design depends on: **never end a turn without arming a background `pad wait`**.
+- `config.ConfigVersion` does **not** move: the marker's schema is untouched, and the pad file format stays `scratchpad v1` (see *Backwards compatibility, in both directions*).
