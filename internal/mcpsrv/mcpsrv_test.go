@@ -89,13 +89,16 @@ func TestToolSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The surface is fixed and append-only: pad_tasks READS the derived board, and a
+	// task is opened, moved and closed through pad_post. A pad_task_update appearing
+	// here would mean the agent surface had stopped being append-only.
 	want := map[string]bool{
 		"pad_create": false, "pad_post": false, "pad_get": false, "pad_read": false,
-		"pad_wait": false, "pad_list": false, "project_list": false,
+		"pad_wait": false, "pad_tasks": false, "pad_list": false, "project_list": false,
 	}
 	for _, tool := range tools.Tools {
 		if _, ok := want[tool.Name]; !ok {
-			t.Errorf("unexpected tool %q (the surface is exactly the 7 agreed tools)", tool.Name)
+			t.Errorf("unexpected tool %q (the surface is exactly the 8 agreed tools)", tool.Name)
 		}
 		want[tool.Name] = true
 	}
@@ -218,7 +221,7 @@ func TestWaitTimeoutAndChange(t *testing.T) {
 	// Change: a concurrent post (via the shared storage layer, as a CLI would) wakes it.
 	go func() {
 		time.Sleep(150 * time.Millisecond)
-		_, _ = st.Post(created.Ref, "b", "reply", "answer", "")
+		_, _ = st.Post(store.PostRequest{Ref: created.Ref, Author: "b", Title: "reply", Content: "answer", Password: ""})
 	}()
 	call(t, cs, "pad_wait", map[string]any{"ref": created.Ref, "since": 1}, &w)
 	if !w.Changed || len(w.Sections) != 1 || w.Sections[0].N != 2 {

@@ -48,12 +48,12 @@ func TestCreatePostReadRoundtrip(t *testing.T) {
 		t.Fatal("section timestamp missing")
 	}
 
-	after, err := s.Post(pad.Ref(), "backend", "Answer", "The answer", "")
+	after, err := s.Post(PostRequest{Ref: pad.Ref(), Author: "backend", Title: "Answer", Content: "The answer", Password: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Last().N != 2 || after.Last().Author != "backend" {
-		t.Fatalf("bad post: %+v", after.Last())
+	if after.Section != 2 || after.Pad.Last().Author != "backend" {
+		t.Fatalf("bad post: %+v", after.Pad.Last())
 	}
 }
 
@@ -63,17 +63,17 @@ func TestTurnRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Post(pad.Ref(), "a", "again", "c", ""); !HasCode(err, CodeNotYourTurn) {
+	if _, err := s.Post(PostRequest{Ref: pad.Ref(), Author: "a", Title: "again", Content: "c", Password: ""}); !HasCode(err, CodeNotYourTurn) {
 		t.Fatalf("want not_your_turn, got %v", err)
 	}
-	if _, err := s.Post(pad.Ref(), "b", "reply", "c", ""); err != nil {
+	if _, err := s.Post(PostRequest{Ref: pad.Ref(), Author: "b", Title: "reply", Content: "c", Password: ""}); err != nil {
 		t.Fatalf("other author must be allowed: %v", err)
 	}
 	// And now a may post again, but b may not.
-	if _, err := s.Post(pad.Ref(), "b", "again", "c", ""); !HasCode(err, CodeNotYourTurn) {
+	if _, err := s.Post(PostRequest{Ref: pad.Ref(), Author: "b", Title: "again", Content: "c", Password: ""}); !HasCode(err, CodeNotYourTurn) {
 		t.Fatalf("want not_your_turn for b, got %v", err)
 	}
-	if _, err := s.Post(pad.Ref(), "a", "back", "c", ""); err != nil {
+	if _, err := s.Post(PostRequest{Ref: pad.Ref(), Author: "a", Title: "back", Content: "c", Password: ""}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -99,7 +99,7 @@ func TestPasswordProtection(t *testing.T) {
 	if _, err := s.Get(pad.Ref(), pw); err != nil {
 		t.Fatalf("correct password rejected: %v", err)
 	}
-	if _, err := s.Post(pad.Ref(), "b", "t", "c", pw); err != nil {
+	if _, err := s.Post(PostRequest{Ref: pad.Ref(), Author: "b", Title: "t", Content: "c", Password: pw}); err != nil {
 		t.Fatalf("correct password rejected on post: %v", err)
 	}
 	// The password must never appear in the pad file (only its bcrypt hash).
@@ -156,7 +156,7 @@ func TestLimits(t *testing.T) {
 	authors := []string{"b", "a", "b", "a", "b", "a"}
 	var lastErr error
 	for _, who := range authors {
-		_, lastErr = s.Post(pad.Ref(), who, "t", "c", "")
+		_, lastErr = s.Post(PostRequest{Ref: pad.Ref(), Author: who, Title: "t", Content: "c", Password: ""})
 		if lastErr != nil {
 			break
 		}
@@ -202,12 +202,12 @@ func TestWait(t *testing.T) {
 
 	// Timeout path: no new section → changed=false, no error.
 	start := time.Now()
-	p, changed, err := s.Wait(context.Background(), pad.Ref(), "", 1, 50*time.Millisecond)
-	if err != nil || changed {
-		t.Fatalf("want quiet timeout, got changed=%v err=%v", changed, err)
+	res, err := s.Wait(context.Background(), WaitRequest{Ref: pad.Ref(), Since: 1, Timeout: 50 * time.Millisecond})
+	if err != nil || res.Changed {
+		t.Fatalf("want quiet timeout, got changed=%v err=%v", res.Changed, err)
 	}
-	if p.Last().N != 1 {
-		t.Fatalf("timeout should still return the pad: %+v", p.Last())
+	if res.Pad.Last().N != 1 {
+		t.Fatalf("timeout should still return the pad: %+v", res.Pad.Last())
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatal("timeout did not honor the deadline")
@@ -219,17 +219,17 @@ func TestWait(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		time.Sleep(100 * time.Millisecond)
-		if _, err := s.Post(pad.Ref(), "b", "reply", "answer", ""); err != nil {
+		if _, err := s.Post(PostRequest{Ref: pad.Ref(), Author: "b", Title: "reply", Content: "answer", Password: ""}); err != nil {
 			t.Error(err)
 		}
 	}()
-	p, changed, err = s.Wait(context.Background(), pad.Ref(), "", 1, 10*time.Second)
+	res, err = s.Wait(context.Background(), WaitRequest{Ref: pad.Ref(), Since: 1, Timeout: 10 * time.Second})
 	wg.Wait()
-	if err != nil || !changed {
-		t.Fatalf("want changed=true, got changed=%v err=%v", changed, err)
+	if err != nil || !res.Changed {
+		t.Fatalf("want changed=true, got changed=%v err=%v", res.Changed, err)
 	}
-	if p.Last().N != 2 || p.Last().Author != "b" {
-		t.Fatalf("waiter saw wrong state: %+v", p.Last())
+	if res.Pad.Last().N != 2 || res.Pad.Last().Author != "b" {
+		t.Fatalf("waiter saw wrong state: %+v", res.Pad.Last())
 	}
 }
 
@@ -253,7 +253,7 @@ func TestConcurrentPosts(t *testing.T) {
 			if i%2 == 1 {
 				who = "odd"
 			}
-			_, _ = s.Post(pad.Ref(), who, "t", "c", "") // not_your_turn errors are expected
+			_, _ = s.Post(PostRequest{Ref: pad.Ref(), Author: who, Title: "t", Content: "c", Password: ""}) // not_your_turn errors are expected
 		}(i)
 	}
 	wg.Wait()
@@ -303,5 +303,167 @@ func TestDeleteAndProjects(t *testing.T) {
 	}
 	if _, err := s.Get(pad.Ref(), ""); !HasCode(err, CodePadNotFound) {
 		t.Fatalf("deleted pad still readable: %v", err)
+	}
+}
+
+// post is the shorthand these tests use for an ordinary append.
+func post(t *testing.T, s *Store, ref, author, title string, meta Meta, openTask bool) *PostResult {
+	t.Helper()
+	res, err := s.Post(PostRequest{
+		Ref: ref, Author: author, Title: title, Content: "body", Meta: meta, OpenTask: openTask,
+	})
+	if err != nil {
+		t.Fatalf("post as %s: %v", author, err)
+	}
+	return res
+}
+
+// TestTaskWritePathEnforcesItsRules covers what only the WRITE path can enforce: the
+// task number is allocated under the same lock as the append, ownership is checked
+// before anything is written, and a task without an owner is refused.
+func TestTaskWritePathEnforcesItsRules(t *testing.T) {
+	s := testStore(t)
+	p, _, err := s.CreatePad("default", "pm", "kickoff", "starting", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := p.Ref()
+
+	if _, err := s.Post(PostRequest{
+		Ref: ref, Author: "pm", Title: "no owner", Content: "x", OpenTask: true,
+	}); !HasCode(err, CodeTaskNeedsOwner) {
+		t.Fatalf("a task without an owner must be refused, got %v", err)
+	}
+
+	first := post(t, s, ref, "pm", "Crash on resume", Meta{To: []string{"ios", "android"}}, true)
+	if first.Task != 1 {
+		t.Fatalf("first task should be T1, got T%d", first.Task)
+	}
+	// Opening a second task immediately: task events do not take the turn, so the same
+	// author is not blocked. This is the coordinator pattern the rule exists to allow.
+	second := post(t, s, ref, "pm", "Payment screen", Meta{To: []string{"ios"}}, true)
+	if second.Task != 2 {
+		t.Fatalf("second task should be T2, got T%d", second.Task)
+	}
+
+	if _, err := s.Post(PostRequest{
+		Ref: ref, Author: "erp", Title: "hijack", Content: "x",
+		Meta: Meta{Kind: "task", Task: 1, Status: "done"},
+	}); !HasCode(err, CodeNotTaskOwner) {
+		t.Fatalf("a stranger must not move a task, got %v", err)
+	}
+
+	// An owner reports on their own slice; the task stays open because the other owner
+	// has not.
+	post(t, s, ref, "ios", "iOS done", Meta{Kind: "task", Task: 1, Status: "done"}, false)
+	got, err := s.Get(ref, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task, _ := got.Task(1); task.Status == "done" {
+		t.Fatal("T1 must not read as done while android is outstanding")
+	}
+}
+
+// TestReplyImpliesAddressingAndValidates pins two write-path behaviours: replying to a
+// section addresses its author without the caller repeating it, and a dangling `re` is
+// refused rather than silently stored.
+func TestReplyImpliesAddressingAndValidates(t *testing.T) {
+	s := testStore(t)
+	p, _, err := s.CreatePad("default", "frontend", "question", "how?", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := p.Ref()
+
+	res := post(t, s, ref, "backend", "answer", Meta{Re: 1}, false)
+	last := res.Pad.Last()
+	if !last.AddressedTo("frontend") {
+		t.Fatalf("a reply should address the parent's author: %#v", last.Meta)
+	}
+
+	if _, err := s.Post(PostRequest{
+		Ref: ref, Author: "frontend", Title: "t", Content: "x", Meta: Meta{Re: 99},
+	}); !HasCode(err, CodeInvalidInput) {
+		t.Fatalf("a dangling re must be refused, got %v", err)
+	}
+}
+
+// TestWaitWakesSelectivelyButCatchesUpFully is the promise the selectors depend on:
+// filtering decides what INTERRUPTS you, never what you are told about.
+func TestWaitWakesSelectivelyButCatchesUpFully(t *testing.T) {
+	s := testStore(t)
+	p, _, err := s.CreatePad("default", "pm", "kickoff", "starting", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := p.Ref()
+	post(t, s, ref, "backend", "chat with erp", Meta{To: []string{"erp"}}, false) // §2
+	post(t, s, ref, "erp", "reply to backend", Meta{To: []string{"backend"}}, false)
+	post(t, s, ref, "pm", "over to you", Meta{To: []string{"ios"}}, false) // §4
+
+	res, err := s.Wait(context.Background(), WaitRequest{
+		Ref: ref, Since: 1, Author: "ios",
+		Wake: Wake{Me: true}, Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Changed || len(res.Matched) != 1 || res.Matched[0].N != 4 {
+		t.Fatalf("ios should be woken by §4 alone: %#v", res.Matched)
+	}
+	if len(res.Skipped) != 2 {
+		t.Fatalf("the two sections it slept through must still be reported: %#v", res.Skipped)
+	}
+	for _, sec := range res.Skipped {
+		if sec.Content != "" {
+			t.Error("skipped sections are a table of contents, not bodies")
+		}
+	}
+}
+
+// TestWaitReturnsOnUnacked is what stops a wait from hanging forever on an agent that
+// was never listening.
+func TestWaitReturnsOnUnacked(t *testing.T) {
+	s := testStore(t)
+	// Opened by someone else, so pm is free to post the message that goes unanswered.
+	p, _, err := s.CreatePad("default", "ios", "kickoff", "starting", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := p.Ref()
+	post(t, s, ref, "pm", "please look", Meta{To: []string{"android"}}, false)
+
+	// Unacked: 1ns — the assignment is already older than that, so this returns at once
+	// rather than after the (never arriving) reply.
+	res, err := s.Wait(context.Background(), WaitRequest{
+		Ref: ref, Since: 2, Author: "pm",
+		Wake: Wake{Me: true}, Timeout: 2 * time.Second, Unacked: time.Nanosecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Changed || res.Reason != "unacked" {
+		t.Fatalf("want an unacked wake, got changed=%v reason=%q", res.Changed, res.Reason)
+	}
+	if len(res.Unacked) != 1 || res.Unacked[0].To != "android" {
+		t.Fatalf("want the android assignment named: %#v", res.Unacked)
+	}
+}
+
+// TestPostWarnsAboutASilentAddressee is the immediacy that presence was wanted for: the
+// sender is told at the moment they can still act, and the post still succeeds.
+func TestPostWarnsAboutASilentAddressee(t *testing.T) {
+	s := testStore(t)
+	p, _, err := s.CreatePad("default", "ios", "kickoff", "starting", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := post(t, s, p.Ref(), "pm", "over to you", Meta{To: []string{"nobody"}}, false)
+	if len(res.Warnings) != 1 {
+		t.Fatalf("want a warning about an addressee never seen here, got %#v", res.Warnings)
+	}
+	if res.Section != 2 {
+		t.Fatal("a warning must not stop the post from succeeding")
 	}
 }

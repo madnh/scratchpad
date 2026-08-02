@@ -64,10 +64,27 @@ fmt-check: ## Kiểm tra định dạng — fail nếu có file chưa gofmt
 vet: ## Phân tích tĩnh bằng go vet
 	go vet ./...
 
+# Ngoài internal/pad, không nơi nào được tự duyệt danh sách section.
+#
+# Trước khi có internal/pad, 14 chỗ trong mcpsrv/webui/cmd tự duyệt pad.Sections, và
+# "chọn section nào" tồn tại dưới 3 từ vựng khác nhau cho cùng một khái niệm. Mọi phép
+# suy diễn (turn, task, participants) và phép chọn giờ nằm ở internal/pad; các surface
+# chỉ dịch request thành pad.Selector. Đây là luật giữ cho điều đó không mục lại — và
+# nó tự kiểm tra được, khác với một dòng văn xuôi trong CLAUDE.md.
+# Bỏ qua *_test.go (test được phép khẳng định trực tiếp trên cấu trúc đã parse) và
+# `Select(...).Sections` (đó là kết quả của Selector, tức là đang DÙNG đúng cơ chế).
+layers: ## Kiểm tra ranh giới: chỉ internal/pad được duyệt Sections
+	@bad=$$(grep -rn "range .*\.Sections\|\.Sections\[" --include=*.go \
+		internal cmd 2>/dev/null \
+		| grep -v "^internal/pad/" | grep -v "_test\.go:" | grep -v ")\.Sections" || true); \
+	if [ -n "$$bad" ]; then \
+		echo "chỉ internal/pad được duyệt danh sách section — hãy dùng pad.Selector / các hàm suy diễn:"; \
+		echo "$$bad"; exit 1; fi
+
 tidy: ## Dọn go.mod/go.sum
 	go mod tidy
 
-check: fmt-check vet test ## Cổng kiểm tra trước khi commit (fmt-check + vet + test)
+check: fmt-check vet layers test ## Cổng kiểm tra trước khi commit (fmt-check + vet + layers + test)
 
 clean: ## Xoá artifact build
 	rm -rf $(BIN_DIR)

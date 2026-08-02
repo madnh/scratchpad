@@ -199,7 +199,7 @@ func TestSectionsArePagedNewestFirst(t *testing.T) {
 		if n%2 == 0 {
 			author = "bob"
 		}
-		if _, err := st.Post(ref, author, fmt.Sprintf("s%d", n), fmt.Sprintf("body %d", n), ""); err != nil {
+		if _, err := st.Post(store.PostRequest{Ref: ref, Author: author, Title: fmt.Sprintf("s%d", n), Content: fmt.Sprintf("body %d", n), Password: ""}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -347,7 +347,7 @@ func TestSSEDeliversPadChange(t *testing.T) {
 		t.Fatalf("Content-Type %q, want text/event-stream", ct)
 	}
 
-	if _, err := st.Post(pad.Ref(), "bob", "reply", "the answer", ""); err != nil {
+	if _, err := st.Post(store.PostRequest{Ref: pad.Ref(), Author: "bob", Title: "reply", Content: "the answer", Password: ""}); err != nil {
 		t.Fatal(err)
 	}
 

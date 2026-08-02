@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/madnh/scratchpad/internal/buildinfo"
 	"github.com/madnh/scratchpad/internal/store"
@@ -142,12 +143,23 @@ func (s *Server) handlePads(r *http.Request, _ *session) (any, error) {
 
 // tocEntry is one line of a pad's table of contents: everything needed to render the
 // index and decide what to fetch, WITHOUT the section body.
+//
+// The routing fields are what turn the transcript from a list of posts into a readable
+// conversation: `to` chips, `re` back-links with a reply count on the parent, and a
+// visual distinction for task events. They cost nothing extra to serve — this response
+// already carries the pad's ENTIRE table of contents, so the page computes reply links
+// and filters from data it already holds, with no second request.
 type tocEntry struct {
-	N      int    `json:"n"`
-	Author string `json:"author"`
-	Title  string `json:"title"`
-	TS     int64  `json:"ts"`
-	Bytes  int    `json:"bytes"`
+	N      int      `json:"n"`
+	Author string   `json:"author"`
+	Title  string   `json:"title"`
+	TS     int64    `json:"ts"`
+	Bytes  int      `json:"bytes"`
+	Kind   string   `json:"kind,omitempty"`
+	To     []string `json:"to,omitempty"`
+	Re     int      `json:"re,omitempty"`
+	Task   int      `json:"task,omitempty"`
+	Status string   `json:"status,omitempty"`
 }
 
 // previewChars and previewLines bound the opening excerpt of a section: a few lines
@@ -221,18 +233,17 @@ func (s *Server) handleSectionPreview(r *http.Request, sess *session) (any, erro
 	if err != nil {
 		return nil, err
 	}
-	for _, sec := range pad.Sections {
-		if sec.N == n {
-			return map[string]any{
-				"n":       sec.N,
-				"author":  sec.Author,
-				"title":   sec.Title,
-				"bytes":   len(sec.Content),
-				"preview": sectionPreview(sec.Content, sec.Title),
-			}, nil
-		}
+	sec, ok := pad.Find(n)
+	if !ok {
+		return nil, badInput("no section " + strconv.Itoa(n) + " in this pad")
 	}
-	return nil, badInput("no section " + strconv.Itoa(n) + " in this pad")
+	return map[string]any{
+		"n":       sec.N,
+		"author":  sec.Author,
+		"title":   sec.Title,
+		"bytes":   len(sec.Content),
+		"preview": sectionPreview(sec.Content, sec.Title),
+	}, nil
 }
 
 // padResponse is the compact pad view: header, turn state, and the full TOC. For a
@@ -249,6 +260,12 @@ type padResponse struct {
 	SectionCount int         `json:"section_count"`
 	Turn         *store.Turn `json:"turn,omitempty"`
 	Sections     []tocEntry  `json:"sections"`
+
+	// Participants rides along with the pad rather than living behind its own endpoint:
+	// the strip is always on screen, and a second round-trip for something never hidden
+	// is pure latency. The task board, which sits behind a tab, is a separate endpoint
+	// for the mirror-image reason.
+	Participants []store.Participant `json:"participants,omitempty"`
 }
 
 func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
@@ -272,17 +289,78 @@ func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
 		return nil, err
 	}
 
-	toc := make([]tocEntry, 0, len(pad.Sections))
-	for _, sec := range pad.Sections {
-		toc = append(toc, tocEntry{N: sec.N, Author: sec.Author, Title: sec.Title, TS: sec.TS, Bytes: len(sec.Content)})
+	all := pad.Select(store.Selector{}).Sections
+	toc := make([]tocEntry, 0, len(all))
+	for _, sec := range all {
+		toc = append(toc, tocEntry{
+			N: sec.N, Author: sec.Author, Title: sec.Title, TS: sec.TS, Bytes: len(sec.Content),
+			Kind: string(sec.Kind), To: sec.To, Re: sec.Re, Task: sec.Task, Status: string(sec.Status),
+		})
 	}
 	turn := pad.TurnState()
 	return padResponse{
 		Ref: pad.Ref(), Project: pad.Project, PadID: pad.ID,
-		Title: pad.Sections[0].Title, CreatedTS: pad.CreatedTS,
+		Title: pad.Title(), CreatedTS: pad.CreatedTS,
 		Protected: pad.Protected(), Locked: false,
 		SectionCount: len(pad.Sections), Turn: &turn, Sections: toc,
+		Participants: pad.Participants(),
 	}, nil
+}
+
+// handleTasks serves the derived task board, or one task with its thread.
+//
+// The fold itself lives in internal/pad and is exposed here rather than recomputed in
+// JavaScript. A second implementation of "what is T3's status" would drift from the
+// CLI's, and a board that disagrees with `pad tasks` is worse than no board.
+func (s *Server) handleTasks(r *http.Request, sess *session) (any, error) {
+	ref := r.PathValue("ref")
+	pad, err := s.store.Get(ref, sess.unlocked(ref))
+	if err != nil {
+		return nil, err
+	}
+	if v := r.URL.Query().Get("task"); v != "" {
+		n, convErr := strconv.Atoi(v)
+		if convErr != nil {
+			return nil, badInput("task must be an integer")
+		}
+		t, ok := pad.Task(n)
+		if !ok {
+			return nil, badInput("no task T" + v + " in this pad")
+		}
+		return map[string]any{"ref": ref, "tasks": []store.Task{t}, "thread": pad.Thread(n)}, nil
+	}
+	tasks := pad.Tasks()
+	if tasks == nil {
+		tasks = []store.Task{}
+	}
+	return map[string]any{"ref": ref, "tasks": tasks}, nil
+}
+
+// defaultStuckThreshold is how long an assignment may sit unanswered before the
+// overview calls it out. It is the "did anything stall overnight?" horizon, not a
+// precise SLA, so it is a constant rather than another config field.
+const defaultStuckThreshold = 30 * time.Minute
+
+// handleStuck answers the question a person actually opens the UI with — "what stalled?"
+// — which spans pads. Answering it per-pad would mean opening every pad to find the one
+// that is stuck, which is exactly the work the overview is supposed to save.
+func (s *Server) handleStuck(r *http.Request, _ *session) (any, error) {
+	threshold := defaultStuckThreshold
+	if v := r.URL.Query().Get("older_than_s"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return nil, badInput("older_than_s must be a non-negative integer")
+		}
+		threshold = time.Duration(n) * time.Second
+	}
+	stuck, err := s.store.Stuck(r.URL.Query().Get("project"), threshold)
+	if err != nil {
+		return nil, err
+	}
+	if stuck == nil {
+		stuck = []store.StuckEntry{}
+	}
+	return map[string]any{"stuck": stuck, "older_than_s": int(threshold.Seconds())}, nil
 }
 
 // handleSections returns ONE PAGE of section bodies. The default page is the newest
@@ -311,35 +389,37 @@ func (s *Server) handleSections(r *http.Request, sess *session) (any, error) {
 		if convErr != nil {
 			return nil, badInput("section must be an integer")
 		}
-		for _, sec := range pad.Sections {
-			if sec.N == n {
-				return map[string]any{"sections": []store.Section{sec}, "has_older": n > 1}, nil
-			}
+		hit := pad.Select(store.Selector{Section: n})
+		if len(hit.Sections) == 0 {
+			return nil, badInput("no section " + v + " in this pad")
 		}
-		return nil, badInput("no section " + v + " in this pad")
+		return map[string]any{"sections": hit.Sections, "has_older": n > 1}, nil
 	}
 
-	// The window ends just below `before` (exclusive), or at the newest section.
-	end := len(pad.Sections)
+	// `before` walks backwards through the history; `limit` keeps the newest page of
+	// what is left. Both are this surface's spelling of the ONE selection vocabulary —
+	// the MCP tools spell the same thing `since`, and the CLI `--since`. Expressing it
+	// as a Selector is what stops the three from drifting apart.
+	sel := store.Selector{Limit: limit, Kind: store.Kind(q.Get("kind"))}
 	if v := q.Get("before"); v != "" {
 		n, convErr := strconv.Atoi(v)
 		if convErr != nil {
 			return nil, badInput("before must be an integer")
 		}
-		end = 0
-		for i, sec := range pad.Sections {
-			if sec.N < n {
-				end = i + 1
-			}
-		}
+		sel.Before = n
 	}
-	start := max(end-limit, 0)
-
-	window := append([]store.Section(nil), pad.Sections[start:end]...)
+	if v := q.Get("task"); v != "" {
+		n, convErr := strconv.Atoi(v)
+		if convErr != nil {
+			return nil, badInput("task must be an integer")
+		}
+		sel.Task = n
+	}
+	res := pad.Select(sel)
 	return map[string]any{
-		"sections":  window,
-		"has_older": start > 0,
-		"total":     len(pad.Sections),
+		"sections":  res.Sections,
+		"has_older": res.HasOlder,
+		"total":     res.Total,
 	}, nil
 }
 

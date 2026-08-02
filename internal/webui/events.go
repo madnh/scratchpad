@@ -33,6 +33,17 @@ type padEvent struct {
 	LastTitle    string `json:"last_title,omitempty"` // empty for a protected pad
 	LastTS       int64  `json:"last_ts,omitempty"`
 	Protected    bool   `json:"protected,omitempty"`
+
+	// Routing and task fields, so a notification can say "T3 → done" rather than "the
+	// pad changed", and so the task panel stays live without refetching.
+	//
+	// They say MORE than a listing entry does, so they follow exactly the rule the last
+	// section's title already follows: omitted entirely for a protected pad. The
+	// boundary is the level `pad list` publishes — not whatever the UI finds useful.
+	LastKind   string `json:"last_kind,omitempty"`
+	LastTask   int    `json:"last_task,omitempty"`
+	LastStatus string `json:"last_status,omitempty"`
+	OpenTasks  int    `json:"open_tasks,omitempty"`
 }
 
 // hub turns the watcher's single event stream into a broadcast to every open browser,
@@ -103,6 +114,15 @@ func (h *hub) enrich(ev watch.Event) padEvent {
 	out.LastTitle = lastTitle
 	out.LastTS = m.LastTS
 	out.Protected = m.Protected
+	if m.Protected {
+		return out // nothing beyond the listing level leaves here
+	}
+	out.OpenTasks = m.OpenTasks
+	if last, err := h.store.LastSection(ev.Ref); err == nil {
+		out.LastKind = string(last.Kind)
+		out.LastTask = last.Task
+		out.LastStatus = string(last.Status)
+	}
 	return out
 }
 

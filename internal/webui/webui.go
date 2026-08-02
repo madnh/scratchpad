@@ -137,6 +137,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/pads/{ref}", s.api(s.handlePad))
 	mux.HandleFunc("GET /api/pads/{ref}/sections", s.api(s.handleSections))
 	mux.HandleFunc("GET /api/pads/{ref}/sections/{n}/preview", s.api(s.handleSectionPreview))
+	mux.HandleFunc("GET /api/pads/{ref}/tasks", s.api(s.handleTasks))
+	mux.HandleFunc("GET /api/stuck", s.api(s.handleStuck))
 	mux.HandleFunc("POST /api/pads/{ref}/unlock", s.api(s.handleUnlock))
 	mux.HandleFunc("DELETE /api/pads/{ref}", s.api(s.handleDelete))
 	mux.HandleFunc("GET /api/events", s.requireSession(http.HandlerFunc(s.handleEvents)))

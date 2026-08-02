@@ -1,39 +1,29 @@
 package store
 
-import (
-	"errors"
-	"fmt"
-)
+import "github.com/madnh/scratchpad/internal/pad"
 
-// Error codes shared by the CLI and the MCP surface. An agent-facing error message is
-// "<code>: <detail>" so a caller can branch on the stable code while a human still
-// reads one plain sentence.
+// The error vocabulary lives in internal/pad, where the rules that raise most of it
+// live. These aliases keep one spelling for callers that talk to the storage layer, so
+// a surface never has to know which package a given code came from.
 const (
-	CodeNotYourTurn        = "not_your_turn"
-	CodePadNotFound        = "pad_not_found"
-	CodeUnauthorized       = "unauthorized"
-	CodeContentTooLarge    = "content_too_large"
-	CodeInvalidProjectName = "invalid_project_name"
-	CodeInvalidRef         = "invalid_ref"
-	CodeInvalidInput       = "invalid_input"
-	CodeLimitExceeded      = "limit_exceeded"
+	CodeNotYourTurn        = pad.CodeNotYourTurn
+	CodeNotTaskOwner       = pad.CodeNotTaskOwner
+	CodeNoSuchTask         = pad.CodeNoSuchTask
+	CodeTaskNeedsOwner     = pad.CodeTaskNeedsOwner
+	CodePadNotFound        = pad.CodePadNotFound
+	CodeUnauthorized       = pad.CodeUnauthorized
+	CodeContentTooLarge    = pad.CodeContentTooLarge
+	CodeInvalidProjectName = pad.CodeInvalidProjectName
+	CodeInvalidRef         = pad.CodeInvalidRef
+	CodeInvalidInput       = pad.CodeInvalidInput
+	CodeLimitExceeded      = pad.CodeLimitExceeded
 )
 
 // CodedError is an error with a stable machine-readable code.
-type CodedError struct {
-	Code string
-	Msg  string
-}
-
-func (e *CodedError) Error() string { return e.Code + ": " + e.Msg }
+type CodedError = pad.CodedError
 
 // coded builds a CodedError with a formatted message.
-func coded(code, format string, args ...any) error {
-	return &CodedError{Code: code, Msg: fmt.Sprintf(format, args...)}
-}
+func coded(code, format string, args ...any) error { return pad.Coded(code, format, args...) }
 
 // HasCode reports whether err carries the given stable code.
-func HasCode(err error, code string) bool {
-	var ce *CodedError
-	return errors.As(err, &ce) && ce.Code == code
-}
+func HasCode(err error, code string) bool { return pad.HasCode(err, code) }

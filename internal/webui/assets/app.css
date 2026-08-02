@@ -312,7 +312,7 @@ pad-outline {
 /* Where the avatar hues are resolved for the outline, the same way .chat resolves them
    for the transcript — one agent, one colour, everywhere. The popup needs its own copy
    because it is mounted on <body>, outside the rail, so it inherits nothing from it. */
-pad-outline, .outline-pop {
+pad-outline, .outline-pop, pad-tasks, .pad__people {
   --avatar-c0: var(--accent, #3b82f6);
   --avatar-c1: var(--green,  #3fb950);
   --avatar-c2: var(--amber,  #d29922);
@@ -496,3 +496,93 @@ pad-outline, .outline-pop {
   padding-left: .25rem; padding-right: .25rem; min-width: 1.85rem;
   display: inline-flex; align-items: center; justify-content: center;
 }
+
+/* ── the rail: outline and task board share one column ─────────────────────────
+   Both are indexes of the same pad — one by section, one by work — so they share
+   a slot and a tab strip rather than each claiming width the transcript needs. */
+.pad__rail { display: flex; flex-direction: column; min-height: 0; gap: .35rem; }
+.pad__rail > pad-outline, .pad__rail > pad-tasks { min-height: 0; flex: 1 1 auto; }
+.pad__rail[data-rail="outline"] > pad-tasks { display: none; }
+.pad__rail[data-rail="tasks"] > pad-outline { display: none; }
+
+.rail__tabs { display: flex; gap: .15rem; padding: 0 .25rem; }
+.rail__tab {
+  flex: 1 1 0; border: 0; background: none; cursor: pointer;
+  color: var(--muted); font: inherit; font-size: .78rem; padding: .25rem .4rem;
+  border-bottom: 2px solid transparent; border-radius: 0;
+}
+.rail__tab:hover { color: var(--text); }
+.rail__tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* ── the task board ─────────────────────────────────────────────────────────── */
+pad-tasks { display: flex; flex-direction: column; overflow: hidden; }
+.tasks__head { display: flex; padding: 0 .25rem .35rem; }
+.tasks__toggle {
+  display: inline-flex; align-items: center; gap: .3rem;
+  color: var(--muted); font-size: .75rem; cursor: pointer;
+}
+.tasks__empty { color: var(--muted); font-size: .78rem; padding: .4rem .5rem; margin: 0; }
+.tasks__list { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+
+.task {
+  display: flex; flex-direction: column; gap: .12rem; width: 100%;
+  text-align: left; border: 0; background: none; cursor: pointer; font: inherit;
+  padding: .35rem .5rem; border-left: 2px solid transparent; border-radius: 0;
+}
+.task:hover { background: var(--panel-2, var(--panel)); }
+.task[aria-current="true"] { border-left-color: var(--accent); background: var(--panel-2, var(--panel)); }
+.task__head { display: flex; align-items: baseline; gap: .35rem; font-size: .72rem; color: var(--muted); }
+.task__id { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
+.task__when { margin-left: auto; }
+.task__status { text-transform: uppercase; letter-spacing: .03em; font-size: .65rem; }
+.task__status[data-status="blocked"] { color: var(--danger, #d9534f); }
+.task__status[data-status="wip"] { color: var(--warning, #d29922); }
+.task__status[data-status="done"] { color: var(--success, #3fb950); }
+.task__status[data-status="dropped"] { text-decoration: line-through; }
+.task[data-status="done"] .task__title, .task[data-status="dropped"] .task__title { opacity: .55; }
+.task__title {
+  font-size: .8rem; color: var(--text);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Per owner, never collapsed: a shared task that reads "done" because one agent
+   finished hides the outstanding half exactly when someone is looking for it. */
+.task__owners { display: flex; flex-wrap: wrap; gap: .2rem; }
+.task__owner {
+  font-size: .65rem; padding: 0 .3rem; border-radius: 999px;
+  color: var(--owner-c); border: 1px solid var(--owner-c); opacity: .8;
+}
+.task__owner[data-done="true"] { background: var(--owner-c); color: #fff; opacity: 1; }
+
+/* ── the participants strip ────────────────────────────────────────────────────
+   Last activity and what is waiting on each agent — deliberately not presence,
+   which an append-only transcript cannot express and which lies in both directions. */
+.pad__people { display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin: .35rem 0 .1rem; }
+.person { display: flex; align-items: baseline; gap: .3rem; font-size: .76rem; }
+.person__dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--dot-c); flex: none; }
+.person__name { color: var(--text); font-weight: 600; }
+.person__last { color: var(--muted); font-variant-numeric: tabular-nums; }
+.person__owes { color: var(--warning, #d29922); }
+.person[data-owing="true"] .person__last { color: var(--warning, #d29922); }
+
+/* ── routing chips in the transcript ───────────────────────────────────────────
+   A broadcast draws nothing: absent `to` already means everyone, and a chip on
+   every legacy section would be noise rather than information. */
+.chip {
+  font-size: .66rem; padding: 0 .35rem; border-radius: 999px; line-height: 1.5;
+  border: 1px solid var(--border); background: none; color: var(--muted);
+  font-family: inherit;
+}
+button.chip { cursor: pointer; }
+button.chip:hover { color: var(--text); border-color: var(--text); }
+.chip--to { border-style: dashed; }
+.chip--task { color: var(--accent); border-color: var(--accent); }
+.chip--task[data-status="done"] { color: var(--success, #3fb950); border-color: var(--success, #3fb950); }
+.chip--task[data-status="blocked"] { color: var(--danger, #d9534f); border-color: var(--danger, #d9534f); }
+/* A task event does not take the turn, so it should not look like a reply either. */
+.msg:has(.chip--task) .msg__author { font-style: italic; }
+
+/* ── the stuck block on the overview ───────────────────────────────────────── */
+.stuck { margin: .5rem 0 1rem; }
+.stuck__row { display: flex; gap: .5rem; align-items: baseline; font-size: .82rem; padding: .2rem 0; }
+.stuck__what { color: var(--warning, #d29922); font-weight: 600; }
+.stuck__age { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }

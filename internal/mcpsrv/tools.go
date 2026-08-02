@@ -8,18 +8,14 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/madnh/scratchpad/internal/config"
+	"github.com/madnh/scratchpad/internal/pad"
 	"github.com/madnh/scratchpad/internal/store"
 )
 
-// tocOnly strips contents from sections so pad_get stays cheap to call.
-func tocOnly(sections []store.Section) []store.Section {
-	out := make([]store.Section, len(sections))
-	for i, sec := range sections {
-		sec.Content = ""
-		out[i] = sec
-	}
-	return out
-}
+// Every tool here is a TRANSLATOR: it turns tool parameters into a pad.Selector or a
+// store request, calls the shared logic, and serialises the answer. No tool walks a
+// section list or decides what a pad means — that lives in internal/pad, so the CLI,
+// the Web UI and these tools cannot drift apart on "whose turn is it" or "is T3 done".
 
 // --- pad_create ---
 
@@ -43,45 +39,61 @@ type createOutput struct {
 
 func (s *Server) padCreate(_ context.Context, _ *mcp.CallToolRequest, in createInput) (*mcp.CallToolResult, createOutput, error) {
 	project := config.ResolveProject(s.cfg, in.Project)
-	pad, password, err := s.store.CreatePad(project, in.Author, in.Title, in.Content, in.Protect)
+	p, password, err := s.store.CreatePad(project, in.Author, in.Title, in.Content, in.Protect)
 	if err != nil {
 		return nil, createOutput{}, err
 	}
 	return nil, createOutput{
-		Ref:      pad.Ref(),
-		Project:  pad.Project,
-		PadID:    pad.ID,
+		Ref:      p.Ref(),
+		Project:  p.Project,
+		PadID:    p.ID,
 		Section:  1,
 		Next:     2,
 		Password: password,
-		Turn:     pad.TurnState(),
+		Turn:     p.TurnState(),
 	}, nil
 }
 
 // --- pad_post ---
 
 type postInput struct {
-	Ref      string `json:"ref" jsonschema:"pad reference, e.g. 'projectx-abc123'"`
-	Author   string `json:"author" jsonschema:"your self-declared identity; must differ from the last section's author (turn rule)"`
-	Title    string `json:"title" jsonschema:"one-line title of this section (shows up in the pad's table of contents)"`
-	Content  string `json:"content" jsonschema:"markdown body of the section"`
-	Password string `json:"password,omitempty" jsonschema:"the pad's password, required when it was created with protect:true"`
+	Ref      string   `json:"ref" jsonschema:"pad reference, e.g. 'projectx-abc123'"`
+	Author   string   `json:"author" jsonschema:"your self-declared identity; must differ from the last MESSAGE section's author (turn rule)"`
+	Title    string   `json:"title" jsonschema:"one-line title of this section (shows up in the pad's table of contents)"`
+	Content  string   `json:"content" jsonschema:"markdown body of the section"`
+	Password string   `json:"password,omitempty" jsonschema:"the pad's password, required when it was created with protect:true"`
+	To       []string `json:"to,omitempty" jsonschema:"authors this section is addressed to; everyone can still READ it, but only these are woken by wake_for:me. Omit to broadcast to the whole pad"`
+	Re       int      `json:"re,omitempty" jsonschema:"the section number this one answers; it also addresses that section's author, so a reply needs no 'to'"`
+	TaskOpen bool     `json:"task_open,omitempty" jsonschema:"open a NEW task: the server allocates its number and returns it. Requires 'to' — a task must have an owner"`
+	Task     int      `json:"task,omitempty" jsonschema:"the number of an EXISTING task this section concerns; combine with status to move it, or use it alone on a message that merely references the task"`
+	Status   string   `json:"status,omitempty" jsonschema:"move the task to open, wip, blocked, done or dropped. Only its owners (their own slice) or its opener (reassign/drop/force-close) may set this"`
 }
 
 type postOutput struct {
-	Ref     string     `json:"ref"`
-	Section int        `json:"section"`
-	Next    int        `json:"next"`
-	Turn    store.Turn `json:"turn"`
+	Ref      string     `json:"ref"`
+	Section  int        `json:"section"`
+	Next     int        `json:"next"`
+	Task     int        `json:"task,omitempty"`
+	Turn     store.Turn `json:"turn"`
+	Warnings []string   `json:"warnings,omitempty"`
 }
 
 func (s *Server) padPost(_ context.Context, _ *mcp.CallToolRequest, in postInput) (*mcp.CallToolResult, postOutput, error) {
-	pad, err := s.store.Post(in.Ref, in.Author, in.Title, in.Content, in.Password)
+	meta := pad.Meta{To: in.To, Re: in.Re, Task: in.Task, Status: pad.Status(in.Status)}
+	if in.Task > 0 || in.Status != "" || in.TaskOpen {
+		meta.Kind = pad.KindTask
+	}
+	res, err := s.store.Post(store.PostRequest{
+		Ref: in.Ref, Author: in.Author, Title: in.Title, Content: in.Content,
+		Password: in.Password, Meta: meta, OpenTask: in.TaskOpen,
+	})
 	if err != nil {
 		return nil, postOutput{}, err
 	}
-	n := pad.Last().N
-	return nil, postOutput{Ref: pad.Ref(), Section: n, Next: n + 1, Turn: pad.TurnState()}, nil
+	return nil, postOutput{
+		Ref: res.Pad.Ref(), Section: res.Section, Next: res.Section + 1,
+		Task: res.Task, Turn: res.Pad.TurnState(), Warnings: res.Warnings,
+	}, nil
 }
 
 // --- pad_get ---
@@ -89,37 +101,50 @@ func (s *Server) padPost(_ context.Context, _ *mcp.CallToolRequest, in postInput
 type getInput struct {
 	Ref      string `json:"ref" jsonschema:"pad reference, e.g. 'projectx-abc123'"`
 	Password string `json:"password,omitempty" jsonschema:"the pad's password, required when it is protected"`
+	Author   string `json:"author,omitempty" jsonschema:"your identity; adds an 'inbox' of what was addressed to you since your own last post, and what you owe or are owed"`
+	Kind     string `json:"kind,omitempty" jsonschema:"limit the table of contents to one stream: 'message' or 'task'"`
 }
 
 type getOutput struct {
-	Ref          string          `json:"ref"`
-	Project      string          `json:"project"`
-	CreatedTS    int64           `json:"created_ts"`
-	SectionCount int             `json:"section_count"`
-	LastAuthor   string          `json:"last_author"`
-	LastTS       int64           `json:"last_ts"`
-	Protected    bool            `json:"protected"`
-	Turn         store.Turn      `json:"turn"`
-	Sections     []store.Section `json:"sections"`
+	Ref          string            `json:"ref"`
+	Project      string            `json:"project"`
+	CreatedTS    int64             `json:"created_ts"`
+	SectionCount int               `json:"section_count"`
+	LastAuthor   string            `json:"last_author"`
+	LastTS       int64             `json:"last_ts"`
+	Protected    bool              `json:"protected"`
+	Turn         store.Turn        `json:"turn"`
+	Sections     []store.Section   `json:"sections"`
+	Participants []pad.Participant `json:"participants"`
+	Inbox        *pad.Inbox        `json:"inbox,omitempty"`
 }
 
 func (s *Server) padGet(_ context.Context, _ *mcp.CallToolRequest, in getInput) (*mcp.CallToolResult, getOutput, error) {
-	pad, err := s.store.Get(in.Ref, in.Password)
+	p, err := s.store.Get(in.Ref, in.Password)
 	if err != nil {
 		return nil, getOutput{}, err
 	}
-	last := pad.Last()
-	return nil, getOutput{
-		Ref:          pad.Ref(),
-		Project:      pad.Project,
-		CreatedTS:    pad.CreatedTS,
-		SectionCount: len(pad.Sections),
+	last := p.Last()
+	out := getOutput{
+		Ref:          p.Ref(),
+		Project:      p.Project,
+		CreatedTS:    p.CreatedTS,
+		SectionCount: len(p.Sections),
 		LastAuthor:   last.Author,
 		LastTS:       last.TS,
-		Protected:    pad.Protected(),
-		Turn:         pad.TurnState(),
-		Sections:     tocOnly(pad.Sections),
-	}, nil
+		Protected:    p.Protected(),
+		Turn:         p.TurnState(),
+		// The TOC carries each section's routing metadata, which turns a list of titles
+		// into a map of the conversation: a returning agent sees who addressed whom and
+		// which sections are its own thread, then reads only those.
+		Sections:     pad.TOC(p.Select(pad.Selector{Kind: pad.Kind(in.Kind)}).Sections),
+		Participants: p.Participants(),
+	}
+	if in.Author != "" {
+		inbox := p.Inbox(in.Author)
+		out.Inbox = &inbox
+	}
+	return nil, out, nil
 }
 
 // --- pad_read ---
@@ -128,6 +153,8 @@ type readInput struct {
 	Ref      string `json:"ref" jsonschema:"pad reference, e.g. 'projectx-abc123'"`
 	Section  int    `json:"section,omitempty" jsonschema:"read exactly this one section number"`
 	Since    int    `json:"since,omitempty" jsonschema:"read every section numbered above this; omit both section and since for the whole pad"`
+	Kind     string `json:"kind,omitempty" jsonschema:"limit to one stream: 'message' or 'task'"`
+	Task     int    `json:"task,omitempty" jsonschema:"read one task's thread: the section that opened it and everything referencing it, without the pad around it"`
 	Password string `json:"password,omitempty" jsonschema:"the pad's password, required when it is protected"`
 }
 
@@ -137,60 +164,44 @@ type readOutput struct {
 }
 
 func (s *Server) padRead(_ context.Context, _ *mcp.CallToolRequest, in readInput) (*mcp.CallToolResult, readOutput, error) {
-	sections, ref, err := s.readSections(in)
+	if in.Section != 0 && in.Since != 0 {
+		return nil, readOutput{}, &store.CodedError{Code: store.CodeInvalidInput, Msg: "pass either section or since, not both"}
+	}
+	p, err := s.store.Get(in.Ref, in.Password)
 	if err != nil {
 		return nil, readOutput{}, err
 	}
-	return nil, readOutput{Ref: ref, Sections: sections}, nil
-}
-
-// readSections applies pad_read's selection semantics: section = exactly one,
-// since = everything after, neither = all (passing both is rejected).
-func (s *Server) readSections(in readInput) ([]store.Section, string, error) {
-	if in.Section != 0 && in.Since != 0 {
-		return nil, "", &store.CodedError{Code: store.CodeInvalidInput, Msg: "pass either section or since, not both"}
+	res := p.Select(pad.Selector{
+		Section: in.Section, Since: in.Since, Kind: pad.Kind(in.Kind), Task: in.Task,
+	})
+	if in.Section != 0 && len(res.Sections) == 0 {
+		return nil, readOutput{}, &store.CodedError{Code: store.CodeInvalidInput,
+			Msg: "pad " + p.Ref() + " has no section " + strconv.Itoa(in.Section) + " (last is " + strconv.Itoa(p.Last().N) + ")"}
 	}
-	pad, err := s.store.Get(in.Ref, in.Password)
-	if err != nil {
-		return nil, "", err
-	}
-	switch {
-	case in.Section != 0:
-		for _, sec := range pad.Sections {
-			if sec.N == in.Section {
-				return []store.Section{sec}, pad.Ref(), nil
-			}
-		}
-		return nil, "", &store.CodedError{Code: store.CodeInvalidInput,
-			Msg: "pad " + pad.Ref() + " has no section " + strconv.Itoa(in.Section) + " (last is " + strconv.Itoa(pad.Last().N) + ")"}
-	case in.Since != 0:
-		var out []store.Section
-		for _, sec := range pad.Sections {
-			if sec.N > in.Since {
-				out = append(out, sec)
-			}
-		}
-		return out, pad.Ref(), nil
-	default:
-		return pad.Sections, pad.Ref(), nil
-	}
+	return nil, readOutput{Ref: p.Ref(), Sections: res.Sections}, nil
 }
 
 // --- pad_wait ---
 
 type waitInput struct {
-	Ref      string `json:"ref" jsonschema:"pad reference, e.g. 'projectx-abc123'"`
-	Since    int    `json:"since" jsonschema:"the last section number you have seen; the call returns when a higher-numbered section exists"`
-	TimeoutS int    `json:"timeout_s,omitempty" jsonschema:"max seconds to wait (server-capped; see the deployment's wait config, default cap 300); omit for the default"`
-	Password string `json:"password,omitempty" jsonschema:"the pad's password, required when it is protected"`
+	Ref      string   `json:"ref" jsonschema:"pad reference, e.g. 'projectx-abc123'"`
+	Since    int      `json:"since" jsonschema:"the last section number you have seen; the call returns when a higher-numbered section MATCHES your selectors"`
+	TimeoutS int      `json:"timeout_s,omitempty" jsonschema:"max seconds to wait (server-capped; see the deployment's wait config, default cap 300); omit for the default"`
+	Password string   `json:"password,omitempty" jsonschema:"the pad's password, required when it is protected"`
+	Author   string   `json:"author,omitempty" jsonschema:"your identity; required by the me/mine selectors, and it also stops your own post from waking you"`
+	WakeFor  []string `json:"wake_for,omitempty" jsonschema:"what should WAKE you (you can always read everything either way): 'any' (default), 'me' (addressed to you, replying to you, or broadcast), 'mine' (task events on tasks you own), 'tasks' (any task event), 'task:<n>' (one task, whoever owns it). They union"`
+	UnackedS int      `json:"unacked_s,omitempty" jsonschema:"also return when something YOU addressed has gone unanswered this long, so a wait cannot hang forever on an agent that was never listening"`
 }
 
 type waitOutput struct {
 	Ref          string          `json:"ref"`
 	Changed      bool            `json:"changed"`
+	Reason       string          `json:"reason,omitempty"`
 	SectionCount int             `json:"section_count"`
 	LastAuthor   string          `json:"last_author"`
 	Sections     []store.Section `json:"sections,omitempty"`
+	Skipped      []store.Section `json:"skipped,omitempty"`
+	Unacked      []store.Owed    `json:"unacked,omitempty"`
 }
 
 func (s *Server) padWait(ctx context.Context, _ *mcp.CallToolRequest, in waitInput) (*mcp.CallToolResult, waitOutput, error) {
@@ -201,22 +212,74 @@ func (s *Server) padWait(ctx context.Context, _ *mcp.CallToolRequest, in waitInp
 	if max := time.Duration(s.cfg.Wait.MaxS) * time.Second; timeout > max {
 		timeout = max // clamp, never error: the cap is a server property, not caller misuse
 	}
-	pad, changed, err := s.store.Wait(ctx, in.Ref, in.Password, in.Since, timeout)
+	wake, err := pad.ParseWake(in.WakeFor)
 	if err != nil {
 		return nil, waitOutput{}, err
 	}
-	out := waitOutput{
-		Ref:          pad.Ref(),
-		Changed:      changed,
-		SectionCount: len(pad.Sections),
-		LastAuthor:   pad.Last().Author,
+	res, err := s.store.Wait(ctx, store.WaitRequest{
+		Ref: in.Ref, Password: in.Password, Since: in.Since, Author: in.Author,
+		Wake: wake, Timeout: timeout, Unacked: time.Duration(in.UnackedS) * time.Second,
+	})
+	if err != nil {
+		return nil, waitOutput{}, err
 	}
-	if changed {
-		for _, sec := range pad.Sections {
-			if sec.N > in.Since {
-				out.Sections = append(out.Sections, sec)
-			}
+	return nil, waitOutput{
+		Ref:          res.Pad.Ref(),
+		Changed:      res.Changed,
+		Reason:       res.Reason,
+		SectionCount: len(res.Pad.Sections),
+		LastAuthor:   res.Pad.Last().Author,
+		Sections:     res.Matched,
+		// Always the full table of contents of what did NOT match: waking is selective,
+		// catch-up is not. An agent that wakes with a silent gap answers from stale
+		// context, which is the failure the selectors exist to prevent.
+		Skipped: res.Skipped,
+		Unacked: res.Unacked,
+	}, nil
+}
+
+// --- pad_tasks ---
+
+type tasksInput struct {
+	Ref      string `json:"ref" jsonschema:"pad reference, e.g. 'projectx-abc123'"`
+	Task     int    `json:"task,omitempty" jsonschema:"one task's number; also returns its thread (the opening section and everything referencing it)"`
+	OpenOnly bool   `json:"open_only,omitempty" jsonschema:"list only tasks that still need attention"`
+	Password string `json:"password,omitempty" jsonschema:"the pad's password, required when it is protected"`
+}
+
+type tasksOutput struct {
+	Ref    string          `json:"ref"`
+	Tasks  []store.Task    `json:"tasks"`
+	Thread []store.Section `json:"thread,omitempty"`
+}
+
+// padTasks answers "where is the team at" without reading the pad. It is a fold over
+// metadata, so it never materialises a body — which is what makes it affordable to ask
+// for on a 600-section pad, and therefore worth having at all.
+//
+// There is no pad_task_update: a task moves by pad_post, so the agent surface stays
+// append-only.
+func (s *Server) padTasks(_ context.Context, _ *mcp.CallToolRequest, in tasksInput) (*mcp.CallToolResult, tasksOutput, error) {
+	p, err := s.store.Get(in.Ref, in.Password)
+	if err != nil {
+		return nil, tasksOutput{}, err
+	}
+	out := tasksOutput{Ref: p.Ref(), Tasks: []store.Task{}}
+	if in.Task > 0 {
+		t, ok := p.Task(in.Task)
+		if !ok {
+			return nil, tasksOutput{}, &store.CodedError{Code: store.CodeNoSuchTask,
+				Msg: "pad " + p.Ref() + " has no task T" + strconv.Itoa(in.Task)}
 		}
+		out.Tasks = append(out.Tasks, t)
+		out.Thread = p.Thread(in.Task)
+		return nil, out, nil
+	}
+	for _, t := range p.Tasks() {
+		if in.OpenOnly && !t.Open() {
+			continue
+		}
+		out.Tasks = append(out.Tasks, t)
 	}
 	return nil, out, nil
 }

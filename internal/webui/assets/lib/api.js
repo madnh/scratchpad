@@ -58,6 +58,21 @@ export const api = {
   sectionPreview: (ref, n, opts = {}) =>
     request(`/api/pads/${encodeURIComponent(ref)}/sections/${encodeURIComponent(n)}/preview`, opts),
 
+  // The folded task board. It is its own endpoint rather than a field on the pad view
+  // because the board sits behind a tab: a person reading the transcript should not pay
+  // for a panel they have not opened. (Participants take the opposite route — they ride
+  // along with the pad, because that strip is never hidden.)
+  tasks: (ref, { task } = {}) => {
+    const q = task ? `?task=${encodeURIComponent(task)}` : "";
+    return request(`/api/pads/${encodeURIComponent(ref)}/tasks${q}`);
+  },
+
+  // Assignments that have gone unanswered, across every pad. This is the question a
+  // person opens the UI with — "did anything stall?" — and it spans pads, so answering
+  // it per-pad would mean opening every pad to find the one that is stuck.
+  stuck: (olderThanS) =>
+    request("/api/stuck" + (olderThanS != null ? `?older_than_s=${olderThanS}` : "")),
+
   unlock: (ref, password) =>
     request(`/api/pads/${encodeURIComponent(ref)}/unlock`, {
       method: "POST",
