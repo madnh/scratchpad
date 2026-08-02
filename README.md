@@ -175,14 +175,38 @@ From a solo laptop to a whole team — full detail in [USECASES.md](USECASES.md)
 ## Build
 
 ```sh
+make tools          # dev tooling (gopls) — run once
 make build-dev      # → bin/scratchpad (keeps debug symbols; for local dev)
 make build-release  # → bin/scratchpad (stripped + -trimpath; matches the released binary)
-make check          # gofmt + vet + test
+make check          # gofmt + vet + layers + test
 make vendor-ui      # refresh the vendored Web UI library (puredashboard)
 ```
 
 The Web UI's assets are embedded with `go:embed`, so **rebuild after changing anything
 under `internal/webui/assets/`** — a running binary keeps serving the old copy.
+
+`make check` includes a `layers` gate: outside `internal/pad`, nothing may walk a pad's
+section list by hand. Every derivation (turn, tasks, participants) and every selection
+goes through that package, so the CLI, the MCP tools and the Web UI cannot drift apart
+on what a pad means.
+
+### Code intelligence
+
+`make tools` installs **gopls**, and `.claude/settings.json` enables Anthropic's
+[`gopls-lsp`](https://claude.com/plugins/gopls-lsp) plugin, so a Claude Code session in
+this repo gets real jump-to-definition and find-references instead of grepping. Install
+it once with:
+
+```
+/plugin install gopls-lsp@claude-plugins-official
+```
+
+The plugin only wraps the language server — `make tools` is what supplies it, and
+`$(go env GOPATH)/bin` has to be on your PATH for the plugin to find it.
+
+On Claude Code for the web none of this is manual: `.claude/hooks/session-start.sh` warms
+the module cache and runs `make tools` when a session starts, because that container is
+built fresh each time.
 
 <br/>
 

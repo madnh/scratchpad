@@ -20,7 +20,13 @@ PD_REPO ?= https://github.com/madnh/puredashboard.git
 PD_REF  ?= main
 PD_DIR  := internal/webui/assets/vendor/puredashboard
 
-.PHONY: help build-dev build-release install run ui test fmt fmt-check vet tidy check clean vendor-ui
+# Công cụ phát triển: pin phiên bản ở đây để mọi máy và mọi phiên Claude Code dùng
+# CÙNG một bản. gopls là language server của Go — nó cho biết một ký hiệu được dùng ở
+# đâu theo đúng ngữ nghĩa, thứ mà grep không làm được (grep không phân biệt nổi
+# `Result.Sections` với `Pad.Sections`, đúng cái bẫy target `layers` đã vấp phải).
+GOPLS_VERSION ?= latest
+
+.PHONY: help build-dev build-release install run ui test fmt fmt-check vet layers tidy check clean vendor-ui tools
 
 help: ## In danh sách lệnh (mặc định)
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -80,6 +86,22 @@ layers: ## Kiểm tra ranh giới: chỉ internal/pad được duyệt Sections
 	if [ -n "$$bad" ]; then \
 		echo "chỉ internal/pad được duyệt danh sách section — hãy dùng pad.Selector / các hàm suy diễn:"; \
 		echo "$$bad"; exit 1; fi
+
+# Kiểm tra cả PATH lẫn $GOPATH/bin: `go install` đặt binary vào $GOPATH/bin, thư mục
+# này thường CHƯA nằm trong PATH — nếu chỉ hỏi `command -v` thì lần chạy nào cũng cài
+# lại, và target mất tính idempotent đúng lúc hook cần nó nhất.
+tools: ## Cài công cụ phát triển (gopls) — idempotent, chạy lại bao nhiêu lần cũng được
+	@gobin=$$(go env GOBIN); [ -n "$$gobin" ] || gobin=$$(go env GOPATH)/bin; \
+	if command -v gopls >/dev/null 2>&1; then \
+		echo "gopls đã có: $$(command -v gopls) ($$(gopls version 2>/dev/null | head -1))"; \
+	elif [ -x "$$gobin/gopls" ]; then \
+		echo "gopls đã có: $$gobin/gopls ($$($$gobin/gopls version 2>/dev/null | head -1))"; \
+		echo "nhưng $$gobin KHÔNG có trong PATH — plugin gopls-lsp sẽ không tìm thấy nó"; \
+	else \
+		echo "cài gopls@$(GOPLS_VERSION)…"; \
+		go install golang.org/x/tools/gopls@$(GOPLS_VERSION); \
+		echo "xong → $$gobin/gopls — nhớ để $$gobin trong PATH"; \
+	fi
 
 tidy: ## Dọn go.mod/go.sum
 	go mod tidy
