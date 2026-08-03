@@ -106,7 +106,15 @@ export default function mount(outlet, ctx) {
     b.dataset.rail = id;
     return b;
   };
-  railTabs.append(railTab("outline", "Outline"), railTab("tasks", "Tasks"));
+  // Closing belongs to the rail, not to the panel inside it: what disappears is the
+  // whole column — tabs, outline and board — so the control sits in the strip that
+  // frames them and works whichever tab is showing.
+  const railClose = el("button", {
+    type: "button", class: "rail__collapse", text: "«",
+    title: "Hide the rail", "aria-label": "Hide the rail",
+    onclick: () => setOutline(false),
+  });
+  railTabs.append(railTab("outline", "Outline"), railTab("tasks", "Tasks"), railClose);
   const railBox = el("div", { class: "pad__rail" }, railTabs, outline, taskPanel);
   // The way back. A rail that closes with a « and leaves nothing behind is a rail you
   // have to go looking for — the toolbar's toggle is across the page and reads like
@@ -124,7 +132,6 @@ export default function mount(outlet, ctx) {
 
   outline.loadPreview = (n, opts) => api.sectionPreview(ref, n, opts);
   outline.addEventListener("pick", (e) => pickSection(e.detail));
-  outline.addEventListener("close", () => setOutline(false));
 
   // ── data ───────────────────────────────────────────────────────────────────
 
@@ -509,7 +516,10 @@ export default function mount(outlet, ctx) {
       if (e.key === "Escape") setOutline(false);
       return;
     }
-    if (outline.contains(e.target) || outlineReopen.contains(e.target)) return;
+    // The whole rail, not just the outline: the tab strip and its close button are
+    // part of the overlay, and dismissing on a click there would fight the control
+    // the click was aimed at.
+    if (railBox.contains(e.target) || outlineReopen.contains(e.target)) return;
     setOutline(false);
   }
   document.addEventListener("pointerdown", dismissOverlay, true);
@@ -740,10 +750,13 @@ export default function mount(outlet, ctx) {
       : `${pad.section_count} sections`;
 
     // Authors only ever grow, and re-assigning the list would close an open dropdown,
-    // so it is written only when it actually changed.
+    // so it is written only when it actually changed. U+001F joins the comparison key
+    // because an author name cannot contain it — a plain separator would let two
+    // different lists compare equal — and unlike a NUL it leaves this file text, which
+    // is what keeps grep, rg and diff viewers reading it.
     const authors = [...new Set(pad.sections.map((s) => s.author))];
-    if (authors.join(" ") !== authorOptions) {
-      authorOptions = authors.join(" ");
+    if (authors.join("\u001f") !== authorOptions) {
+      authorOptions = authors.join("\u001f");
       f.filter.options = authors.map((a) => ({ value: a, label: a }));
     }
     if (f.filter.value !== authorFilter) f.filter.value = authorFilter;

@@ -96,14 +96,12 @@ class PadOutline extends Reactive {
   render() {
     const rows = this.rows();
 
-    // No heading and no count: the toolbar beside this already says "showing #23–#42
-    // of 45", and a rail that announces itself twice over a list of twenty titles is
-    // mostly announcement. What is left is the one control the list cannot do without.
+    // Nothing but the list. No heading and no count — the toolbar beside this already
+    // says "showing #23–#42 of 45" — and no close button either: closing hides the
+    // whole rail, tabs and board included, so that control belongs to the rail's own
+    // frame. A panel that could hide its container would be a panel reaching outside
+    // itself, and it would leave the Tasks tab with no way to close at all.
     return html`
-      <div class="outline__head">
-        <button type="button" class="outline__close" title="Hide the outline"
-                aria-label="Hide the outline" @click=${() => this.emit("close")}>«</button>
-      </div>
       <div class="outline__list js-outline-list" @scroll=${() => { this._userScrolledAt = Date.now(); }}>
         ${repeat(rows, (s) => s.n, (s) => this.#row(s))}
         ${rows.length ? null : html`<p class="outline__empty">No sections match this filter.</p>`}
