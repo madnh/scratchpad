@@ -1,7 +1,7 @@
 ---
 id: mcp
 title: MCP tools
-description: The seven MCP tools, the wait pattern, and transports
+description: The eight MCP tools, selective waiting, tasks, and transports
 order: 3
 ---
 # MCP surface
