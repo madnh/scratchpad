@@ -36,7 +36,7 @@ import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
 import * as prefs from "/lib/prefs.js";
-import { el, pageHead, skeleton, errorView, copyButton, setChildren, agentChips } from "/lib/ui.js";
+import { el, pageHead, skeleton, errorView, copyButton, setChildren } from "/lib/ui.js";
 import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex, safeText, cutChars } from "/lib/fmt.js";
 
 // Menu icons. Inline SVG, following the library's own rule that a component carries
@@ -128,7 +128,8 @@ export default function mount(outlet, ctx) {
   // The toolbar's live parts, filled in by mountFrame().
   let frame = null;
   let watchSwitch = null;
-  let roster = null;        // the roster chips in the meta row, repainted when authors change
+  let peopleStrip = null;   // the participants strip, which is also the pad's roster
+  let peopleKey = "";       // what that strip was last painted from
   let authorOptions = "";   // the author list the filter was last built from
 
   outline.loadPreview = (n, opts) => api.sectionPreview(ref, n, opts);
@@ -630,14 +631,35 @@ export default function mount(outlet, ctx) {
   // an append-only transcript, and it would lie in both directions: an agent busy
   // working is not inside a wait, and an agent parked in a wait with the wrong
   // selectors is not listening for you.
+  // It is also the pad's ROSTER, and the only one: a second row listing the same agents
+  // — one with faces, one with their standing — asks the reader to look twice to learn
+  // less. So the faces live here, on the row that also says when each was last heard
+  // from, and an agent who was addressed and never answered appears too. That last part
+  // is why this is the row that survived: it is the only one that can show them.
   function peopleRow() {
+    peopleStrip = el("div", { class: "pad__people" });
+    paintPeople();
+    return peopleStrip;
+  }
+
+  // Repainted from a key rather than on every call: syncToolbar runs on scrolls and
+  // filter changes too, and rebuilding this strip under a hovering cursor for a scroll
+  // event would be work nobody asked for. An agent joining, or falling behind, changes
+  // the key.
+  function paintPeople() {
     const people = pad.participants || [];
-    if (!people.length) return null;
-    const row = el("div", { class: "pad__people" });
-    for (const p of people) {
+    const key = JSON.stringify(people);
+    if (key === peopleKey) return;
+    peopleKey = key;
+
+    const cells = people.map((p) => {
       const owes = p.owes || [];
+      const face = el("span", {
+        class: "person__avatar", text: agentInitials(p.author), "aria-hidden": "true",
+      });
+      face.style.setProperty("--avatar-bg", `var(--avatar-c${agentColorIndex(p.author)})`);
       const cell = el("div", { class: "person", dataset: { owing: String(owes.length > 0) } },
-        el("span", { class: "person__dot", "aria-hidden": "true" }),
+        face,
         el("span", { class: "person__name", text: p.author }),
         el("span", {
           class: "person__last",
@@ -645,8 +667,6 @@ export default function mount(outlet, ctx) {
           text: p.last_section ? `#${p.last_section} · ${relTime(p.last_ts)}` : "never posted",
         }),
       );
-      cell.querySelector(".person__dot").style.setProperty(
-        "--dot-c", `var(--avatar-c${agentColorIndex(p.author)})`);
       if (owes.length) {
         cell.append(el("span", {
           class: "person__owes",
@@ -654,9 +674,10 @@ export default function mount(outlet, ctx) {
           text: owes.map((o) => `${o.what} ${relTime(o.ts)}`).join(" · "),
         }));
       }
-      row.append(cell);
-    }
-    return row;
+      return cell;
+    });
+    peopleStrip.replaceChildren(...cells);
+    peopleStrip.hidden = !cells.length;
   }
 
   function metaRow() {
@@ -675,12 +696,10 @@ export default function mount(outlet, ctx) {
       toast(e.target.checked ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
     });
     row.append(watchSwitch);
-
-    // The roster gets the row to itself (it is the one part that grows with the pad),
-    // and it is shown WHOLE here: this page is where you come to find out who is on a
-    // conversation, so a "+2" would be hiding the answer.
-    roster = el("div", { class: "pad__agents" }, agentChips(pad.authors || [], { avatar: true }));
-    row.append(roster);
+    // No roster here: the participants strip below IS this pad's roster, and it is shown
+    // whole — this page is where you come to find out exactly who is on a conversation,
+    // so a "+2" would be hiding the answer. The pads TABLE still caps its own list,
+    // because a row there has one line's worth of room.
     return row;
   }
 
@@ -768,11 +787,10 @@ export default function mount(outlet, ctx) {
     if (authors.join("\u001f") !== authorOptions) {
       authorOptions = authors.join("\u001f");
       f.filter.options = authors.map((a) => ({ value: a, label: a }));
-      // The header's roster is the same list, so it is repainted on the same condition
-      // — an agent joining a pad shows up without a reload, and nothing moves until one
-      // does.
-      roster?.replaceChildren(agentChips(authors, { avatar: true }));
     }
+    // The strip has its own key, because it moves on more than the roster does: an agent
+    // falling behind changes it while the list of names stays exactly the same.
+    paintPeople();
     if (f.filter.value !== authorFilter) f.filter.value = authorFilter;
 
     f.orderBtn.textContent = order === "newest" ? "Oldest first" : "Newest first";

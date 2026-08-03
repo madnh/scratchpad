@@ -200,7 +200,7 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
 /* The transcript's avatar, scaled down to sit on a line of text: same hue, same
    initials, same deliberate casing (agentInitials decides it — "iOS", not "IOS"), so
    the face beside a message and the face in the roster are one thing. */
-.agents__avatar {
+.agents__avatar, .person__avatar {
   flex: none;
   width: 1.5rem; height: 1.5rem; border-radius: var(--radius-full, 999px);
   display: inline-flex; align-items: center; justify-content: center;
@@ -217,13 +217,6 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
    under the control — enough to lift the knob and its label off the row's centre
    line. Making the host a flex box shrinks it to the control itself. */
 .pad__meta puredashboard-switch { display: inline-flex; align-items: center; }
-/* The roster takes the whole row rather than trailing the ref and the created date:
-   it is the one item here that grows with the pad, and a list that sometimes wraps
-   into the line above moves everything else around as agents join. */
-.pad__agents { flex-basis: 100%; }
-/* Discs need more air between them than dots do, or five agents read as one strip. */
-.pad__agents .agents { gap: .85rem; }
-
 /* The section toolbar sticks: on a pad hundreds of sections long, the controls that
    filter, jump and reorder must not scroll away — otherwise using them means scrolling
    back up first, which is the whole reason to have them. */
@@ -608,9 +601,20 @@ pad-tasks { display: flex; flex-direction: column; overflow: hidden; }
 /* ── the participants strip ────────────────────────────────────────────────────
    Last activity and what is waiting on each agent — deliberately not presence,
    which an append-only transcript cannot express and which lies in both directions. */
-.pad__people { display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin: .35rem 0 .1rem; }
-.person { display: flex; align-items: baseline; gap: .3rem; font-size: .76rem; }
-.person__dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--dot-c); flex: none; }
+.pad__people {
+  display: flex; flex-wrap: wrap; gap: .45rem 1rem; margin: .5rem 0 .2rem;
+  /* Its own copy of the hues: this strip carries the transcript's faces, and it sits
+     outside .chat where they are otherwise resolved. */
+  --avatar-c0: var(--accent, #3b82f6);
+  --avatar-c1: var(--green,  #3fb950);
+  --avatar-c2: var(--amber,  #d29922);
+  --avatar-c3: var(--red,    #f85149);
+  --avatar-c4: var(--teal,   #2dd4bf);
+  --avatar-c5: var(--purple, #a98bff);
+}
+/* Centred, not baseline-aligned: a disc has no baseline, and hanging one off the text's
+   would drop it half a line below the name it belongs to. */
+.person { display: flex; align-items: center; gap: .35rem; font-size: .76rem; }
 .person__name { color: var(--text); font-weight: 600; }
 .person__last { color: var(--muted); font-variant-numeric: tabular-nums; }
 .person__owes { color: var(--warning, #d29922); }
