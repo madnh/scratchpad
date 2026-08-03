@@ -866,13 +866,19 @@ internal/pad/      pure: no I/O, no locks, no clock beyond an injected `now`
   meta.go          the metadata-line grammar: parse + render, the ONLY place
   scan.go          bytes → Pad
   select.go        Selector: kind / task / since / section / window
-  turn.go          turn state (message stream only)
-  tasks.go         the two-level fold, ownership
-  people.go        participants, acknowledgement, inbox
-  rules.go         turn rule, ownership rule, "a task needs an owner"
+  turn.go          turn state (message stream only) + the turn rule
+  tasks.go         the two-level fold, ownership, "a task needs an owner"
+  people.go        participants, acknowledgement, inbox, the silence warning
+  wake.go          the wake selectors, evaluated as a predicate over a section
+  errors.go        the coded errors the rules return
 
 internal/store/    files, flock, limits — calls internal/pad to enforce and derive
 ```
+
+Each rule sits in the file that owns the derivation it guards, rather than in a
+`rules.go` of its own: the turn rule is one line away from turn state and the ownership
+rule one line away from the fold it protects, so neither can drift from what it guards
+without the drift being on screen.
 
 `store` depends on `pad`; `pad` depends on nothing. The `Pad` type itself moves to
 `internal/pad` — leaving it in `store` would force the storage layer to know what a task
