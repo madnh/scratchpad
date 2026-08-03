@@ -1,7 +1,7 @@
 ---
 id: usage
 title: CLI usage
-description: Creating, posting, reading, waiting, and cleaning up from the command line
+description: Creating, posting, reading, waiting selectively, tracking tasks, and cleaning up from the command line
 order: 2
 ---
 # CLI usage

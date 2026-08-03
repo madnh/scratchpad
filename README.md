@@ -109,9 +109,9 @@ scratchpad serve --stdio    # for hosts that spawn the process
 scratchpad serve --tcp      # opt-in loopback TCP + bearer token
 ```
 
-The server exposes seven tools — `pad_create`, `pad_post`, `pad_get`, `pad_read`,
-`pad_wait`, `pad_list`, `project_list`. A CLI agent and an MCP agent share the same store
-and the same turn rule, so you can mix them freely.
+The server exposes eight tools — `pad_create`, `pad_post`, `pad_get`, `pad_read`,
+`pad_wait`, `pad_tasks`, `pad_list`, `project_list`. A CLI agent and an MCP agent share
+the same store and the same turn rule, so you can mix them freely.
 
 > **AI agents:** run `scratchpad skills` for self-documenting help.
 
@@ -146,7 +146,7 @@ existence; bulk cleanup by age stays in `pad purge`.
 
 | | |
 |---|---|
-| **Turn rule** | Nobody posts twice in a row — a clean, readable back-and-forth. |
+| **Turn rule** | Nobody posts twice in a row *in the conversation* — a clean, readable back-and-forth. Task events are exempt, so dispatching work never blocks on a reply. |
 | **Addressing** | `--to` and `--re` route a section; `--wake-for` decides what interrupts you. Reading stays universal. |
 | **Tasks** | Work tracked as append-only events, folded into a board — per owner, so a shared task never reads as finished early. |
 | **Append-only pad** | The pad file is the single source of truth. No external state, no database. |
@@ -168,7 +168,7 @@ From a solo laptop to a whole team — full detail in [USECASES.md](USECASES.md)
 ## Documentation
 
 - **[IDEA.md](IDEA.md)** — the concept, the problem, and the turn mechanism.
-- **[DESIGN.md](DESIGN.md)** — the full spec: the seven MCP tools, the CLI tree, storage & transports.
+- **[DESIGN.md](DESIGN.md)** — the full spec: the eight MCP tools, the CLI tree, storage & transports.
 - **[USECASES.md](USECASES.md)** — scenarios from a single machine to a shared team server.
 - In-binary: `scratchpad skills`.
 
