@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -319,6 +320,74 @@ func TestEventForProtectedPadHidesSectionTitle(t *testing.T) {
 	if ev.Title != "locked pad" || !ev.Protected {
 		t.Fatalf("protected pad event should still carry listing metadata, got %+v", ev)
 	}
+}
+
+// Ctrl-C with a browser tab open must still be a clean, prompt stop.
+//
+// The bug this pins: Shutdown waits for handlers to return and never cancels their
+// request contexts, so an open /api/events stream held it until the deadline and Run
+// came back with "context deadline exceeded" — a stop the person asked for, reported as
+// a failure, with a non-zero exit code behind it.
+func TestRunStopsPromptlyWithAnOpenEventStream(t *testing.T) {
+	// Built here rather than through newTestServer: this is the one test that needs the
+	// real Run() path — its own listener and its own Shutdown — instead of httptest,
+	// and the auth mode has to be decided before New() builds the token.
+	projects := filepath.Join(t.TempDir(), "projects")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		Type: config.ConfigType, Version: config.ConfigVersion,
+		DisplayName: "Test", Instance: "scratchpad",
+		ProjectsDir: projects, Limits: config.DefaultLimits,
+	}
+	srv, err := New(store.New(projects, config.DefaultLimits), cfg,
+		Options{Port: freePort(t), NoAuth: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx) }()
+
+	base := fmt.Sprintf("http://127.0.0.1:%d", srv.opts.Port)
+	var resp *http.Response
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var err error
+		if resp, err = http.Get(base + "/api/events"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the server never came up: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("Content-Type %q, want an open SSE stream to hold the shutdown", ct)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Ctrl-C should stop cleanly, got %v", err)
+		}
+	case <-time.After(shutdownGrace):
+		t.Fatalf("shutdown did not finish within %s — the stream is still holding it", shutdownGrace)
+	}
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
 }
 
 // End to end: a post through the store reaches a connected browser as an SSE event,
