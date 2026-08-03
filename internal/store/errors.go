@@ -10,6 +10,7 @@ const (
 	CodeNotTaskOwner       = pad.CodeNotTaskOwner
 	CodeNoSuchTask         = pad.CodeNoSuchTask
 	CodeTaskNeedsOwner     = pad.CodeTaskNeedsOwner
+	CodeRulesUnread        = pad.CodeRulesUnread
 	CodePadNotFound        = pad.CodePadNotFound
 	CodeUnauthorized       = pad.CodeUnauthorized
 	CodeContentTooLarge    = pad.CodeContentTooLarge

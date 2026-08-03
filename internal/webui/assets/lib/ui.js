@@ -97,6 +97,57 @@ export function link(href, text, cls) {
   return el("a", { href, text, class: cls });
 }
 
+// svgIcon builds a lucide glyph from its path data, as NODES.
+//
+// Icons are built rather than parsed from markup for the same reason everything else
+// here is: nothing in this UI reaches the DOM through innerHTML, so there is no
+// markup-parsing path to keep an eye on at all. The CSP also forbids fetching an icon
+// set, so the handful we use are inlined.
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+export function svgIcon(shapes, { size = "1em", cls = "icon" } = {}) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  for (const [k, v] of Object.entries({
+    viewBox: "0 0 24 24", width: size, height: size, fill: "none",
+    stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round",
+    "stroke-linejoin": "round", "aria-hidden": "true", class: cls,
+  })) svg.setAttribute(k, v);
+  for (const [tag, attrs] of shapes) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
+// lucide `copy`
+export const ICON_COPY_SHAPES = [
+  ["rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }],
+  ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }],
+];
+// lucide `check`
+const ICON_CHECK_SHAPES = [["path", { d: "M20 6 9 17l-5-5" }]];
+
+// copyIconButton copies a value from beside the value itself. A labelled button in a
+// row of actions says "Copy ref" and leaves you to work out WHICH ref; an icon sitting
+// against the id copies the thing it is touching, and needs no label to say so.
+export function copyIconButton(value, title = "Copy") {
+  const btn = el("button", { type: "button", class: "inline-icon-btn", title, "aria-label": title },
+    svgIcon(ICON_COPY_SHAPES));
+  btn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      btn.replaceChildren(svgIcon(ICON_CHECK_SHAPES));
+      btn.classList.add("inline-icon-btn--done");
+      setTimeout(() => {
+        btn.replaceChildren(svgIcon(ICON_COPY_SHAPES));
+        btn.classList.remove("inline-icon-btn--done");
+      }, 1200);
+    } catch { /* clipboard blocked; the value is on screen anyway */ }
+  });
+  return btn;
+}
+
 // copyButton copies a value and confirms it in place.
 export function copyButton(value, label = "Copy ref") {
   return el("button", {

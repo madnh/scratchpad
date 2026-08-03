@@ -33,7 +33,7 @@ func newPadCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newPadCreateCmd(), newPadPostCmd(), newPadGetCmd(), newPadReadCmd(),
 		newPadWaitCmd(), newPadTasksCmd(), newPadWhoCmd(), newPadListCmd(),
-		newPadDeleteCmd(), newPadPurgeCmd())
+		newPadRulesCmd(), newPadDeleteCmd(), newPadPurgeCmd())
 	return cmd
 }
 
@@ -65,7 +65,7 @@ func newProjectCmd() *cobra.Command {
 		},
 	}
 	dir.bind(list)
-	cmd.AddCommand(list)
+	cmd.AddCommand(list, newProjectRulesCmd())
 	return cmd
 }
 
@@ -163,11 +163,12 @@ func humanAge(d time.Duration) string {
 
 func newPadCreateCmd() *cobra.Command {
 	var (
-		dir     dirFlags
-		project string
-		author  string
-		title   string
-		protect bool
+		dir      dirFlags
+		project  string
+		author   string
+		title    string
+		protect  bool
+		ackRules string
 	)
 	cmd := &cobra.Command{
 		Use:   "create [content|-]",
@@ -189,7 +190,10 @@ func newPadCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			created, pw, err := st.CreatePad(config.ResolveProject(cfg, project), a, title, content, protect)
+			created, pw, err := st.CreatePad(store.CreateRequest{
+				Project: config.ResolveProject(cfg, project), Author: a,
+				Title: title, Content: content, Protect: protect, AckRules: ackRules,
+			})
 			if err != nil {
 				return err
 			}
@@ -209,8 +213,16 @@ func newPadCreateCmd() *cobra.Command {
 	f.StringVar(&project, "project", "", "project to file the pad under (default from "+config.EnvProject+", else the configured default)")
 	f.StringVar(&title, "title", "", "one-line title of the first section (required)")
 	f.BoolVar(&protect, "protect", false, "password-protect the pad (the password is generated and printed once)")
+	ackRulesFlag(cmd, &ackRules)
 	_ = cmd.MarkFlagRequired("title")
 	return cmd
+}
+
+// ackRulesFlag binds --ack-rules. It is spelled the same on create and post because it
+// answers the same question in both: have you read how work is done here?
+func ackRulesFlag(cmd *cobra.Command, ack *string) {
+	cmd.Flags().StringVar(ack, "ack-rules", "",
+		"the digest of the rules you have read (required on your FIRST post to a pad that has rules)")
 }
 
 func newPadPostCmd() *cobra.Command {
@@ -224,6 +236,7 @@ func newPadPostCmd() *cobra.Command {
 		taskOpen bool
 		task     int
 		status   string
+		ackRules string
 	)
 	cmd := &cobra.Command{
 		Use:   "post <ref> [content|-]",
@@ -264,7 +277,7 @@ func newPadPostCmd() *cobra.Command {
 			}
 			res, err := st.Post(store.PostRequest{
 				Ref: args[0], Author: a, Title: title, Content: content,
-				Password: password, Meta: meta, OpenTask: taskOpen,
+				Password: password, Meta: meta, OpenTask: taskOpen, AckRules: ackRules,
 			})
 			if err != nil {
 				return err
@@ -299,6 +312,7 @@ func newPadPostCmd() *cobra.Command {
 		"the number of an existing task this section concerns; on its own it merely references the task and stays an ordinary message")
 	f.StringVar(&status, "status", "",
 		"move the task: open, wip, blocked, done or dropped — this is what makes the section a task event")
+	ackRulesFlag(cmd, &ackRules)
 	_ = cmd.MarkFlagRequired("title")
 	return cmd
 }
@@ -328,14 +342,16 @@ func newPadGetCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			last := p.Last()
 			fmt.Fprintf(out, "ref: %s\n", p.Ref())
 			fmt.Fprintf(out, "project: %s\n", p.Project)
 			fmt.Fprintf(out, "created: %s\n", time.Unix(p.CreatedTS, 0).UTC().Format(time.RFC3339))
 			fmt.Fprintf(out, "sections: %d\n", len(p.Sections))
 			fmt.Fprintf(out, "authors: %s\n", strings.Join(p.Authors(), ", "))
 			fmt.Fprintf(out, "protected: %t\n", p.Protected())
-			fmt.Fprintf(out, "turn: %s (last: %s)\n", p.TurnState().WaitingFor, last.Author)
+			// "last message", not "last section": with task events and rules in the file
+			// the last section is often bookkeeping, and naming its author beside the turn
+			// reads as if THEY held it.
+			fmt.Fprintf(out, "turn: %s (last message: %s)\n", p.TurnState().WaitingFor, p.TurnState().LastAuthor)
 			if a := strings.TrimSpace(author); a != "" {
 				in := p.Inbox(a)
 				fmt.Fprintf(out, "\ninbox for %s (your last post: §%d)\n", a, in.Since)
@@ -354,6 +370,10 @@ func newPadGetCmd() *cobra.Command {
 			}
 			fmt.Fprintln(out)
 			printTOC(out, p.Select(store.Selector{Kind: pad.Kind(kind)}).Sections)
+			// An agent asking for a pad's state is usually about to post to it, so this is
+			// where it should meet the rules — on stderr, before it has written anything,
+			// rather than as a refusal after it has.
+			printRulesFor(cmd.ErrOrStderr(), st, p, author)
 			return nil
 		},
 	}
@@ -484,6 +504,10 @@ func newPadWaitCmd() *cobra.Command {
 				fmt.Fprintf(errOut, "also missed %d section(s) that did not match your selectors:\n", len(res.Skipped))
 				printTOC(errOut, res.Skipped)
 			}
+			// Being woken by a pad you have never posted to is exactly the "joining"
+			// moment, so the rules come with the wake-up rather than with the rejection
+			// of the reply it is about to write.
+			printRulesFor(errOut, st, res.Pad, a)
 			printSections(cmd.OutOrStdout(), res.Matched)
 			return nil
 		},

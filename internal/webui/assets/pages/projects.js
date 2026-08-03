@@ -4,6 +4,7 @@ import "/vendor/puredashboard/card.js";
 import "/vendor/puredashboard/empty.js";
 import "/vendor/puredashboard/statistic.js";
 
+import { rulesIcon } from "/components/rules-dialog.js";
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import { el, pageHead, skeleton, errorView } from "/lib/ui.js";
@@ -35,6 +36,13 @@ export default function mount(outlet) {
         const card = el("puredashboard-card", {},
           el("a", { href: `#/projects/${encodeURIComponent(p.name)}` }, stat),
           el("div", { class: "muted", title: absTime(p.last_ts), text: `last activity ${relTime(p.last_ts)}` }),
+          // Which levels of rules apply here, not the rules themselves: a listing says
+          // what EXISTS, and the text belongs to the page that opens it.
+          p.rules
+            ? el("div", { class: "muted project-card__rules" },
+              rulesIcon(),
+              el("span", { text: p.rules === "store" ? "store rules" : "project + store rules" }))
+            : null,
         );
         return card;
       }),

@@ -157,6 +157,16 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/stuck", s.api(s.handleStuck))
 	mux.HandleFunc("POST /api/pads/{ref}/unlock", s.api(s.handleUnlock))
 	mux.HandleFunc("DELETE /api/pads/{ref}", s.api(s.handleDelete))
+
+	// Rules are the only pad content this UI writes, and the only reason it can: a rules
+	// section does not take the turn, and it is authored by pad.SystemAuthor rather than
+	// impersonating an agent. Every write here goes through `secure`, which requires a
+	// same-origin Origin on any non-GET.
+	mux.HandleFunc("GET /api/rules", s.api(s.handleStoreRules))
+	mux.HandleFunc("PUT /api/rules", s.api(s.handleSetStoreRules))
+	mux.HandleFunc("GET /api/projects/{name}/rules", s.api(s.handleProjectRules))
+	mux.HandleFunc("PUT /api/projects/{name}/rules", s.api(s.handleSetProjectRules))
+	mux.HandleFunc("PUT /api/pads/{ref}/rules", s.api(s.handleSetPadRules))
 	mux.HandleFunc("GET /api/events", s.requireSession(http.HandlerFunc(s.handleEvents)))
 
 	mux.Handle("GET /", s.requireSession(s.assetHandler()))

@@ -7,7 +7,7 @@ See IDEA.md for the overall concept.
 - The primary entity is named **`pad`** (a "file" in IDEA.md) — this avoids clashing with the word "file", which is overloaded in the tool context. On disk it is still a file `<project>/<padid>.md`.
 - **`section`**: a single post within a pad, numbered incrementally starting from 1.
 - **Ref** (the fully-qualified identifier): `<project>-<padid>`, e.g. `projectx-abc123`.
-- **`stream`**: the class a section belongs to — `message` (the conversation) or `task` (the work ledger). Declared per section by the `kind` metadata key; absent means `message`. Streams share one file, one numbering and one append-only sequence, but each defines its own rules.
+- **`stream`**: the class a section belongs to — `message` (the conversation), `task` (the work ledger) or `rules` (the pad's house style). Declared per section by the `kind` metadata key; absent means `message`. Streams share one file, one numbering and one append-only sequence, but each defines its own rules.
 - **`task`**: a unit of work opened by one section and moved by later ones. It has its own number, written `T<n>`, in a numbering space separate from section numbers (written `§<n>`).
 
 ## Section metadata — routing, threading, tasks
@@ -38,7 +38,8 @@ header line has always used:
 | Key | Meaning | Absent means |
 |---|---|---|
 | `ts` | timestamp — always present, always first | — |
-| `kind` | which stream: `message` \| `task` | `message` |
+| `kind` | which stream: `message` \| `task` \| `rules` | `message` |
+| `rules` | `replace` on a rules section: the levels above do not apply | they are extended |
 | `to` | comma-separated authors this section is addressed to | broadcast (message); **invalid** (task open) |
 | `re` | the section number this one answers | not a reply |
 | `task` | the task number this section concerns | unrelated to any task |
@@ -100,18 +101,23 @@ decision` is a new *value*, not a new region — no format migration, no new rew
 Each stream carries its own rules, which is the property a physical split was wanted
 for in the first place:
 
-| | `message` | `task` |
-|---|---|---|
-| Counts for the turn rule | yes | **no** |
-| `to` absent | broadcast | **invalid** on a task open |
-| Wakes `wake_for: me` | yes | only via the task selectors |
-| Changed by | nothing — append a reply with `re` | nothing — append a status event |
+| | `message` | `task` | `rules` |
+|---|---|---|---|
+| Counts for the turn rule | yes | **no** | **no** |
+| `to` absent | broadcast | **invalid** on a task open | broadcast (`to` is rejected) |
+| Wakes `wake_for: me` | yes | only via the task selectors | yes |
+| Changed by | nothing — append a reply with `re` | nothing — append a status event | nothing — append a newer rules section |
 
 The turn rule therefore reads: **the last section whose kind is `message` holds the
 turn.** Still fully derived, still no state outside the file — the derivation just
 filters by kind before taking the last element. Consequence: a coordinator can open
 five tasks in a row without hitting `not_your_turn`, and a progress report never steals
 or grants a turn.
+
+The filter is written `== message`, never `!= task`. Stated the other way round it
+would hand the turn to every stream added later, on the day it is added, silently, in
+the one piece of state every agent depends on — which is exactly what happened to
+`rules` in review.
 
 **Honest limit.** Like the turn rule itself, every rule here — ownership included — is
 a **guard rail, not security**. Identity is self-declared (see Identity), so a
@@ -214,6 +220,103 @@ back to waiting without the turn rule obliging it to say anything.
 A hand-deleted opening section leaves an **orphaned** task: status events with no title
 or owner. It renders as orphaned and is never a parse error, matching the existing rule
 that a vanished file is simply a deleted pad.
+
+## Rules — the house style, and the one moment it is enforced
+
+Everything above makes a long pad *navigable*. None of it stops a pad from becoming
+unreadable in the first place, which is what actually happens: agents join one at a
+time, each writes at whatever length seems reasonable to it, and six hundred sections
+later every one of them is three screens long. No agent misbehaved. There was simply
+nowhere to say how work is done here, and no moment at which anyone would have read it.
+
+**Rules are prose.** A machine-checkable version was considered — a byte cap per
+section, `require_to`, and so on — and rejected: what makes a pad unreadable is not
+measurable ("put detail in a task, not in a status report"), and a rule an agent
+understands adapts, while a limit it trips over just gets worked around. The one thing
+enforced mechanically is that the rules were *fetched* before the first post.
+
+### Three levels, extending
+
+| Level | Where it lives | Why there |
+|---|---|---|
+| store | `<dir>/_rules.md` | how this deployment works, e.g. "detail goes in tasks" |
+| project | `<dir>/projects/<p>/_rules.md` | inside the project, so deleting it takes the rules along |
+| pad | a `kind: rules` section | inside the pad, so `rm` takes the rules along |
+
+Effective rules = store + project + pad, concatenated, most specific last — the way a
+global CLAUDE.md and a repo's own stack. `replace` (a first line of
+`<!-- rules: replace -->` in a file, `rules: replace` on a section) cuts the chain for
+the pad whose way of working is genuinely different rather than merely more specific.
+
+**Two levels are files, one is a section, and the split is not an inconsistency.** A
+rule set is *edited* — the new text replaces the old — which an append-only pad cannot
+express and a file expresses natively. But a pad's own rules must vanish with `rm`
+along with everything else about it, and "no state outside the pad file" is the property
+the whole design rests on. So the pad level is a section, and being append-only it comes
+out *better*: several rules sections are not several rule sets but **versions of one**,
+the last in force and the earlier ones readable as history — which a file silently
+throws away.
+
+Cumulative pad rules were rejected for the same reason: with append-only accumulation a
+rule can never be *removed*, only contradicted by a later "ignore rule 3", and the set an
+agent must obey grows monotonically for the life of the pad.
+
+### The gate: read on the way in
+
+The rules are enforced at exactly one point — an author's **first** post to a pad — and
+what is checked is that they quoted the digest (8 hex of sha256 over the combined text)
+of the rules in force. `pad_get`, `pad_wait` and `pad create`/`pad post` all hand back
+the full text with that digest, so the second attempt is a flag away.
+
+Once per author per pad is the whole design:
+
+- It fires when an agent is about to write its first message with no idea how the pad
+  works — the exact failure this exists to prevent.
+- It never interrupts a conversation in flight, so it cannot become the thing agents
+  route around.
+- **Rule *changes* are not gated**, because they do not need to be: a rules section is a
+  broadcast, so it wakes everyone already on the pad through the existing selectors. A
+  second gate would have meant remembering who has acknowledged what — subscription
+  state, the thing this design does not have anywhere else.
+
+Like the turn rule and task ownership this is a **guard rail, not security**: an agent
+that fetched the rules and did not read them can still quote the digest. It stops the
+accident, which is what all the rules here do.
+
+### The reserved author `scratchpad`
+
+A person must be able to edit rules at every level, including a pad's. The file levels
+need no identity; a section needs an author. Hence one reserved name, `pad.SystemAuthor`
+= `scratchpad`: a fixed string, not derived from the executable name, for the same reason
+the pad header says `scratchpad v1` — renaming the binary must not change what an
+already-written file means.
+
+`ValidateAuthor` refuses it, which also covers `to` (a `to` target is validated as an
+author — and nobody holds a conversation with the tool). Only the rules-writing path
+passes `ValidateAuthorAllowSystem`, and claiming the identity is a *field on the request*
+(`SystemPost`) rather than an inference from the author string, so it takes a deliberate
+act of the calling code and never a string an agent can send. It is excluded from the
+roster, participants and inboxes: it is the tool recording a change, not a teammate.
+
+This is also what lets the **Web UI write rules** without reopening the question its
+read-only rule settled. That rule exists because posting needs an agent identity and
+obeys the turn rule; a rules section has neither problem. Messages and task events stay
+agent-only, which was the part that mattered.
+
+### The naming law that came with it
+
+Rules at the store and project level are *settings*, and settings must not be
+indistinguishable from data. So the store gained a written rule rather than a
+convention: **a file starting with `_` belongs to the tool; a pad is `[a-z0-9]{1,64}.md`
+and nothing else.** It holds in both directions — pad ids are drawn from `a-z0-9`, so
+`_rules.md` can never be a pad id and `ParseRef` rejects one that tries.
+
+Everything that walks the store uses the same predicate (`pad.IsPadFileName`), which
+also fixes a pre-existing hole: any stray `*.md` used to be parsed as a pad and reported
+as corrupt. Now it is skipped — but not silently, because silence would hide a pad
+renamed by hand: `doctor` lists strays as their own section, and `internal/watch` uses
+the same predicate so a rules file never emits a change event for a ref nobody can
+resolve.
 
 ## Waking — reading is universal, waking is selective
 
@@ -318,6 +421,7 @@ Following the convention: names are `<entity>_<verb>` in snake_case, and **the s
 | `pad_read` | Read section content |
 | `pad_wait` | Long-poll waiting for a section that matches the caller's selectors (timeout capped) |
 | `pad_tasks` | The derived task board, or one task with its thread |
+| `pad_rules` | The rules in force (store + project + pad), as layers plus a digest |
 | `pad_list` | List pads |
 | `project_list` | List projects + pad count |
 
@@ -326,7 +430,7 @@ There is no `pad_delete` / `pad_update` over MCP: a pad is append-only, and dele
 ### `pad_create`
 
 ```
-input:  { project?, author, title, content, protect? }
+input:  { project?, author, title, content, protect?, ack_rules? }
 output: { ref, project, pad_id, section: 1, next: 2, password?, turn: {...} }
 ```
 
@@ -340,7 +444,8 @@ output: { ref, project, pad_id, section: 1, next: 2, password?, turn: {...} }
 input:  { ref, author, title, content, password?,
            to?: [author], re?: n,
            task_open?: bool, task?: n,
-           status?: "open"|"wip"|"blocked"|"done"|"dropped" }
+           status?: "open"|"wip"|"blocked"|"done"|"dropped",
+           ack_rules?: string, set_rules?: bool, replace?: bool }
 output: { ref, section, next, task?, turn: {...}, warnings?: [string] }
 ```
 
@@ -362,6 +467,10 @@ output: { ref, section, next, task?, turn: {...}, warnings?: [string] }
 - `warnings` is advisory and never fails the post — it carries the "nobody may be
   listening" notice when an addressee has been silent (see *Knowing whether work is
   moving*). A post that succeeded must never look like it failed.
+- `ack_rules` is checked only on an author's FIRST post to this pad, and only when the
+  pad has rules; else `rules_unread`, whose message carries the rules and the digest to
+  repeat with. `set_rules: true` makes the section the pad's rules — no `to`, no task, no
+  turn taken.
 
 ### `pad_get`
 
@@ -448,12 +557,39 @@ android outstanding" rather than collapsing to one misleading verdict.
 
 There is no `pad_task_update`. A task moves by `pad_post`.
 
+### `pad_rules`
+
+```
+input:  { ref? , project?, password? }
+output: { ref?, layers: [ { level, source, text, author?, section?, ts?,
+                            replace?, superseded? } ],
+          text, digest, history?: [n] }
+```
+
+Read-only, and the store/project levels have **no writing tool at all**: those are files,
+and rewriting a file is not an append. A pad's own rules are set through `pad_post`
+(`set_rules`) like any other section, which is what keeps this surface append-only in the
+true sense — the same reasoning that keeps `pad_delete` out of it.
+
+`layers` is deliberately not flattened into `text` alone: an agent (and a person) needs
+to know which line came from the store and which from this pad, because that is what says
+where to go to change it. `superseded` marks a level a lower `replace` switched off,
+rather than dropping it — a level that exists but does not apply is a different fact from
+one that does not exist.
+
 ### `pad_list`
 
 ```
 input:  { project? }
-output: { pads: [ { ref, project, title, section_count, authors, last_author, last_ts, protected: bool } ] }
+output: { pads: [ { ref, project, title, section_count, authors,
+                    last_author, turn_author, last_ts, protected: bool } ] }
 ```
+
+`last_author` wrote the most recent SECTION; `turn_author` wrote the most recent MESSAGE
+and therefore holds the turn. Both are published because collapsing them gets one of the
+two wrong: a change notification has to name who actually just wrote, while "whose move
+is it" must not name whoever filed a task event or edited the rules — neither takes the
+turn.
 
 `title` = the title of section 1 (a pad has no name, so it borrows context from the opening question). A pad with a password still appears in the list (metadata), but its content cannot be read without the password.
 
@@ -464,6 +600,7 @@ The author is always **self-declared, from a single source**: the `author` param
 ### Common error semantics
 
 - `not_your_turn` — includes who is currently blocked, and suggests `pad_wait`. Derived from the last `message` section only.
+- `rules_unread` — a first post to a pad with rules, without the right `ack_rules`. The message carries the rules IN FULL plus the digest, so the retry needs no second call.
 - `not_task_owner` — names the task's current owners and its opener, so the caller can see whether to ask an owner or the opener.
 - `no_such_task` — `task: <n>` references a task this pad never opened.
 - `task_needs_owner` — a task was opened without `to`.
@@ -498,21 +635,26 @@ would be one more thing to explain in `config.md` for no gain.
 ```
 scratchpad
 ├── init                 # initialize a CUSTOM dir (flag/env); the default dir self-bootstraps, so init is not required
+├── rules   [--set <text|->] [--replace]   # the store-wide rules
 ├── serve                # MCP server: UDS by default; --stdio; --tcp opt-in
 ├── ui                   # Web UI for a human: browse, read, watch (loopback only) — see the Web UI section
 ├── doctor               # diagnostics, strictly read-only (see the Doctor section)
 ├── skills               # self-documenting docs (go:embed); skills docs <topic>; -o json
 ├── version
+├── project
+│   ├── list
+│   └── rules   <project> [--set <text|->] [--replace]   # the project's rules
 └── pad
-    ├── create   --project <p> --as <author> --title <t> [--protect] [content | -]
+    ├── create   --project <p> --as <author> --title <t> [--protect] [--ack-rules <digest>] [content | -]
     ├── post     <ref> --as <author> --title <t> [--password] [content | -]
-    │              [--to a,b] [--re N]
+    │              [--to a,b] [--re N] [--ack-rules <digest>]
     │              [--task-open | --task N] [--status open|wip|blocked|done|dropped]
     ├── get      <ref> [--as <author>] [--kind message|task]   # TOC + turn (compact)
     ├── read     <ref> [--section N | --since N] [--kind K] [--task N]
     ├── wait     <ref> --since N [--timeout 10m]   # for a background CLI wait
     │              [--as <author>] [--wake-for any|me|mine|tasks|task:N,…] [--unacked 15m]
     ├── tasks    <ref> [--task N] [--open]         # the derived board
+    ├── rules    <ref> [--set <text|->] [--replace] [--as <author>]   # rules in force / the pad's own
     ├── who      <ref>                             # last activity + what each author owes
     ├── list     [--project <p>]
     ├── delete   <ref>                    # confirm with a human, --yes for automation
@@ -534,6 +676,19 @@ Notes:
 - `pad who` exists because presence does not: it reports *last activity and outstanding
   acknowledgements*, which are derivable, instead of *who is currently blocked in a
   wait*, which is not (see *Knowing whether work is moving*).
+- The three `rules` commands read without `--set` and write with it, at one level each.
+  Writing is behind an explicit flag rather than "an argument means write", so a mistyped
+  read can never overwrite the rules with the word that was meant as a filter.
+  **`--set` carries the text** (`--set -` reads stdin) rather than being a boolean beside
+  a positional argument — unlike `pad post`, whose content is positional. Rules are a
+  bullet list, so the text nearly always begins with `-`, and a positional argument
+  starting with `-` is a flag to any getopt-style parser. As a flag *value* it is simply
+  the value.
+  `pad rules --set` defaults its author to `scratchpad`: at a terminal it is a person
+  deciding how the pad works, and making them invent an agent name for that would put a
+  fictional teammate in the transcript. An agent passes its own `--as`.
+- `pad get --as X` and `pad wait --as X` print the rules to **stderr** when X has never
+  posted in this pad — the moment before the first post, rather than the error after it.
 - **`pad wait` via the CLI is not capped at 300s** (`--timeout` is arbitrary, defaulting to infinite until SIGINT) — this is exactly wait style #2 in IDEA.md: the agent runs it in the background (`run_in_background`), the command exits when a new section appears → waking the agent. Exit codes: 0 = a new section exists (printed to stdout), 3 = timed out. The new MCP `pad_wait` needs the cap because of the MCP client's per-request timeout.
 - `delete`/`purge` follow the interactivity convention: prompt with a human (TTY), fail-fast with a process, `--yes`/`--non-interactive` to override; there is a root flag `--non-interactive` + env `SCRATCHPAD_NONINTERACTIVE`.
 - The `pad *` commands operate **directly on disk** through a shared storage layer (flock when writing) — no running server is needed. The server and CLI share the same storage package, so they share the same lock discipline.
@@ -569,13 +724,21 @@ Every env has a corresponding flag; on conflict, **flag > env > config file > de
 ~/.scratchpad/                   # the Scratchpad directory, self-contained, 0700
 ├── scratchpad.config.json      # marker + settings (see Marker file contents)
 ├── config.md                       # config guide, go:embed from a separate source file in the repo
+├── _rules.md                   # store-wide rules (optional; absent = none)
 ├── scratchpad.sock             # unix socket, 0600 — derived from dir, not configured separately
 └── projects/
     ├── default/
+    │   ├── _rules.md           # this project's rules (optional)
     │   └── ab3k9x.md
     └── projectx/
         └── abc123.md
 ```
+
+**A file starting with `_` belongs to the tool; a pad is `[a-z0-9]{1,64}.md` and nothing
+else.** Settings must not be indistinguishable from data, and the rule holds in both
+directions because pad ids are drawn from `a-z0-9` (see *Rules*). One predicate,
+`pad.IsPadFileName`, is used by the store, the watcher and `doctor` — a second copy of a
+naming law is a second law.
 
 ### Marker file contents
 
@@ -647,11 +810,19 @@ stale agent, an unclaimed task, an assignment nobody answered. So the UI's first
 not "render the transcript" but **"show where the team is stuck"**; the transcript is
 what they open *after* they know where to look.
 
-**Read-only for pad content.** A person watching a conversation is not a participant
+**Read-only for the conversation.** A person watching a conversation is not a participant
 in it: posting needs an author identity and would have to obey the turn rule, which
 belongs to the agents' surfaces. **Tasks do not open a hole in this**: a task event has
 an author too, and now an ownership check as well — a "close T3" button would have to
-post as *somebody*, and the UI deliberately has no identity. The escape hatch already
+post as *somebody*, and the UI deliberately has no identity.
+
+**Rules are the one exception, and they are one precisely because they fail neither
+test.** A rules section does not take the turn, and it is authored by the reserved
+`scratchpad` identity — the tool recording what a person changed, not an agent being
+impersonated (see *Rules*). Without this a person could edit the store's and the
+project's rules but not a pad's, which is the level most worth fixing when a pad is going
+badly. Three `PUT` endpoints exist, all of them rules; messages and task events remain
+agent-only. The escape hatch already
 exists and is in the right place: a person has a shell, so `pad post --as <them>
 --task 3 --status dropped` is how they intervene. The UI is for looking; the CLI is for
 touching. Deleting a pad is available — **one at a time**, with
@@ -696,9 +867,30 @@ reconnects by itself, so a server restart heals with no client retry logic.
 | `GET /api/pads/{ref}/sections/{n}/preview` | the opening excerpt of one section |
 | `GET /api/pads/{ref}/tasks[?task=]` | the derived board, or one task |
 | `GET /api/stuck` | across all pads: assignments unacknowledged past a threshold |
+| `GET /api/rules`, `PUT /api/rules` | the store-wide rules |
+| `GET /api/projects/{name}/rules`, `PUT …` | one project's rules |
+| `PUT /api/pads/{ref}/rules` | append the pad's rules as `scratchpad` (no GET: they ride with the pad) |
 | `POST /api/pads/{ref}/unlock` | verify a protected pad's password once per session |
 | `DELETE /api/pads/{ref}` | delete one pad (no bulk counterpart, by design) |
 | `GET /api/events` | SSE stream of pad changes |
+
+The rules of a pad **ride along with `/api/pads/{ref}`** rather than sitting behind their
+own GET, following `participants` and for a stronger reason: the header must say whether
+this pad *has* rules before the person decides to open them, so the digest has to be in
+that response anyway — and once it is, the text is a few hundred bytes on a payload that
+already carries the whole TOC. Like the section titles it is withheld while the pad is
+locked, and it is built from the pad already parsed for the response — reading it again
+would rebuild every section body a second time on the one request that is already the
+most expensive.
+
+The three writing endpoints go through the state-changing guards that already exist:
+loopback bind, non-loopback `Host` refused, same-origin `Origin` required, and a
+protected pad must have been unlocked in the session (exactly as `DELETE` requires).
+One path detail has to be caught in the CLIENT because the server never sees it:
+`encodeURIComponent` leaves `..` alone, and both the browser and Go's router normalise a
+path before routing, so `/api/projects/../rules` IS `/api/rules` — an action a person
+took as "edit this project's rules" would edit the store's. `lib/api.js` therefore
+refuses a name that is not `a-z0-9` before building the URL.
 
 Two placements follow the reasoning `preview` already established. **Participants ride
 along with the pad response** because the strip is always on screen — a second
@@ -785,6 +977,34 @@ pm §44 · 2m      backend §41 · 8m      ios §38 · 25m ⚠      android §12
                                         T3 unanswered 25m     T3 4h · §40 35m
 ```
 
+**The rules, in a modal.** Deliberately not a third rail tab: rules are a short block a
+person opens, reads and closes, so a permanent column of the transcript's width would be
+the wrong trade, and it would drag the rail's own state — which tab is selected, where it
+is scrolled — into something looked at once a session. One dialog component serves the
+pad view, the project page and Settings, differing only in how many levels there are to
+show; each level renders as its own block with its source, because knowing *which* level
+a line comes from is what tells a person where to change it. It is reached from a chip
+beside the pad's identity, from the `RULES` badge on the section itself, from a chip on
+the project page, and from Settings.
+
+Four things about how it reads, each of which was got wrong first:
+
+- **Levels are named by reach, not by file.** "Everywhere in this store" / "Everywhere in
+  project X" / "This pad only" — `store`/`project`/`pad` is the vocabulary of the disk
+  layout, while what a reader needs is how far a rule reaches. For the same reason the
+  `replace` option names the levels it switches off ("Ignore the store rules and X's rules
+  — this pad follows only what is written here") instead of saying "the levels above",
+  which points at nothing when you are looking at one box.
+- **Rules render as the markdown they are written in**, so a list of habits reads as a
+  list. Through the shared renderer, which builds nodes and never touches `innerHTML` —
+  this text is written by agents. The editor stays plain text: you edit what you wrote.
+- **The digest is not a label.** The chip says "Rules"; the digest sits at the foot of the
+  dialog with the sentence that says what it is for ("an agent must quote this code on its
+  first post"). A hash on a button answers the agent's question, not the person's.
+- **Settings shows the store's rules in place**, not a summary with a button: the card is
+  three lines, and someone who came to check what this store asks of its agents should not
+  have to open a dialog to find out. The dialog is for CHANGING them.
+
 **A Tasks tab beside the Outline**, in the existing right rail. A second rail is not
 added: the rail is already the pad's index, and Tasks is another index of the same pad.
 Selecting a task filters the transcript to its thread — the person's version of the
@@ -833,6 +1053,8 @@ Reports:
 
 - **Resolution**: the running binary (its real path, symlinks resolved), version, `on PATH` (resolving to this exact file), a **PATH shadow** on its own line if the command name resolves to a different file (compared by inode/`os.SameFile`, **never executing** the file found); cwd, the config dir + the winning source, the marker path, and the derived `projects/` and socket paths.
 - **Store**: does `projects/` exist? is it writable? the number of projects/pads (counted by stat/list, changing nothing); can the last pad file be parsed (read read-only).
+- **Rules**: which of the three levels exist, and the digest of what a pad in the default project would get. This is where "the agents are ignoring the rules" starts, and the first question is whether the rules are where the operator thinks they are.
+- **Strays**: files under `projects/` that are neither pads nor tool files. Every listing skips them; `doctor` is the one place that says they are there, so a pad renamed by hand does not simply disappear.
 - Opt-in: `--content` (lists each pad's ref + section count), `--verdict` (a conclusion + next steps, walking through failure modes from the outside in), `--json`.
 
 ### Output streams (hard rules)
@@ -932,6 +1154,9 @@ Positioning: **the CLI is the primary path, self-sufficient for local use** — 
 | Selective waking (`--wake-for`, `--unacked`) | ✅ | ✅ (`wake_for`, `unacked_s`) |
 | Tasks: open / move / close | ✅ `pad post --task-open/--task` | ✅ `pad_post` with task metadata |
 | Tasks: the derived board | ✅ `pad tasks`, `pad who` | ✅ `pad_tasks` (read-only) |
+| Rules: read | ✅ `rules`, `project rules`, `pad rules` | ✅ `pad_rules` |
+| Rules: write a PAD's | ✅ `pad rules --set` | ✅ `pad_post(set_rules)` — it is an append |
+| Rules: write a store's / project's | ✅ `rules --set`, `project rules --set` | ❌ — rewriting a file is not an append |
 | Delete / cleanup (`delete`, `purge`) | ✅ (confirm with a human, `--yes` for automation) | ❌ — the agent surface is append-only |
 | Operations (`init`, `serve`, `ui`, `doctor`, `skills`, `version`) | ✅ | ❌ |
 | Identity | `--as` / env `SCRATCHPAD_AUTHOR` | param `author` (self-declared, mandatory) |
@@ -982,6 +1207,7 @@ laid on top of the current shape.
 |---|---|
 | **1** | `internal/pad` split + Selector + the `make check` invariant; the metadata line (`to`, `re`); `--wake-for`; `--unacked`; the post-time silence warning; `pad who`; UI routing chips, reply links, participants strip |
 | **2** | `kind: task` + ownership + the two-level fold; `pad tasks` / `pad_tasks`; task selectors (`mine`, `task:<n>`, `tasks`); UI Tasks tab, task thread filter, `/api/stuck`, notification filters |
+| **3** | `kind: rules` + the three levels + the `_` naming law; `rules` / `project rules` / `pad rules`; `--ack-rules` and the `rules_unread` gate; `pad_rules`; the reserved `scratchpad` author; UI rules dialog and the three `PUT`s |
 
 Phase 1 addresses the stale-agent, fake-mention and irrelevant-wake problems; phase 2
 addresses tracking a pad too long to read.

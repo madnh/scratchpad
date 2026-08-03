@@ -158,6 +158,9 @@ func (p *Pad) Participants() []Participant {
 	idx := map[string]int{}
 	var out []Participant
 	for _, sec := range p.Sections {
+		if sec.Author == SystemAuthor {
+			continue // the tool writing down a person's edit is not a teammate
+		}
 		i, seen := idx[sec.Author]
 		if !seen {
 			idx[sec.Author] = len(out)

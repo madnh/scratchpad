@@ -31,12 +31,13 @@ import { menu } from "/vendor/puredashboard/menu.js";
 
 import "/components/pad-outline.js";
 import "/components/pad-tasks.js";
+import { rulesChip, showRules } from "/components/rules-dialog.js";
 
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
 import * as prefs from "/lib/prefs.js";
-import { el, pageHead, skeleton, errorView, copyButton, setChildren } from "/lib/ui.js";
+import { el, pageHead, skeleton, errorView, copyButton, copyIconButton, setChildren } from "/lib/ui.js";
 import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex, safeText, cutChars } from "/lib/fmt.js";
 
 // Menu icons. Inline SVG, following the library's own rule that a component carries
@@ -128,6 +129,10 @@ export default function mount(outlet, ctx) {
   // The toolbar's live parts, filled in by mountFrame().
   let frame = null;
   let watchSwitch = null;
+  // The rules chip is built once with the rest of the meta row and repainted in place,
+  // like everything else in the frame: rebuilding it would lose nothing visible but would
+  // break the rule that only the transcript is ever rebuilt.
+  let rulesEntry = null;
   let peopleStrip = null;   // the participants strip, which is also the pad's roster
   let peopleKey = "";       // what that strip was last painted from
   let authorOptions = "";   // the author list the filter was last built from
@@ -425,8 +430,16 @@ export default function mount(outlet, ctx) {
   function mountFrame() {
     const sentinel = el("div", { class: "pad__sticky-sentinel" });
     frame = { sentinel, ...buildToolbar() };
+    // Rules belong with the pad's ACTIONS, beside Copy ref: they are something you open
+    // and change, not a property of the pad like its project or its age. Down in the meta
+    // row a person reads past them.
+    rulesEntry = rulesChip({ kind: "pad", ref, project: pad.project }, () => pad.rules, {
+      onSection: (n) => pickSection(n),
+      onChange: (rules) => { pad.rules = rules; rulesEntry.repaint(); },
+    });
     setChildren(outlet,
-      pageHead(pad.title || ref, null, copyButton(ref), padMenuButton()),
+      breadcrumb(),
+      pageHead(pad.title || ref, null, watchToggle(), rulesEntry, padMenuButton()),
       metaRow(),
       peopleRow(),
       sentinel,
@@ -740,14 +753,45 @@ export default function mount(outlet, ctx) {
     peopleStrip.hidden = !cells.length;
   }
 
+  // Where this pad sits, above its title: Projects → the project. The pad itself is NOT
+  // a crumb — the title right underneath already says which pad you are on, and repeating
+  // it costs a line to tell you something you can read at twice the size.
+  //
+  // Hand-built rather than <puredashboard-breadcrumb>, because that component treats its
+  // LAST crumb as the current page and renders it as plain text. Here the last crumb is
+  // the project, which is precisely the one that has to stay clickable.
+  function breadcrumb() {
+    return el("nav", { class: "pad__crumbs", "aria-label": "Breadcrumb" },
+      el("ol", {},
+        el("li", {}, el("a", { href: "#/projects", text: "Projects" })),
+        el("li", {}, el("a", {
+          href: `#/projects/${encodeURIComponent(pad.project)}`, text: pad.project,
+        })),
+      ),
+    );
+  }
+
   function metaRow() {
+    // Copy sits ON the id it copies. As a labelled button among the page's actions it
+    // said "Copy ref" and left you to work out which ref; here it touches the thing.
     const row = el("div", { class: "pad__meta" },
-      el("span", { class: "ref", text: ref }),
-      el("puredashboard-tag", { color: "info", size: "sm", text: pad.project }),
+      el("span", { class: "pad__id" },
+        el("span", { class: "ref", text: ref }),
+        copyIconButton(ref, "Copy this pad's ref"),
+      ),
       el("span", { class: "muted", title: absTime(pad.created_ts), text: `created ${relTime(pad.created_ts)}` }),
     );
     if (pad.protected) row.append(el("puredashboard-tag", { color: "warning", size: "sm", text: "protected" }));
+    // No roster here: the participants strip below IS this pad's roster, and it is shown
+    // whole — this page is where you come to find out exactly who is on a conversation,
+    // so a "+2" would be hiding the answer. The pads TABLE still caps its own list,
+    // because a row there has one line's worth of room.
+    return row;
+  }
 
+  // watchToggle is an action on the pad, so it belongs with the other actions in the
+  // header rather than trailing the facts about it in the meta row.
+  function watchToggle() {
     watchSwitch = el("puredashboard-switch");
     watchSwitch.label = "Watch this pad";
     watchSwitch.checked = wl.isWatched(ref);
@@ -755,12 +799,7 @@ export default function mount(outlet, ctx) {
       wl.setWatched(ref, e.target.checked);
       toast(e.target.checked ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
     });
-    row.append(watchSwitch);
-    // No roster here: the participants strip below IS this pad's roster, and it is shown
-    // whole — this page is where you come to find out exactly who is on a conversation,
-    // so a "+2" would be hiding the answer. The pads TABLE still caps its own list,
-    // because a row there has one line's worth of room.
-    return row;
+    return watchSwitch;
   }
 
   // buildToolbar creates the controls ONCE and hands back the parts that later have
@@ -1045,6 +1084,21 @@ export default function mount(outlet, ctx) {
   function routingChips(sec) {
     const meta = pad.sections.find((s) => s.n === sec.n) || sec;
     const out = [];
+    // A rules section is marked where it sits, because it behaves differently from the
+    // prose around it: it does not take the turn, and only the LAST one is in force —
+    // which is why an older one says so rather than looking like current policy.
+    if (meta.kind === "rules") {
+      const inForce = pad.rules?.layers?.find((l) => l.level === "pad")?.section === meta.n;
+      out.push(el("button", {
+        type: "button", class: "chip chip--rules" + (inForce ? "" : " chip--rules-old"),
+        text: inForce ? "RULES" : "RULES (superseded)",
+        title: inForce ? "The rules in force on this pad" : "An earlier version of the pad's rules",
+        onclick: () => showRules({ kind: "pad", ref, project: pad.project }, pad.rules, {
+          onSection: (n) => pickSection(n),
+          onChange: (rules) => { pad.rules = rules; rulesEntry?.repaint(); },
+        }),
+      }));
+    }
     if (meta.task) {
       const chip = el("button", {
         type: "button", class: "chip chip--task", dataset: { status: meta.status || "" },

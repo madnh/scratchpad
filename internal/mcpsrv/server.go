@@ -26,9 +26,9 @@ func New(st *store.Store, cfg config.Config) *Server {
 	return &Server{store: st, cfg: cfg}
 }
 
-// AddTools registers the full tool surface: pad_create, pad_post, pad_get, pad_read,
-// pad_wait, pad_tasks, pad_list, project_list. Names follow <entity>_<verb>; the server
-// does NOT prefix a product name (an aggregating host may add its own prefix).
+// AddTools registers the full tool surface: pad_create, pad_post, pad_get, pad_rules,
+// pad_read, pad_wait, pad_tasks, pad_list, project_list. Names follow <entity>_<verb>;
+// the server does NOT prefix a product name (an aggregating host may add its own prefix).
 //
 // The surface stays append-only: pad_tasks reads, and a task is opened, moved and
 // closed through pad_post carrying metadata, so no mutating tool joins the set.
@@ -44,7 +44,9 @@ func (s *Server) AddTools(ms *mcp.Server) {
 
 	mcp.AddTool(ms, &mcp.Tool{
 		Name: "pad_post",
-		Description: "Post the next section to a pad. Turn-based: the author of the pad's last MESSAGE may not post again — a not_your_turn error means wait for another agent (use pad_wait). Task events are exempt, so a coordinator can open several tasks in a row. " +
+		Description: "Post the next section to a pad. Turn-based: the author of the pad's last MESSAGE may not post again — a not_your_turn error means wait for another agent (use pad_wait). Task events and rules are exempt, so a coordinator can open several tasks in a row. " +
+			"On your FIRST post to a pad that has rules you must pass ack_rules with the digest from pad_rules; a rules_unread error hands you the rules and the digest to repeat with. " +
+			"Set the pad's own rules with set_rules:true. " +
 			"Address it with `to` (everyone can still read it; `to` decides who is WOKEN) and anchor it with `re` so a reader knows what it answers. " +
 			"Open work with task_open:true + `to` (a task must have an owner) and move it with `task` + `status`. " +
 			"Returns the new section's number, any task number, the refreshed turn state, and warnings when an addressee has been silent. Include `password` when the pad is protected.",
@@ -56,6 +58,15 @@ func (s *Server) AddTools(ms *mcp.Server) {
 			"The routing metadata makes the TOC a map of the conversation: after being away, pass `author` to get your inbox (what was addressed to you since your own last post) and read only those sections instead of the whole pad. " +
 			"To wait for a new section use pad_wait instead of polling this in a loop.",
 	}, s.padGet)
+
+	mcp.AddTool(ms, &mcp.Tool{
+		Name: "pad_rules",
+		Description: "The rules in force for a pad: how agents here are expected to work (message length, when to open a task, whether to address or broadcast). " +
+			"Three levels — store, project, pad — each extending the one above, returned as separate layers with their source plus the combined text and its digest. " +
+			"Read this BEFORE your first post to a pad you have not written in: that post must quote the digest as ack_rules, and pad_get/pad_wait return the same thing when you are new to the pad. " +
+			"Pass `ref` for a pad, `project` for what would apply to a pad in a project, neither for the store-wide rules. " +
+			"Read-only: a pad's own rules are set with pad_post(set_rules:true); the project and store levels are files, edited from the CLI or the Web UI.",
+	}, s.padRules)
 
 	mcp.AddTool(ms, &mcp.Tool{
 		Name: "pad_read",

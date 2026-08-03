@@ -17,6 +17,7 @@ const (
 	CodeNotTaskOwner       = "not_task_owner"
 	CodeNoSuchTask         = "no_such_task"
 	CodeTaskNeedsOwner     = "task_needs_owner"
+	CodeRulesUnread        = "rules_unread"
 	CodePadNotFound        = "pad_not_found"
 	CodeUnauthorized       = "unauthorized"
 	CodeContentTooLarge    = "content_too_large"

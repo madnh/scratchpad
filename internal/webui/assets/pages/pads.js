@@ -18,7 +18,7 @@ export default function mount(outlet, ctx) {
 
 // renderPadTable is shared with the per-project page, which is the same table with a
 // project fixed and a different heading.
-export function renderPadTable(outlet, { project = "", heading, subtitle } = {}) {
+export function renderPadTable(outlet, { project = "", heading, subtitle, actions = [] } = {}) {
   outlet.replaceChildren(skeleton(6));
   let disposed = false;
   let rows = [];
@@ -40,7 +40,10 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
     // A table row has one line's worth of room, so the roster is capped here — the pad's
     // own page shows it whole.
     { key: "authors", label: "Agents", render: (r) => agentChips(r.authors, { max: 3 }) },
-    { key: "last_author", label: "Last turn", sortable: true },
+    // Whose MOVE it is, which is not always who wrote last: a task event or a rules
+    // section takes no turn, so naming its author here would say the wrong agent is
+    // holding things up.
+    { key: "turn_author", label: "Last turn", sortable: true },
     {
       key: "last_ts", label: "Activity", sortable: true,
       render: (r) => el("span", { class: "nowrap", title: absTime(r.last_ts), text: relTime(r.last_ts) }),
@@ -67,7 +70,7 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
       if (disposed) return;
       rows = data.pads || [];
       outlet.replaceChildren(
-        pageHead(heading || "Pads", subtitle ?? `${rows.length} pad${rows.length === 1 ? "" : "s"}`),
+        pageHead(heading || "Pads", subtitle ?? `${rows.length} pad${rows.length === 1 ? "" : "s"}`, ...actions),
         table,
       );
       repaint();
@@ -90,7 +93,7 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
     const next = {
       ref: ev.ref, project: ev.project, title: ev.title,
       section_count: ev.section_count, authors: ev.authors || [],
-      last_author: ev.last_author,
+      last_author: ev.last_author, turn_author: ev.turn_author,
       last_ts: ev.last_ts, protected: ev.protected,
     };
     if (idx < 0) rows.unshift(next); else rows[idx] = { ...rows[idx], ...next };

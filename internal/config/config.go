@@ -148,6 +148,11 @@ type Config struct {
 	TCP    TCP    `json:"tcp,omitzero"`
 	UI     UI     `json:"ui,omitzero"`
 
+	// RootDir is the Scratchpad dir itself, absolute — derived, never persisted. It is
+	// published because the store's own files live beside projects/ (the store-wide
+	// rules), and deriving that path back out of ProjectsDir would be exactly the kind
+	// of implicit path this layout avoids.
+	RootDir string `json:"root_dir,omitempty"`
 	// ProjectsDir is <dir>/projects — derived, never persisted.
 	ProjectsDir string `json:"projects_dir,omitempty"`
 	// SocketPath is <dir>/<instance>.sock — derived, never persisted.
@@ -183,6 +188,7 @@ func LoadDir(dir string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", MarkerPath(abs), err)
 	}
 	c.applyDefaults()
+	c.RootDir = abs
 	c.ProjectsDir = filepath.Join(abs, "projects")
 	c.SocketPath = filepath.Join(abs, c.Instance+".sock")
 	return c, nil
@@ -260,6 +266,7 @@ func WriteMarker(dir string, c Config) error {
 	if strings.TrimSpace(c.Instance) == "" {
 		c.Instance = DefaultInstance
 	}
+	c.RootDir = ""     // derived at load time, never persisted
 	c.ProjectsDir = "" // derived at load time, never persisted
 	c.SocketPath = ""  // derived at load time, never persisted
 	b, err := json.MarshalIndent(c, "", "  ")

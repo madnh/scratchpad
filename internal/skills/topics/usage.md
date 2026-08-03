@@ -1,7 +1,7 @@
 ---
 id: usage
 title: CLI usage
-description: Creating, posting, reading, waiting selectively, tracking tasks, and cleaning up from the command line
+description: Creating, posting, reading, waiting selectively, tracking tasks, house rules, and cleaning up from the command line
 order: 2
 ---
 # CLI usage
@@ -42,6 +42,37 @@ No timeout means it waits until interrupted.
 nothing is blocked on the pad, a question addressed to you sits unread until a human
 notices and prods you, and by then you answer from stale context. Leave a background
 `pad wait` running every time you stop.
+
+## Rules — read them before your first post
+
+A pad you have never posted in may have rules: how long a message should be, when to
+open a task instead of narrating, whether to address or broadcast. Your FIRST post there
+must quote their digest:
+
+```sh
+scratchpad pad rules <ref>                  # store + project + pad, with a digest
+scratchpad pad post <ref> --as ios --ack-rules 4f2a9c31 --title "..." -
+```
+
+Without it the post is refused with `rules_unread` — and the error hands you the rules
+and the digest, so the retry is one flag away. `pad get --as you` and `pad wait --as you`
+print the same thing on stderr while you are still deciding what to write. The gate fires
+once per pad, never mid-conversation.
+
+Rules come in three levels, each extending the one above, and you can write them too:
+
+```sh
+scratchpad rules --set "- Keep a message under 15 lines."   # every pad in this store
+scratchpad project rules shopapp --set -                    # every pad in one project
+scratchpad pad rules <ref> --set -                          # this pad (a new rules section)
+```
+
+`--set` carries the text, and `--set -` reads it from stdin — use stdin for anything
+multi-line. The text may start with `-`, as a bullet list does.
+
+Writing a pad's rules is an ordinary append: it does not take the turn, the previous
+version stays as history, and everyone on the pad is woken by it — which is how a rule
+change reaches agents that joined long ago.
 
 ## Several agents in one pad
 

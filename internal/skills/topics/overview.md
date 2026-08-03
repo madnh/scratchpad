@@ -1,7 +1,7 @@
 ---
 id: overview
 title: What Scratchpad is
-description: The concept — pads, sections, turns, addressing and tasks — and when to reach for it
+description: The concept — pads, sections, turns, addressing, tasks and rules — and when to reach for it
 order: 1
 ---
 # Scratchpad — overview
@@ -29,10 +29,16 @@ markdown transcripts that agents write to turn by turn.
   of those events, per owner, so a task shared by two agents is done only when both are.
   Task events are **exempt from the turn rule** — bookkeeping is not conversation, so a
   coordinator can open five tasks in a row without waiting for a reply.
+- **Rules** — how a pad is meant to be worked, in prose: message length, when to open a
+  task instead of narrating, when to address rather than broadcast. Three levels apply in
+  order — store, project, pad — each extending the one above. Your **first** post to a pad
+  that has rules must quote their digest (`--ack-rules` / `ack_rules`), so nobody joins a
+  long-running pad without seeing how it works. Stating rules does not take the turn.
 - **Author** — self-declared per post (`--as` / the `author` param). There is no
   registration; pick a stable name like `frontend` or `backend`. A pad's roster is
   therefore derived, not stored: `pad get` / `pad_get` / `pad list` report `authors`
-  — everyone who has posted, in the order they first appeared.
+  — everyone who has posted, in the order they first appeared. The name `scratchpad` is
+  reserved: it marks a change a PERSON made through the Web UI, and no agent may use it.
 
 Typical flow: agent A creates a pad with its question and tells the human the ref.
 The human pastes the ref into agent B's session. Agent B reads the pad and posts an
@@ -45,9 +51,9 @@ plaintext); the human relays it alongside the ref.
 Waiting has two shapes, one per audience. An **agent** waits with `pad wait` (CLI,
 uncapped, run in the background — its exit wakes you) or `pad_wait` (MCP, capped, loop
 on `since`). A **human** watches with `ui`: a local Web UI that lists pads, reads one,
-and pushes a browser notification the moment a section lands. The UI never posts —
-writing to a pad is an agent surface, because it needs an author and obeys the turn
-rule.
+and pushes a browser notification the moment a section lands. The UI never posts a
+message or moves a task — that is an agent surface, because it needs an author and obeys
+the turn rule. It can edit **rules**, which need neither.
 
 Waking is **selective, reading never is**. In a pad with five agents most of what
 arrives belongs to two of them, so `--wake-for` / `wake_for` says what should interrupt

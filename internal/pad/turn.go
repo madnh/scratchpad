@@ -10,11 +10,16 @@ type Turn struct {
 }
 
 // LastMessage returns the last section belonging to the conversation stream — the one
-// that holds the turn. A pad whose sections are all task events (only reachable by hand
+// that holds the turn. A pad whose sections are all bookkeeping (only reachable by hand
 // editing) has none, and then nobody is blocked.
+//
+// The test is `== KindMessage`, deliberately not `!= KindTask`: every stream added later
+// is bookkeeping until proven otherwise, and stating it the other way round would hand
+// the turn to each new kind on the day it appears — silently, and to the one piece of
+// state every agent relies on.
 func (p *Pad) LastMessage() (Section, bool) {
 	for i := len(p.Sections) - 1; i >= 0; i-- {
-		if p.Sections[i].Kind != KindTask {
+		if p.Sections[i].Kind == KindMessage {
 			return p.Sections[i], true
 		}
 	}
@@ -42,14 +47,14 @@ func (p *Pad) TurnState() Turn {
 	}
 }
 
-// CheckTurn enforces the turn rule for a section about to be appended. A task event is
-// exempt.
+// CheckTurn enforces the turn rule for a section about to be appended. Only a message
+// takes the turn; task events and rules are bookkeeping and are exempt.
 //
 // Like every rule here this is a GUARD RAIL, not security: identity is self-declared,
 // so a determined agent can claim any author or label a message as a task. It stops
 // accidents and drift between cooperating agents, which is what it is for.
 func (p *Pad) CheckTurn(author string, kind Kind) error {
-	if kind == KindTask {
+	if kind != KindMessage {
 		return nil
 	}
 	last, ok := p.LastMessage()

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +27,12 @@ func setup(t *testing.T) (*mcp.ClientSession, *store.Store) {
 		Limits:         config.DefaultLimits,
 		Wait:           config.Wait{DefaultS: 1, MaxS: 2}, // keep tests fast
 	}
-	st := store.New(t.TempDir(), cfg.Limits)
+	dir := t.TempDir()
+	projects := filepath.Join(dir, "projects")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(dir, projects, cfg.Limits)
 
 	ms := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
 	New(st, cfg).AddTools(ms)
@@ -89,16 +96,18 @@ func TestToolSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The surface is fixed and append-only: pad_tasks READS the derived board, and a
-	// task is opened, moved and closed through pad_post. A pad_task_update appearing
-	// here would mean the agent surface had stopped being append-only.
+	// The surface is fixed and append-only: pad_tasks and pad_rules READ derived state,
+	// and a task or a pad's rules are written through pad_post. A pad_task_update or a
+	// rules-writing tool appearing here would mean the agent surface had stopped being
+	// append-only.
 	want := map[string]bool{
 		"pad_create": false, "pad_post": false, "pad_get": false, "pad_read": false,
-		"pad_wait": false, "pad_tasks": false, "pad_list": false, "project_list": false,
+		"pad_wait": false, "pad_tasks": false, "pad_rules": false, "pad_list": false,
+		"project_list": false,
 	}
 	for _, tool := range tools.Tools {
 		if _, ok := want[tool.Name]; !ok {
-			t.Errorf("unexpected tool %q (the surface is exactly the 8 agreed tools)", tool.Name)
+			t.Errorf("unexpected tool %q (the surface is exactly the 9 agreed tools)", tool.Name)
 		}
 		want[tool.Name] = true
 	}
@@ -256,5 +265,85 @@ func TestListAndProjects(t *testing.T) {
 	call(t, cs, "project_list", nil, &projects)
 	if len(projects.Projects) != 2 {
 		t.Fatalf("want 2 projects: %+v", projects)
+	}
+}
+
+// The agent-facing side of rules: read them with pad_rules, quote the digest on the
+// first post, and set a pad's own with pad_post(set_rules) — which stays an append, so
+// the surface is still append-only.
+func TestRulesOverMCP(t *testing.T) {
+	cs, st := setup(t)
+	if err := st.SetStoreRules("- keep it under 15 lines", false); err != nil {
+		t.Fatal(err)
+	}
+
+	var rules rulesOutput
+	call(t, cs, "pad_rules", map[string]any{"project": "default"}, &rules)
+	if rules.Digest == "" || len(rules.Layers) != 1 {
+		t.Fatalf("pad_rules should report the store layer: %+v", rules)
+	}
+
+	if msg := callErr(t, cs, "pad_create", map[string]any{
+		"project": "default", "author": "pm", "title": "kickoff", "content": "starting",
+	}); !strings.Contains(msg, "rules_unread") || !strings.Contains(msg, rules.Digest) {
+		t.Fatalf("create without an ack must fail with the rules and the digest: %s", msg)
+	}
+
+	var created createOutput
+	call(t, cs, "pad_create", map[string]any{
+		"project": "default", "author": "pm", "title": "kickoff", "content": "starting",
+		"ack_rules": rules.Digest,
+	}, &created)
+
+	// Setting the pad's rules through pad_post: no turn taken, so pm may still not post
+	// an ordinary message afterwards.
+	call(t, cs, "pad_post", map[string]any{
+		"ref": created.Ref, "author": "pm", "title": "House style",
+		"content": "- progress goes on the task", "set_rules": true,
+	}, nil)
+	if msg := callErr(t, cs, "pad_post", map[string]any{
+		"ref": created.Ref, "author": "pm", "title": "again", "content": "x",
+	}); !strings.Contains(msg, "not_your_turn") {
+		t.Fatalf("rules must not hand pm the turn: %s", msg)
+	}
+
+	var padRules rulesOutput
+	call(t, cs, "pad_rules", map[string]any{"ref": created.Ref}, &padRules)
+	if len(padRules.Layers) != 2 || padRules.Layers[1].Level != "pad" {
+		t.Fatalf("the pad's own rules should be the second layer: %+v", padRules.Layers)
+	}
+
+	// A newcomer meets the rules on pad_get, before writing anything.
+	var got getOutput
+	call(t, cs, "pad_get", map[string]any{"ref": created.Ref, "author": "ios"}, &got)
+	if got.Rules == nil || got.Rules.Digest != padRules.Digest {
+		t.Fatalf("pad_get must hand a newcomer the rules: %+v", got.Rules)
+	}
+	if msg := callErr(t, cs, "pad_post", map[string]any{
+		"ref": created.Ref, "author": "ios", "title": "hi", "content": "hello",
+	}); !strings.Contains(msg, "rules_unread") {
+		t.Fatalf("a newcomer's first post must be gated: %s", msg)
+	}
+	call(t, cs, "pad_post", map[string]any{
+		"ref": created.Ref, "author": "ios", "title": "hi", "content": "hello",
+		"ack_rules": padRules.Digest,
+	}, nil)
+
+	// Once they are on the pad, pad_get stops repeating the rules at them. (A fresh
+	// value to decode into: an absent field leaves the previous one in place.)
+	var settled getOutput
+	call(t, cs, "pad_get", map[string]any{"ref": created.Ref, "author": "ios"}, &settled)
+	if settled.Rules != nil {
+		t.Fatalf("the rules should not be repeated to an author already on the pad: %+v", settled.Rules)
+	}
+}
+
+// The reserved identity is not reachable from the agent surface at all.
+func TestSystemAuthorRefusedOverMCP(t *testing.T) {
+	cs, _ := setup(t)
+	if msg := callErr(t, cs, "pad_create", map[string]any{
+		"author": "scratchpad", "title": "t", "content": "c",
+	}); !strings.Contains(msg, "reserved") {
+		t.Fatalf("want the reserved-name error, got: %s", msg)
 	}
 }

@@ -60,6 +60,14 @@ func run(dir string, force bool) error {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 
+	// The two FILE levels of rules, written with the same renderer the store uses so the
+	// replace marker cannot drift. A demo store without them would show an empty rules
+	// dialog and a gate that never fires — i.e. it would demo nothing.
+	if err := os.WriteFile(filepath.Join(dir, pad.RulesFileName),
+		[]byte(pad.RenderRulesFile(storeRules, false)), 0o600); err != nil {
+		return err
+	}
+
 	for _, sc := range scenarios {
 		text, err := build(sc, now)
 		if err != nil {
@@ -68,6 +76,12 @@ func run(dir string, force bool) error {
 		dest := filepath.Join(dir, "projects", sc.Project)
 		if err := os.MkdirAll(dest, 0o700); err != nil {
 			return err
+		}
+		if rules, ok := projectRules[sc.Project]; ok {
+			if err := os.WriteFile(filepath.Join(dest, pad.RulesFileName),
+				[]byte(pad.RenderRulesFile(rules, false)), 0o600); err != nil {
+				return err
+			}
 		}
 		if err := os.WriteFile(filepath.Join(dest, sc.ID+".md"), []byte(text), 0o600); err != nil {
 			return err
@@ -138,6 +152,9 @@ func build(sc scenario, now time.Time) (string, error) {
 		meta := pad.Meta{To: ev.To}
 		if ev.Opens != "" || ev.Status != "" {
 			meta.Kind = pad.KindTask
+		}
+		if ev.Rules {
+			meta.Kind, meta.Replace = pad.KindRules, ev.Replace
 		}
 		switch {
 		case ev.Opens != "":

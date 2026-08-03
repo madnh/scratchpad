@@ -169,7 +169,17 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
 /* The spacer stops stretching once the title is the flexible item — two growing
    siblings would split the row in half and wrap the title at 50% width. */
 .page__head > .page__spacer { flex: none; }
-.page__head > button { flex: none; margin-top: .15rem; }
+/* Every action sits on the title's FIRST line and shares one baseline. The row is
+   `align-items: flex-start` so a title that wraps keeps its actions at the top rather
+   than centred against a two-line block — but that alone leaves controls of different
+   heights (a switch, a button) hanging at different offsets, which is what made the
+   header look crooked. Aligning them to each other fixes it without giving that up. */
+.page__head > button,
+.page__head > puredashboard-switch,
+.page__head > .rules-chip {
+  flex: none; align-self: flex-start; margin-top: .15rem;
+  display: inline-flex; align-items: center; min-height: 1.9rem;
+}
 .page__sub { color: var(--muted); font-size: .85rem; }
 .page__spacer { flex: 1; }
 
@@ -217,6 +227,27 @@ puredashboard-content { display: flex; flex-direction: column; padding: 0; }
    under the control — enough to lift the knob and its label off the row's centre
    line. Making the host a flex box shrinks it to the control itself. */
 .pad__meta puredashboard-switch { display: inline-flex; align-items: center; }
+/* The trail sits above the title and stays quiet: it says where you are, and the title
+   right under it is what the eye should land on. The separator is drawn in CSS so it is
+   never announced by a screen reader and never selectable as text. */
+.pad__crumbs { display: block; margin-bottom: .3rem; font-size: .82rem; }
+.pad__crumbs ol { display: flex; flex-wrap: wrap; gap: .35rem; list-style: none; margin: 0; padding: 0; }
+.pad__crumbs li + li::before { content: "/"; color: var(--muted); margin-right: .35rem; }
+.pad__crumbs a { color: var(--muted); text-decoration: none; }
+.pad__crumbs a:hover { color: var(--text); text-decoration: underline; }
+
+/* The id and the control that copies it are one unit. A name of its own, deliberately:
+   `.icon-btn` already exists further down for the header's overflow button, and reusing
+   it here resized that one instead. */
+.pad__id { display: inline-flex; align-items: center; gap: .25rem; }
+.inline-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.6rem; height: 1.6rem; padding: 0; cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--radius, 6px);
+  background: none; color: var(--muted); font-family: inherit;
+}
+.inline-icon-btn:hover { color: var(--text); border-color: var(--border); }
+.inline-icon-btn--done { color: var(--success, #3fb950); }
 /* The section toolbar sticks: on a pad hundreds of sections long, the controls that
    filter, jump and reorder must not scroll away — otherwise using them means scrolling
    back up first, which is the whole reason to have them. */
@@ -636,6 +667,77 @@ button.chip:hover { color: var(--text); border-color: var(--text); }
 .chip--task[data-status="blocked"] { color: var(--danger, #d9534f); border-color: var(--danger, #d9534f); }
 /* A task event does not take the turn, so it should not look like a reply either. */
 .msg:has(.chip--task) .msg__author { font-style: italic; }
+
+/* ── rules ─────────────────────────────────────────────────────────────────────
+   A rules section is neither conversation nor bookkeeping about work: it is the
+   pad telling you how to write in it. It gets its own accent so it reads as
+   policy at a glance, and a superseded one is visibly past tense. */
+.chip--rules { color: var(--warning, #d29922); border-color: var(--warning, #d29922); }
+.chip--rules-old { color: var(--muted); border-color: var(--border); text-decoration: line-through; }
+.msg:has(.chip--rules) .msg__bubble { border-left: 3px solid var(--warning, #d29922); }
+
+/* Shape and size come from .ghost-btn, so this button matches the ones beside it; all
+   that is added here is room for the icon. */
+.rules-chip { display: inline-flex; align-items: center; gap: .35rem; }
+.rules-chip--empty { color: var(--muted); }
+.rules-icon { flex: none; }
+.project-card__rules { display: flex; align-items: center; gap: .3rem; }
+
+.rules__layer { margin: 0 0 1.1rem; }
+.rules__layer--off { opacity: .55; }
+.rules__head { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; font-size: .8rem; }
+.rules__spacer { flex: 1; }
+.rules__level { font-weight: 600; }
+.rules__by { color: var(--muted); font-size: .76rem; }
+.rules__flag { color: var(--warning, #d29922); font-size: .76rem; }
+.rules__link {
+  border: none; background: none; padding: 0; cursor: pointer; font-family: inherit;
+  font-size: inherit; color: var(--accent); text-decoration: underline;
+}
+/* The rules render as the markdown they are written in, so a bullet list reads as a
+   list. The component brings its own block spacing; these rules only place it. */
+.rules__text {
+  display: block; margin: .3rem 0 0; font-size: .88rem;
+  border-left: 2px solid var(--border); padding-left: .7rem;
+}
+.rules__text :first-child { margin-top: 0; }
+.rules__text :last-child { margin-bottom: 0; }
+.rules__text ul, .rules__text ol { margin: .2rem 0; padding-left: 1.2rem; }
+.rules__layer--off .rules__text { text-decoration: line-through; }
+.rules--inline .rules__text { border-left: none; padding-left: 0; }
+
+.rules__history { margin-top: 1rem; font-size: .8rem; color: var(--muted); }
+.rules__digest {
+  margin: 1rem 0 0; padding-top: .6rem; border-top: 1px solid var(--border);
+  font-size: .76rem; color: var(--muted);
+}
+.rules__digest code { font-variant-numeric: tabular-nums; }
+.rules__editing { margin: 0 0 .5rem; }
+/* max-width and resize:vertical together are what keep the dialog from growing a
+   horizontal scrollbar: a textarea's resize handle can otherwise drag it wider than the
+   dialog, and the whole modal starts scrolling sideways. */
+.rules__editor {
+  display: block; width: 100%; max-width: 100%; box-sizing: border-box; resize: vertical;
+  /* Roomy, but never so tall that the dialog outgrows a short window. */
+  min-height: min(18rem, 45vh);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .88rem; line-height: 1.55; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius, 6px); padding: .6rem;
+}
+/* Writing needs more room than reading, and the dialog's default width is sized for a
+   confirm prompt. It widens only while the editor is on screen, so the reading view
+   stays the comfortable measure it is. */
+.rules-dialog .puredashboard-dialog__body { overflow-x: hidden; }
+.rules-dialog:has(.rules__editor) { width: min(48rem, 92vw); max-width: 92vw; }
+.rules__replace { display: block; margin: .5rem 0; font-size: .8rem; }
+.rules__hint { font-size: .78rem; margin: .3rem 0; }
+.rules__status { font-size: .8rem; color: var(--muted); min-height: 1.2em; }
+.rules__actions { display: flex; gap: .5rem; justify-content: flex-end; }
+/* Reading mode leaves the footer empty; without this the dialog keeps its border and
+   padding for a row that is not there. */
+.rules-dialog .puredashboard-dialog__footer:has(.rules__actions:empty) { display: none; }
+.rules__save { border-color: var(--accent); color: var(--accent); }
+.rules__save[disabled] { opacity: .6; cursor: default; }
 
 /* ── the stuck block on the overview ───────────────────────────────────────── */
 .stuck { margin: .5rem 0 1rem; }

@@ -20,11 +20,12 @@ import (
 // --- pad_create ---
 
 type createInput struct {
-	Project string `json:"project,omitempty" jsonschema:"project to file the pad under (a-z0-9 only, auto-created); omit for the deployment's default project"`
-	Author  string `json:"author" jsonschema:"your self-declared identity in this pad (e.g. 'frontend'); the turn rule keys off it"`
-	Title   string `json:"title" jsonschema:"one-line title of the first section (doubles as the pad's display title in listings)"`
-	Content string `json:"content" jsonschema:"markdown body of the first section (the opening question/message)"`
-	Protect bool   `json:"protect,omitempty" jsonschema:"true to password-protect the pad; the server generates the password and returns it exactly once in this result"`
+	Project  string `json:"project,omitempty" jsonschema:"project to file the pad under (a-z0-9 only, auto-created); omit for the deployment's default project"`
+	Author   string `json:"author" jsonschema:"your self-declared identity in this pad (e.g. 'frontend'); the turn rule keys off it"`
+	Title    string `json:"title" jsonschema:"one-line title of the first section (doubles as the pad's display title in listings)"`
+	Content  string `json:"content" jsonschema:"markdown body of the first section (the opening question/message)"`
+	Protect  bool   `json:"protect,omitempty" jsonschema:"true to password-protect the pad; the server generates the password and returns it exactly once in this result"`
+	AckRules string `json:"ack_rules,omitempty" jsonschema:"the digest of the rules you have read (see pad_rules). Required when this project has rules; a rules_unread error carries them in full along with the digest to quote"`
 }
 
 type createOutput struct {
@@ -39,7 +40,10 @@ type createOutput struct {
 
 func (s *Server) padCreate(_ context.Context, _ *mcp.CallToolRequest, in createInput) (*mcp.CallToolResult, createOutput, error) {
 	project := config.ResolveProject(s.cfg, in.Project)
-	p, password, err := s.store.CreatePad(project, in.Author, in.Title, in.Content, in.Protect)
+	p, password, err := s.store.CreatePad(store.CreateRequest{
+		Project: project, Author: in.Author, Title: in.Title,
+		Content: in.Content, Protect: in.Protect, AckRules: in.AckRules,
+	})
 	if err != nil {
 		return nil, createOutput{}, err
 	}
@@ -67,6 +71,9 @@ type postInput struct {
 	TaskOpen bool     `json:"task_open,omitempty" jsonschema:"open a NEW task: the server allocates its number and returns it. Requires 'to' — a task must have an owner"`
 	Task     int      `json:"task,omitempty" jsonschema:"the number of an EXISTING task this section concerns; combine with status to move it, or use it alone on a message that merely references the task"`
 	Status   string   `json:"status,omitempty" jsonschema:"move the task to open, wip, blocked, done or dropped. Setting this is what makes the section a task EVENT — exempt from the turn rule, part of the task's record, and the owner's answer for it. Only its owners (their own slice) or its opener (reassign/drop/force-close) may set it"`
+	AckRules string   `json:"ack_rules,omitempty" jsonschema:"the digest of the rules in force on this pad (see pad_rules). Required on your FIRST post to a pad that has rules; a rules_unread error carries them in full along with the digest to quote"`
+	SetRules bool     `json:"set_rules,omitempty" jsonschema:"post this section as the pad's RULES rather than a message: how agents here are expected to work. It replaces the pad's previous rules (the old ones stay in the pad as history), takes no to/task/status, and does not take the turn"`
+	Replace  bool     `json:"replace,omitempty" jsonschema:"with set_rules: these rules REPLACE the project's and the store's instead of extending them"`
 }
 
 type postOutput struct {
@@ -87,9 +94,12 @@ func (s *Server) padPost(_ context.Context, _ *mcp.CallToolRequest, in postInput
 	if in.TaskOpen || in.Status != "" {
 		meta.Kind = pad.KindTask
 	}
+	if in.SetRules {
+		meta.Kind, meta.Replace = pad.KindRules, in.Replace
+	}
 	res, err := s.store.Post(store.PostRequest{
 		Ref: in.Ref, Author: in.Author, Title: in.Title, Content: in.Content,
-		Password: in.Password, Meta: meta, OpenTask: in.TaskOpen,
+		Password: in.Password, Meta: meta, OpenTask: in.TaskOpen, AckRules: in.AckRules,
 	})
 	if err != nil {
 		return nil, postOutput{}, err
@@ -122,6 +132,11 @@ type getOutput struct {
 	Sections     []store.Section   `json:"sections"`
 	Participants []pad.Participant `json:"participants"`
 	Inbox        *pad.Inbox        `json:"inbox,omitempty"`
+
+	// Rules is present only when `author` has never posted here and the pad has rules:
+	// the one moment they need reading, delivered before the first post rather than as
+	// the error that rejects it.
+	Rules *pad.Rules `json:"rules,omitempty"`
 }
 
 func (s *Server) padGet(_ context.Context, _ *mcp.CallToolRequest, in getInput) (*mcp.CallToolResult, getOutput, error) {
@@ -149,8 +164,62 @@ func (s *Server) padGet(_ context.Context, _ *mcp.CallToolRequest, in getInput) 
 	if in.Author != "" {
 		inbox := p.Inbox(in.Author)
 		out.Inbox = &inbox
+		out.Rules = s.rulesFor(p, in.Author)
 	}
 	return nil, out, nil
+}
+
+// --- pad_rules ---
+
+type rulesInput struct {
+	Ref      string `json:"ref,omitempty" jsonschema:"pad reference, e.g. 'projectx-abc123'; omit it and pass project to see what applies to a pad you have not created yet"`
+	Project  string `json:"project,omitempty" jsonschema:"a project name, when asking without a pad; omit both for the store-wide rules only"`
+	Password string `json:"password,omitempty" jsonschema:"the pad's password, required when it is protected"`
+}
+
+type rulesOutput struct {
+	Ref string `json:"ref,omitempty"`
+	pad.Rules
+}
+
+// padRules is READ-ONLY, and the store/project levels have no writing tool at all: they
+// are files, and rewriting a file is not an append. A pad's own rules ARE an append, so
+// they are set through pad_post (set_rules) like every other section — which is what
+// keeps this surface append-only in the true sense.
+func (s *Server) padRules(_ context.Context, _ *mcp.CallToolRequest, in rulesInput) (*mcp.CallToolResult, rulesOutput, error) {
+	if in.Ref != "" {
+		rules, err := s.store.PadRules(in.Ref, in.Password)
+		if err != nil {
+			return nil, rulesOutput{}, err
+		}
+		return nil, rulesOutput{Ref: in.Ref, Rules: rules}, nil
+	}
+	project := ""
+	if in.Project != "" {
+		project = config.ResolveProject(s.cfg, in.Project)
+	}
+	rules, err := s.store.ProjectRuleSet(project)
+	if err != nil {
+		return nil, rulesOutput{}, err
+	}
+	return nil, rulesOutput{Rules: rules}, nil
+}
+
+// rulesFor returns the rules an author must acknowledge before their first post here, and
+// nothing at all once they have posted. Attaching it to pad_get and pad_wait is what makes
+// the gate teachable rather than merely blocking: an agent meets the rules on the call it
+// uses to arrive at the pad, not in the error for the message it already wrote.
+func (s *Server) rulesFor(p *store.Pad, author string) *pad.Rules {
+	if author == "" || p.HasPosted(author) {
+		return nil
+	}
+	// From the pad the caller already parsed: its password was checked when it was
+	// loaded, and reading it again would rebuild every section body for nothing.
+	rules, err := s.store.RulesOf(p)
+	if err != nil || rules.Empty() {
+		return nil
+	}
+	return &rules
 }
 
 // --- pad_read ---
@@ -208,6 +277,11 @@ type waitOutput struct {
 	Sections     []store.Section `json:"sections,omitempty"`
 	Skipped      []store.Section `json:"skipped,omitempty"`
 	Unacked      []store.Owed    `json:"unacked,omitempty"`
+
+	// Rules rides along for the same reason it does on pad_get: being woken by a pad you
+	// have never posted to IS joining it, and the reply you are about to write is the
+	// post the gate would otherwise reject.
+	Rules *pad.Rules `json:"rules,omitempty"`
 }
 
 func (s *Server) padWait(ctx context.Context, _ *mcp.CallToolRequest, in waitInput) (*mcp.CallToolResult, waitOutput, error) {
@@ -241,6 +315,7 @@ func (s *Server) padWait(ctx context.Context, _ *mcp.CallToolRequest, in waitInp
 		// context, which is the failure the selectors exist to prevent.
 		Skipped: res.Skipped,
 		Unacked: res.Unacked,
+		Rules:   s.rulesFor(res.Pad, in.Author),
 	}, nil
 }
 

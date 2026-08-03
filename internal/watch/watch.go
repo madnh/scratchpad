@@ -33,6 +33,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/madnh/scratchpad/internal/pad"
 )
 
 // debounceInterval is how long the watcher waits for a burst of kernel events to
@@ -321,17 +323,19 @@ func padFilesIn(dir string) []string {
 	}
 	var out []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+		if !e.IsDir() && pad.IsPadFileName(e.Name()) {
 			out = append(out, filepath.Join(dir, e.Name()))
 		}
 	}
 	return out
 }
 
-// isPadPath filters out editor swap files, dotfiles and anything that is not a pad.
+// isPadPath filters out editor swap files, dotfiles, the store's own files and anything
+// else that is not a pad. It uses the same naming law as the store, so a change to
+// `_rules.md` never announces itself as a pad that does not exist — a subscriber would
+// then fetch a ref nobody can resolve.
 func isPadPath(path string) bool {
-	base := filepath.Base(path)
-	return strings.HasSuffix(base, ".md") && !strings.HasPrefix(base, ".")
+	return pad.IsPadFileName(filepath.Base(path))
 }
 
 // isDir reports whether path is a directory right now.
