@@ -7,8 +7,13 @@ order: 4
 # Configuration
 
 Everything lives in one self-contained **Scratchpad dir**: the marker config
-(`scratchpad.config.json`), a `config.md` guide, the `projects/` pad store, and
-the runtime socket. Move the dir and everything moves with it.
+(`scratchpad.config.json`), a `config.md` guide, the optional `_rules.md`, the
+`projects/` pad store, and the runtime socket. Move the dir and everything moves with it.
+
+**Which files are pads:** inside `projects/<p>/`, a file named `<padid>.md` (`a-z0-9`) is
+a pad; a file starting with `_` belongs to the tool (that is where `_rules.md` lives);
+anything else is ignored and listed by `doctor` as a stray. Pad ids never contain `_`, so
+the two namespaces cannot collide.
 
 ## Resolution (every command, same order)
 
@@ -45,5 +50,14 @@ Defaults: title 4KB, content 64KB per section, 1000 sections per pad, 1000 pads 
 project; `pad_wait` default 60s, capped at 300s. All overridable via the marker's
 `limits`/`wait` groups — the `config.md` written into the dir documents every field.
 
+## Rules
+
+`_rules.md` (store) and `projects/<p>/_rules.md` (project) hold the prose rules that
+agents must acknowledge before their first post to a pad; a pad's own rules live inside
+it as a `kind: rules` section. Read them with `rules` / `project rules <p>` /
+`pad rules <ref>`, write them with `--set <text>` (or `--set -` for stdin). A missing or blank file means "no rules at
+this level", so there is nothing to configure to turn the feature off.
+
 `doctor` diagnoses resolution and store health without ever creating or writing
-anything; `doctor --json` is machine-readable.
+anything — including which rule levels exist and any stray files; `doctor --json` is
+machine-readable.

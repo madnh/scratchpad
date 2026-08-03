@@ -21,7 +21,21 @@ const (
 	KindMessage Kind = "message"
 	// KindTask is the work ledger: bookkeeping, exempt from the turn rule.
 	KindTask Kind = "task"
+	// KindRules is the pad's house style: how the agents on this pad are expected to
+	// write. Like a task event it is bookkeeping and does NOT take the turn — stating
+	// the rules is not a move in the conversation.
+	KindRules Kind = "rules"
 )
+
+// SystemAuthor is the reserved identity for something a PERSON did through a surface
+// that has no identity of its own — today, editing a pad's rules in the Web UI.
+//
+// It is a fixed string rather than something derived from the executable name, for the
+// same reason the pad header says "scratchpad v1" and the marker says
+// `type: "scratchpad"`: renaming the binary must not change what an already-written pad
+// file means. ValidateAuthor refuses it, so no agent can claim it; only the rules-writing
+// path is allowed to use it.
+const SystemAuthor = "scratchpad"
 
 // Status is a task event's state transition. Absent on an event means "no change".
 type Status string
@@ -52,6 +66,11 @@ type Meta struct {
 	Re     int      `json:"re,omitempty"`
 	Task   int      `json:"task,omitempty"`
 	Status Status   `json:"status,omitempty"`
+
+	// Replace belongs to a rules section: it cuts the inheritance chain, so the levels
+	// above (project, store) are ignored instead of being extended. It is written as
+	// `rules: replace` on the metadata line and means nothing on any other kind.
+	Replace bool `json:"replace,omitempty"`
 }
 
 // Section is one post in a pad. Meta is embedded so it flattens in JSON: a section
@@ -69,6 +88,9 @@ type Section struct {
 // IsTask reports whether this section is part of a task's record (as opposed to merely
 // referencing a task, which a plain message may also do).
 func (s Section) IsTask() bool { return s.Kind == KindTask }
+
+// IsRules reports whether this section states the pad's rules.
+func (s Section) IsRules() bool { return s.Kind == KindRules }
 
 // Broadcast reports whether the section is addressed to everyone. Absent `to` means
 // broadcast for a message; a task open without `to` is rejected at write time, so this
@@ -137,16 +159,53 @@ func (p *Pad) Find(n int) (Section, bool) {
 // Deliberately NOT the same set as Participants: this is who has SPOKEN. Participants
 // also counts an agent that was addressed and never answered — usually the one a person
 // is looking for — which is a fact about a pad's inside, not part of its listing entry.
+// SystemAuthor is excluded: it is not an agent on the pad but the tool writing down what
+// a person changed, and listing it as a participant would put a fictional teammate in
+// every view built on the roster.
 func (p *Pad) Authors() []string {
 	seen := make(map[string]bool, len(p.Sections))
 	var out []string
 	for _, sec := range p.Sections {
-		if !seen[sec.Author] {
-			seen[sec.Author] = true
-			out = append(out, sec.Author)
+		if sec.Author == SystemAuthor || seen[sec.Author] {
+			continue
 		}
+		seen[sec.Author] = true
+		out = append(out, sec.Author)
 	}
 	return out
+}
+
+// HasPosted reports whether an author has any section in this pad. It is what "first
+// time here" means — derived from the transcript, so no membership list is stored and a
+// hand-deleted section takes the membership with it.
+func (p *Pad) HasPosted(author string) bool {
+	for _, sec := range p.Sections {
+		if sec.Author == author {
+			return true
+		}
+	}
+	return false
+}
+
+// RulesSection returns the pad's rules — the LAST `kind: rules` section — plus the
+// numbers of the earlier ones, newest first.
+//
+// Several rules sections are not several sets of rules: they are versions of one, and
+// the last one wins, exactly as editing a rules FILE replaces what was there. The pad is
+// append-only, so the earlier versions stay readable instead of being overwritten; that
+// is history, not something still in force.
+func (p *Pad) RulesSection() (cur Section, history []int, ok bool) {
+	for i := len(p.Sections) - 1; i >= 0; i-- {
+		if !p.Sections[i].IsRules() {
+			continue
+		}
+		if !ok {
+			cur, ok = p.Sections[i], true
+			continue
+		}
+		history = append(history, p.Sections[i].N)
+	}
+	return cur, history, ok
 }
 
 // Title is the pad's display title. A pad has no name of its own, so it borrows the

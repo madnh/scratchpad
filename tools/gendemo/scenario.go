@@ -40,6 +40,23 @@ type event struct {
 	Opens  string     // opens a NEW task under this LABEL; needs To
 	Task   string     // the LABEL of an existing task this section concerns
 	Status pad.Status // moving the task — this is what makes it a task EVENT
+
+	// Rules makes this section the pad's rules. Several of them in one scenario is the
+	// point rather than a mistake: the last is in force and the earlier ones are the
+	// history the UI shows as superseded. Replace cuts off the project and store levels.
+	Rules   bool
+	Replace bool
+}
+
+// storeRules and projectRules are the two FILE levels of the demo. They are here for the
+// same reason the pads are: `pad rules`, the UI's rules dialog and the rules_unread gate
+// all show nothing on a store where nobody has written any.
+const storeRules = "- Keep a message under 15 lines. Detail belongs in a task, not in a status report.\n" +
+	"- Address what you write (`--to`); broadcast only what the whole pad needs."
+
+var projectRules = map[string]string{
+	"mobile": "- Reproduce before you claim a task, and say which device in the claim.\n" +
+		"- Crash work is tracked as tasks; the conversation is for decisions.",
 }
 
 type scenario struct {
@@ -72,6 +89,14 @@ var scenarios = []scenario{
 			{Ago: 3*day + 11*minute, Author: "android", Re: "brief",
 				Title: "Android: same shape",
 				Body:  "Same on a Pixel 8. Not every time — maybe two resumes in three."},
+
+			// The pad's own rules, twice: an early version and the one in force. That is
+			// what a rules section IS — a version, not a separate rule set — and it is
+			// the case the UI has to render as "superseded by §n".
+			{Ago: 3*day + 10*minute, Author: "pm", Rules: true,
+				Title: "How we work on this crash",
+				Body: "- Say which device and OS version in any repro claim.\n" +
+					"- Progress goes on the task, not into the conversation."},
 
 			{Ago: 3*day + 9*minute, Author: "pm", Opens: "crash", To: []string{"ios", "android"},
 				Title: "Crash on resume — both platforms",
@@ -210,6 +235,16 @@ var scenarios = []scenario{
 			{Ago: 15 * minute, Author: "pm", To: []string{"ios", "android", "backend", "qa"},
 				Title: "Wrapping up the crash thread",
 				Body:  "Leaving the pad open for the webhook. Everything else is closed."},
+
+			// The rules being TIGHTENED after the pad got noisy — which is how this
+			// happens in practice, and why they are versioned rather than fixed at
+			// creation. It is the last rules section, so it is the one in force; note
+			// that it does not take the turn away from pm above.
+			{Ago: 10 * minute, Author: "pm", Rules: true,
+				Title: "Tightened after the release",
+				Body: "- Say which device and OS version in any repro claim.\n" +
+					"- Progress goes on the task, not into the conversation.\n" +
+					"- Under 15 lines. If it needs more, open a task and link it."},
 		},
 	},
 

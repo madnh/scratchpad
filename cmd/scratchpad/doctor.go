@@ -101,6 +101,18 @@ type doctorStore struct {
 	LastPad      string `json:"last_pad,omitempty"` // most recently modified pad file
 	LastPadParse string `json:"last_pad_parse,omitempty"`
 	ListWarnings int    `json:"list_warnings,omitempty"`
+
+	// Rules is which levels exist and the digest a pad in the default project would be
+	// asked to acknowledge. "The agents ignore the rules" starts here, and the first
+	// thing to establish is whether the rules are where the operator thinks they are.
+	StoreRules   bool   `json:"store_rules"`
+	ProjectRules int    `json:"project_rules"`
+	RulesDigest  string `json:"rules_digest,omitempty"`
+
+	// Strays are files under projects/ that are neither pads nor tool files. Every
+	// listing skips them; this is the one place that says they exist, so a pad renamed
+	// by hand does not simply vanish.
+	Strays []string `json:"strays,omitempty"`
 }
 
 // doctorPadInfo is one pad's --content entry.
@@ -190,7 +202,7 @@ func runDoctor(dir *dirFlags, wantContent, wantVerdict bool) *doctorReport {
 
 	rep.Store = statStore(cfg)
 	if wantContent {
-		st := store.New(cfg.ProjectsDir, cfg.Limits)
+		st := store.New(cfg.RootDir, cfg.ProjectsDir, cfg.Limits)
 		if pads, _, err := st.List(""); err == nil {
 			for _, p := range pads {
 				rep.Content = append(rep.Content, doctorPadInfo{
@@ -249,7 +261,7 @@ func statStore(cfg config.Config) *doctorStore {
 	ds.Exists = true
 	ds.Writable = unix.Access(cfg.ProjectsDir, unix.W_OK) == nil
 
-	st := store.New(cfg.ProjectsDir, cfg.Limits)
+	st := store.New(cfg.RootDir, cfg.ProjectsDir, cfg.Limits)
 	if projects, err := st.Projects(); err == nil {
 		ds.ProjectCount = len(projects)
 		for _, p := range projects {
@@ -268,7 +280,32 @@ func statStore(cfg config.Config) *doctorStore {
 			ds.LastPadParse = warns[0]
 		}
 	}
+	if text, _, err := st.StoreRules(); err == nil {
+		ds.StoreRules = strings.TrimSpace(text) != ""
+	}
+	if projects, err := st.Projects(); err == nil {
+		for _, p := range projects {
+			if text, _, err := st.ProjectRules(p.Name); err == nil && strings.TrimSpace(text) != "" {
+				ds.ProjectRules++
+			}
+		}
+	}
+	if rules, err := st.ProjectRuleSet(cfg.DefaultProject); err == nil {
+		ds.RulesDigest = rules.Digest
+	}
+	if strays, err := st.StrayFiles(); err == nil {
+		ds.Strays = strays
+	}
 	return ds
+}
+
+// yesNo picks between two labels — a report reads better saying what IS there than
+// saying "true".
+func yesNo(cond bool, yes, no string) string {
+	if cond {
+		return yes
+	}
+	return no
 }
 
 // verdict walks the failure modes outermost-in and states a conclusion + next step.
@@ -346,6 +383,25 @@ func (r *doctorReport) writeText(w io.Writer) {
 		}
 		if r.Store.ListWarnings > 0 {
 			fmt.Fprintf(w, "  warnings      %d pad file(s) fail to parse\n", r.Store.ListWarnings)
+		}
+
+		fmt.Fprintln(w, "\n▸ Rules")
+		fmt.Fprintf(w, "  store         %s\n", yesNo(r.Store.StoreRules, "_rules.md", "none"))
+		fmt.Fprintf(w, "  projects      %d with their own _rules.md\n", r.Store.ProjectRules)
+		if r.Store.RulesDigest != "" {
+			fmt.Fprintf(w, "  digest        %s  (what a new pad in the default project must acknowledge)\n", r.Store.RulesDigest)
+		} else {
+			fmt.Fprintln(w, "  digest        —  (no rules apply; agents join with no guidance)")
+		}
+
+		// Not a warning: a stray file breaks nothing. It is reported because every
+		// listing skips it silently, so this is the only place a pad renamed by hand
+		// would ever show up again.
+		if len(r.Store.Strays) > 0 {
+			fmt.Fprintln(w, "\n▸ Stray files in projects/ (not pads, not tool files — ignored everywhere else)")
+			for _, s := range r.Store.Strays {
+				fmt.Fprintf(w, "  %s\n", s)
+			}
 		}
 	}
 	if len(r.Content) > 0 {

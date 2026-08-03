@@ -19,9 +19,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/madnh/scratchpad/internal/config"
+	"github.com/madnh/scratchpad/internal/pad"
 	"github.com/madnh/scratchpad/internal/store"
 	"github.com/madnh/scratchpad/internal/watch"
 )
+
+// createPad is the old positional CreatePad, for the tests that predate rules.
+func createPad(st *store.Store, project, author, title, content string, protect bool) (*store.Pad, string, error) {
+	return st.CreatePad(store.CreateRequest{
+		Project: project, Author: author, Title: title, Content: content, Protect: protect,
+	})
+}
 
 // newTestServer builds a UI server over a fresh store plus an httptest listener, and
 // returns a client that has already redeemed the one-time token.
@@ -37,7 +45,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, *http.Client, *stor
 		DisplayName: "Test", Instance: "scratchpad",
 		ProjectsDir: projects, Limits: config.DefaultLimits,
 	}
-	st := store.New(projects, config.DefaultLimits)
+	st := store.New(dir, projects, config.DefaultLimits)
 
 	srv, err := New(st, cfg, Options{Port: config.DefaultUIPort})
 	if err != nil {
@@ -161,7 +169,7 @@ func TestNonLoopbackHostRejected(t *testing.T) {
 func TestCrossOriginWriteRejected(t *testing.T) {
 	srv, ts, client, st := newTestServer(t)
 	authenticate(t, srv, ts, client)
-	pad, _, err := st.CreatePad("demo", "alice", "hello", "body", false)
+	pad, _, err := createPad(st, "demo", "alice", "hello", "body", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +198,7 @@ func TestSectionsArePagedNewestFirst(t *testing.T) {
 	srv, ts, client, st := newTestServer(t)
 	authenticate(t, srv, ts, client)
 
-	pad, _, err := st.CreatePad("demo", "alice", "s1", "body 1", false)
+	pad, _, err := createPad(st, "demo", "alice", "s1", "body 1", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +266,7 @@ func TestProtectedPadLocksContentNotIdentity(t *testing.T) {
 	srv, ts, client, st := newTestServer(t)
 	authenticate(t, srv, ts, client)
 
-	pad, password, err := st.CreatePad("demo", "alice", "secret talk", "body", true)
+	pad, password, err := createPad(st, "demo", "alice", "secret talk", "body", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,11 +316,11 @@ func TestProtectedPadLocksContentNotIdentity(t *testing.T) {
 func TestEventForProtectedPadHidesSectionTitle(t *testing.T) {
 	srv, _, _, st := newTestServer(t)
 
-	open, _, err := st.CreatePad("demo", "alice", "open pad", "body", false)
+	open, _, err := createPad(st, "demo", "alice", "open pad", "body", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	locked, _, err := st.CreatePad("demo", "alice", "locked pad", "body", true)
+	locked, _, err := createPad(st, "demo", "alice", "locked pad", "body", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +348,8 @@ func TestRunStopsPromptlyWithAnOpenEventStream(t *testing.T) {
 	// Built here rather than through newTestServer: this is the one test that needs the
 	// real Run() path — its own listener and its own Shutdown — instead of httptest,
 	// and the auth mode has to be decided before New() builds the token.
-	projects := filepath.Join(t.TempDir(), "projects")
+	dir := t.TempDir()
+	projects := filepath.Join(dir, "projects")
 	if err := os.MkdirAll(projects, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +358,7 @@ func TestRunStopsPromptlyWithAnOpenEventStream(t *testing.T) {
 		DisplayName: "Test", Instance: "scratchpad",
 		ProjectsDir: projects, Limits: config.DefaultLimits,
 	}
-	srv, err := New(store.New(projects, config.DefaultLimits), cfg,
+	srv, err := New(store.New(dir, projects, config.DefaultLimits), cfg,
 		Options{Port: freePort(t), NoAuth: true})
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +418,7 @@ func TestSSEDeliversPadChange(t *testing.T) {
 	go func() { _ = srv.watcher.Run(ctx) }()
 	go srv.hub.run(ctx)
 
-	pad, _, err := st.CreatePad("demo", "alice", "hello", "body", false)
+	pad, _, err := createPad(st, "demo", "alice", "hello", "body", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +473,7 @@ func newNoAuthServer(t *testing.T) (*Server, *httptest.Server, *store.Store) {
 		DisplayName: "Test", Instance: "scratchpad",
 		ProjectsDir: projects, Limits: config.DefaultLimits,
 	}
-	st := store.New(projects, config.DefaultLimits)
+	st := store.New(dir, projects, config.DefaultLimits)
 	srv, err := New(st, cfg, Options{Port: config.DefaultUIPort, NoAuth: true})
 	if err != nil {
 		t.Fatal(err)
@@ -481,7 +490,7 @@ func newNoAuthServer(t *testing.T) (*Server, *httptest.Server, *store.Store) {
 // no cookie jar reproduces it exactly.
 func TestNoAuthServesCookielessRequests(t *testing.T) {
 	_, ts, st := newNoAuthServer(t)
-	pad, _, err := st.CreatePad("p", "alice", "hello", "body\n", false)
+	pad, _, err := createPad(st, "p", "alice", "hello", "body\n", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +517,7 @@ func TestNoAuthServesCookielessRequests(t *testing.T) {
 // bcrypt compare before dereferencing the session.
 func TestNoAuthUnlockDoesNotPanic(t *testing.T) {
 	_, ts, st := newNoAuthServer(t)
-	pad, password, err := st.CreatePad("p", "alice", "secret", "body\n", true)
+	pad, password, err := createPad(st, "p", "alice", "secret", "body\n", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,7 +608,7 @@ func TestSectionPreviewEndpoint(t *testing.T) {
 	srv, ts, client, st := newTestServer(t)
 	authenticate(t, srv, ts, client)
 
-	pad, _, err := st.CreatePad("demo", "alice", "s1", "## Heading\nthe opening prose", false)
+	pad, _, err := createPad(st, "demo", "alice", "s1", "## Heading\nthe opening prose", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,12 +636,228 @@ func TestSectionPreviewEndpoint(t *testing.T) {
 	}
 
 	// A protected pad the session has not unlocked must not leak an excerpt.
-	locked, _, err := st.CreatePad("demo", "alice", "secret talk", "the secret itself", true)
+	locked, _, err := createPad(st, "demo", "alice", "secret talk", "the secret itself", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var denied map[string]any
 	if code := getJSON(t, client, ts.URL+"/api/pads/"+locked.Ref()+"/sections/1/preview", &denied); code != http.StatusForbidden {
 		t.Fatalf("preview of a locked pad gave %d, want 403", code)
+	}
+}
+
+// putJSON performs an authenticated PUT with a same-origin Origin, which is what the
+// browser sends and what `secure` requires of any state-changing method.
+func putJSON(t *testing.T, client *http.Client, url, body string, into any) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://"+req.Host)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if into != nil && resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(into); err != nil {
+			t.Fatalf("decode %s: %v", url, err)
+		}
+	}
+	return resp.StatusCode
+}
+
+// Rules are the only pad content this UI writes, and only because a rules section takes
+// no turn and is authored by the reserved identity rather than by an agent.
+func TestRulesEndpoints(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+	p, _, err := createPad(st, "demo", "alice", "hello", "body", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if code := putJSON(t, client, ts.URL+"/api/rules", `{"text":"- be brief"}`, nil); code != http.StatusOK {
+		t.Fatalf("PUT /api/rules gave %d", code)
+	}
+	if code := putJSON(t, client, ts.URL+"/api/projects/demo/rules", `{"text":"- always --to"}`, nil); code != http.StatusOK {
+		t.Fatalf("PUT project rules gave %d", code)
+	}
+	var padRules pad.Rules
+	if code := putJSON(t, client, ts.URL+"/api/pads/"+p.Ref()+"/rules",
+		`{"text":"- progress on the task"}`, &padRules); code != http.StatusOK {
+		t.Fatalf("PUT pad rules gave %d", code)
+	}
+	if len(padRules.Layers) != 3 {
+		t.Fatalf("want all three layers back: %+v", padRules.Layers)
+	}
+
+	// The pad's rules are a section, authored by the tool on the person's behalf — and
+	// they must not have taken the turn from alice.
+	fresh, err := st.Get(p.Ref(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := fresh.Last()
+	if last.Author != store.SystemAuthor || !last.IsRules() {
+		t.Fatalf("the UI must write rules as %q: %+v", store.SystemAuthor, last)
+	}
+	if turn := fresh.TurnState(); turn.LastAuthor != "alice" {
+		t.Fatalf("a rules section must not take the turn: %+v", turn)
+	}
+
+	// And the pad view carries them, so the header can say whether there are any.
+	var padView padResponse
+	if code := getJSON(t, client, ts.URL+"/api/pads/"+p.Ref(), &padView); code != http.StatusOK {
+		t.Fatalf("GET pad gave %d", code)
+	}
+	if padView.Rules == nil || padView.Rules.Digest != padRules.Digest {
+		t.Fatalf("the pad view must carry the rules: %+v", padView.Rules)
+	}
+}
+
+// A write without a same-origin Origin is a cross-site write attempt; the same guard
+// that protects DELETE protects these.
+func TestRulesWriteNeedsOrigin(t *testing.T) {
+	srv, ts, client, _ := newTestServer(t)
+	authenticate(t, srv, ts, client)
+
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/rules", strings.NewReader(`{"text":"- sneaky"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("a PUT with no Origin gave %d, want 403", resp.StatusCode)
+	}
+}
+
+// A protected pad's rules are pad content: they are withheld until the session has
+// unlocked it, and cannot be written before that either.
+func TestProtectedPadRulesNeedUnlock(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+	locked, password, err := createPad(st, "demo", "alice", "secret talk", "body", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetPadRules(locked.Ref(), store.SystemAuthor, "", "- secret house style", password, false); err != nil {
+		t.Fatal(err)
+	}
+
+	var view padResponse
+	if code := getJSON(t, client, ts.URL+"/api/pads/"+locked.Ref(), &view); code != http.StatusOK {
+		t.Fatalf("GET locked pad gave %d", code)
+	}
+	if !view.Locked || view.Rules != nil {
+		t.Fatalf("a locked pad must not hand out its rules: locked=%t rules=%+v", view.Locked, view.Rules)
+	}
+
+	if code := putJSON(t, client, ts.URL+"/api/pads/"+locked.Ref()+"/rules",
+		`{"text":"- injected"}`, nil); code != http.StatusForbidden {
+		t.Fatalf("writing rules into a locked pad gave %d, want 403", code)
+	}
+
+	// After unlocking, both work.
+	body := strings.NewReader(`{"password":"` + password + `"}`)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/pads/"+locked.Ref()+"/unlock", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://"+req.Host)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlock gave %d", resp.StatusCode)
+	}
+	if code := putJSON(t, client, ts.URL+"/api/pads/"+locked.Ref()+"/rules", `{"text":"- allowed now"}`, nil); code != http.StatusOK {
+		t.Fatalf("writing rules after unlocking gave %d", code)
+	}
+}
+
+// A project name reaches the filesystem, so the naming rule is what stands between a
+// path segment and a traversal. Anything that gets as far as the handler is refused.
+func TestProjectRulesRejectsBadNames(t *testing.T) {
+	srv, ts, client, _ := newTestServer(t)
+	authenticate(t, srv, ts, client)
+
+	for _, name := range []string{"..%2f..%2fetc", "Bad-Name", "a_b", "%2e%2e"} {
+		url := ts.URL + "/api/projects/" + name + "/rules"
+		if code := putJSON(t, client, url, `{"text":"- nope"}`, nil); code == http.StatusOK {
+			t.Errorf("PUT %s was accepted; a project name must be a-z0-9 only", name)
+		}
+		if code := getJSON(t, client, url, nil); code == http.StatusOK {
+			t.Errorf("GET %s was accepted; a project name must be a-z0-9 only", name)
+		}
+	}
+	// Nothing escaped the projects tree.
+	if entries, err := os.ReadDir(filepath.Dir(srv.store.ProjectsDir())); err == nil {
+		for _, e := range entries {
+			if e.Name() != "projects" && e.Name() != pad.RulesFileName {
+				t.Errorf("unexpected entry beside projects/: %q", e.Name())
+			}
+		}
+	}
+}
+
+// A literal ".." never reaches the project handler at all: both the browser and Go's
+// router normalise the path first, so `/api/projects/../rules` IS `/api/rules`. The
+// server cannot tell the two apart — which is why the UI client refuses such a name
+// before building the URL (see projectSegment in lib/api.js). This test pins the
+// behaviour down so a change in Go's routing does not pass unnoticed.
+func TestDotDotInProjectPathIsNormalisedToTheStoreRules(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+
+	if code := putJSON(t, client, ts.URL+"/api/projects/../rules", `{"text":"- store level"}`, nil); code != http.StatusOK {
+		t.Fatalf("normalised path gave %d, want it to land on /api/rules (200)", code)
+	}
+	text, _, err := st.StoreRules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "- store level" {
+		t.Fatalf("the request should have edited the STORE rules, got %q", text)
+	}
+	if _, _, err := st.ProjectRules("demo"); err != nil {
+		t.Fatalf("no project should have been touched: %v", err)
+	}
+}
+
+// The turn belongs to the last MESSAGE, so a listing must not name whoever filed the
+// most recent task event or rules section as the one holding it up.
+func TestListingSeparatesLastWriterFromTurnHolder(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+	p, _, err := createPad(st, "demo", "alice", "hello", "body", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetPadRules(p.Ref(), store.SystemAuthor, "", "- be brief", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	var list struct {
+		Pads []store.PadMeta `json:"pads"`
+	}
+	if code := getJSON(t, client, ts.URL+"/api/pads", &list); code != http.StatusOK {
+		t.Fatalf("GET pads gave %d", code)
+	}
+	if len(list.Pads) != 1 {
+		t.Fatalf("want one pad: %+v", list.Pads)
+	}
+	if got := list.Pads[0]; got.LastAuthor != store.SystemAuthor || got.TurnAuthor != "alice" {
+		t.Fatalf("last writer %q / turn holder %q, want %q / alice", got.LastAuthor, got.TurnAuthor, store.SystemAuthor)
 	}
 }

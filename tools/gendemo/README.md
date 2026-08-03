@@ -51,32 +51,47 @@ Three pads across two projects. Section numbers below are stable across rebuilds
 only the timestamps move — so they are safe to quote in a bug report, and they change
 the moment you edit the scenario.
 
-### `mobile-crash9x` — the flagship (46 sections, 5 agents, 5 tasks)
+### `mobile-crash9x` — the flagship (48 sections, 5 agents, 5 tasks, 2 rule versions)
 
 Five agents (`pm`, `ios`, `android`, `backend`, `qa`) over three days, plus `infra`,
 who is assigned work and never appears.
 
 | Task | State | Owners | Opened → last | Shows |
 |---|---|---|---|---|
-| T1 Crash on resume | `done` | ios:done android:done | §4 → §37 | the two-level fold: iOS reported `done` at §15 and the task stayed OPEN for another day and a half, because Android had not |
-| T2 Order API contract | `done` | backend:done | §10 → §39 | an ordinary single-owner task, opened → wip → done |
-| T3 Flaky checkout test | `done` | qa:done | §14 → §40 | `blocked` (§34) as a state someone else has to clear |
-| T4 Migrate to the push SDK | `dropped` | android | §31 → §33 | the opener's management right: android refuses (§32), pm drops it (§33) |
-| T5 Payment webhook signature | `open` | infra | §41 → §41 | **the overdue case** — opened 5 hours ago, owner has never posted |
+| T1 Crash on resume | `done` | ios:done android:done | §5 → §38 | the two-level fold: iOS reported `done` at §16 and the task stayed OPEN for another day and a half, because Android had not |
+| T2 Order API contract | `done` | backend:done | §11 → §40 | an ordinary single-owner task, opened → wip → done |
+| T3 Flaky checkout test | `done` | qa:done | §15 → §41 | `blocked` (§35) as a state someone else has to clear |
+| T4 Migrate to the push SDK | `dropped` | android | §32 → §34 | the opener's management right: android refuses (§33), pm drops it (§34) |
+| T5 Payment webhook signature | `open` | infra | §42 → §42 | **the overdue case** — opened 5 hours ago, owner has never posted |
 
-Derived state: turn is held by `pm` (last message §46); `pad who` reports
-`infra — never — T5 (5h)`; `/api/stuck` lists T5.
+Derived state: turn is held by `pm` (last message §47 — the rules at §48 do NOT take it);
+`pad who` reports `infra — never — T5 (5h)`; `/api/stuck` lists T5.
 
 Where to look for specific behaviour:
 
-- **The two layers of `task:`** — §41 is `kind: task; task: 5; …; status: open` (a task
-  EVENT) and §42 is `task: 5; to: pm` with no `kind` (a plain message that merely
-  cross-references it). §7, §17, §19 and §32 are the same shape. In the UI they render
+- **The two layers of `task:`** — §42 is `kind: task; task: 5; …; status: open` (a task
+  EVENT) and §43 is `task: 5; to: pm` with no `kind` (a plain message that merely
+  cross-references it). §8, §18, §20 and §33 are the same shape. In the UI they render
   as a `T5 open` chip versus a bare `T5` chip.
-- **Replies** — §43 answers §42, §38 answers §37, §45 answers §44. `re` implies `to`,
+- **Replies** — §44 answers §43, §39 answers §38, §46 answers §45. `re` implies `to`,
   so those sections address their parent's author without saying so.
-- **Broadcast vs addressed** — §46 addresses four agents; most of the middle of the pad
+- **Broadcast vs addressed** — §47 addresses four agents; most of the middle of the pad
   is broadcast and draws no chip.
+- **Rules, versioned** — §4 states the pad's rules and §48 tightens them after the
+  release. The LAST one is in force; §4 renders as superseded, and the dialog lists it
+  under "earlier versions". §48 following pm's own §47 is the proof that a rules section
+  does not take the turn.
+
+### Rules files (the two levels that are not sections)
+
+`_rules.md` at the store root, and `projects/mobile/_rules.md` for the mobile project.
+Together with the pad's own §48 they are the three layers `pad rules mobile-crash9x`
+prints and the UI's rules dialog shows. Both are written by `main.go` from the constants
+at the top of `scenario.go`.
+
+Without them the rules dialog would be empty, `rules_unread` would never fire, and
+`projects/` would have no file exercising the `_` naming law — so a demo of this feature
+would be a demo of nothing.
 
 ### `mobile-apiq7k` — a plain pad (8 sections, 2 agents, no tasks)
 
@@ -115,6 +130,8 @@ An event is one section:
 | `Opens` | opens a NEW task under this **label**; requires `To` |
 | `Task` | the **label** of an existing task this section concerns |
 | `Status` | moves the task — **setting this is what makes the section a task event** |
+| `Rules` | makes the section the pad's rules; several of them are VERSIONS of one rule set, the last in force |
+| `Replace` | with `Rules`: ignore the project and store levels instead of extending them |
 
 **Nothing refers to a section or task by number.** Insert a line in the middle and
 nothing renumbers; delete a line something replies to and the build fails with the label

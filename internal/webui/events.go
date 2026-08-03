@@ -34,9 +34,12 @@ type padEvent struct {
 	// section count does, or the row would keep the roster it was first painted with.
 	Authors    []string `json:"authors,omitempty"`
 	LastAuthor string   `json:"last_author,omitempty"`
-	LastTitle  string   `json:"last_title,omitempty"` // empty for a protected pad
-	LastTS     int64    `json:"last_ts,omitempty"`
-	Protected  bool     `json:"protected,omitempty"`
+	// TurnAuthor is who holds the turn, which is NOT who just wrote when the arriving
+	// section is a task event or the pad's rules.
+	TurnAuthor string `json:"turn_author,omitempty"`
+	LastTitle  string `json:"last_title,omitempty"` // empty for a protected pad
+	LastTS     int64  `json:"last_ts,omitempty"`
+	Protected  bool   `json:"protected,omitempty"`
 
 	// Routing and task fields, so a notification can say "T3 → done" rather than "the
 	// pad changed", and so the task panel stays live without refetching.
@@ -149,6 +152,7 @@ func (h *hub) enrich(ev watch.Event) padEvent {
 	out.SectionCount = m.SectionCount
 	out.Authors = m.Authors
 	out.LastAuthor = m.LastAuthor
+	out.TurnAuthor = m.TurnAuthor
 	out.LastTitle = lastTitle
 	out.LastTS = m.LastTS
 	out.Protected = m.Protected

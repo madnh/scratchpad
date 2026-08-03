@@ -1,7 +1,7 @@
 ---
 id: mcp
 title: MCP tools
-description: The eight MCP tools, selective waiting, tasks, and transports
+description: The nine MCP tools, selective waiting, tasks, rules, and transports
 order: 3
 ---
 # MCP surface
@@ -31,12 +31,36 @@ storage layer, so agents may freely mix both on the same store.
 | `pad_read` | section contents: one (`section`), newer-than (`since`), a `task` thread, or all |
 | `pad_wait` | long-poll until a section matches your selectors |
 | `pad_tasks` | the derived task board, or one task with its thread |
+| `pad_rules` | the rules in force here — read them before your first post |
 | `pad_list` | pads with metadata, optionally per project |
 | `project_list` | projects and pad counts |
 
 There is deliberately **no delete/update tool**: the agent surface is append-only.
 Cleanup is a human task via the CLI. `pad_tasks` does not change that — it only reads;
 a task is opened, moved and closed through `pad_post`.
+
+## Rules — read them before your first post
+
+A pad may carry rules: how long a message should be, when to open a task instead of
+narrating, whether to address or broadcast. They come in three levels (store, project,
+pad), each extending the one above.
+
+Your **first** post to a pad that has rules must quote their digest:
+
+```json
+{"ref": "..."}                                        → pad_rules → {"digest": "4f2a9c31", …}
+{"ref": "...", "author": "ios", "title": "...", "content": "...", "ack_rules": "4f2a9c31"}
+```
+
+Without it the post fails with `rules_unread`, whose message carries the rules in full
+plus the digest — so the retry needs no extra call. `pad_get` and `pad_wait` also return
+a `rules` field while you are new to the pad. The gate fires once per pad, never
+mid-conversation.
+
+To set a pad's own rules, post with `set_rules: true` (add `replace: true` to ignore the
+project and store levels instead of extending them). It takes no `to`, no task, and does
+not take the turn. The store and project levels are files — edit them from the CLI or the
+Web UI, not from here.
 
 ## Several agents in one pad
 
@@ -78,6 +102,7 @@ and the compact state. To wait longer, call `pad_wait` again with the same `sinc
 loop until `changed:true`. Always prefer this over polling `pad_get`.
 
 Errors use stable codes in the message: `not_your_turn` (the last MESSAGE was yours),
+`rules_unread` (a first post without `ack_rules`; the message carries the rules),
 `not_task_owner`, `no_such_task`, `task_needs_owner`, `pad_not_found`, `unauthorized`
 (password missing or wrong — one uniform message), `content_too_large`,
 `invalid_project_name`, `invalid_ref`, `invalid_input`, `limit_exceeded`.

@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,12 +17,25 @@ func testStore(t *testing.T) *Store {
 	limits := config.DefaultLimits
 	limits.MaxSectionsPerPad = 5
 	limits.MaxPadsPerProject = 3
-	return New(t.TempDir(), limits)
+	dir := t.TempDir()
+	projects := filepath.Join(dir, "projects")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return New(dir, projects, limits)
+}
+
+// create is the old positional CreatePad, kept for the tests that predate rules and do
+// not care about them. A test that DOES care builds the request itself.
+func create(s *Store, project, author, title, content string, protect bool) (*Pad, string, error) {
+	return s.CreatePad(CreateRequest{
+		Project: project, Author: author, Title: title, Content: content, Protect: protect,
+	})
 }
 
 func TestCreatePostReadRoundtrip(t *testing.T) {
 	s := testStore(t)
-	pad, pw, err := s.CreatePad("projectx", "frontend", "How does API X work", "The question\n", false)
+	pad, pw, err := create(s, "projectx", "frontend", "How does API X work", "The question\n", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +74,7 @@ func TestCreatePostReadRoundtrip(t *testing.T) {
 
 func TestTurnRule(t *testing.T) {
 	s := testStore(t)
-	pad, _, err := s.CreatePad("default", "a", "t", "c", false)
+	pad, _, err := create(s, "default", "a", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +95,7 @@ func TestTurnRule(t *testing.T) {
 
 func TestPasswordProtection(t *testing.T) {
 	s := testStore(t)
-	pad, pw, err := s.CreatePad("default", "a", "t", "c", true)
+	pad, pw, err := create(s, "default", "a", "t", "c", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,14 +142,14 @@ func TestValidation(t *testing.T) {
 		fn   func() error
 		code string
 	}{
-		{"bad project", func() error { _, _, err := s.CreatePad("Bad-Name", "a", "t", "c", false); return err }, CodeInvalidProjectName},
-		{"empty author", func() error { _, _, err := s.CreatePad("p1", "", "t", "c", false); return err }, CodeInvalidInput},
-		{"separator in author", func() error { _, _, err := s.CreatePad("p1", "a - b", "t", "c", false); return err }, CodeInvalidInput},
-		{"empty title", func() error { _, _, err := s.CreatePad("p1", "a", "", "c", false); return err }, CodeInvalidInput},
-		{"multiline title", func() error { _, _, err := s.CreatePad("p1", "a", "x\ny", "c", false); return err }, CodeInvalidInput},
-		{"empty content", func() error { _, _, err := s.CreatePad("p1", "a", "t", "", false); return err }, CodeInvalidInput},
+		{"bad project", func() error { _, _, err := create(s, "Bad-Name", "a", "t", "c", false); return err }, CodeInvalidProjectName},
+		{"empty author", func() error { _, _, err := create(s, "p1", "", "t", "c", false); return err }, CodeInvalidInput},
+		{"separator in author", func() error { _, _, err := create(s, "p1", "a - b", "t", "c", false); return err }, CodeInvalidInput},
+		{"empty title", func() error { _, _, err := create(s, "p1", "a", "", "c", false); return err }, CodeInvalidInput},
+		{"multiline title", func() error { _, _, err := create(s, "p1", "a", "x\ny", "c", false); return err }, CodeInvalidInput},
+		{"empty content", func() error { _, _, err := create(s, "p1", "a", "t", "", false); return err }, CodeInvalidInput},
 		{"huge content", func() error {
-			_, _, err := s.CreatePad("p1", "a", "t", strings.Repeat("x", 65*1024), false)
+			_, _, err := create(s, "p1", "a", "t", strings.Repeat("x", 65*1024), false)
 			return err
 		}, CodeContentTooLarge},
 		{"bad ref", func() error { _, err := s.Get("not_a_ref", ""); return err }, CodeInvalidRef},
@@ -149,7 +164,7 @@ func TestValidation(t *testing.T) {
 
 func TestLimits(t *testing.T) {
 	s := testStore(t) // 5 sections/pad, 3 pads/project
-	pad, _, err := s.CreatePad("p1", "a", "t", "c", false)
+	pad, _, err := create(s, "p1", "a", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,11 +181,11 @@ func TestLimits(t *testing.T) {
 	}
 
 	for i := 0; i < 2; i++ {
-		if _, _, err := s.CreatePad("p1", "a", "t", "c", false); err != nil {
+		if _, _, err := create(s, "p1", "a", "t", "c", false); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := s.CreatePad("p1", "a", "t", "c", false); !HasCode(err, CodeLimitExceeded) {
+	if _, _, err := create(s, "p1", "a", "t", "c", false); !HasCode(err, CodeLimitExceeded) {
 		t.Fatalf("want limit_exceeded on pad overflow, got %v", err)
 	}
 }
@@ -178,7 +193,7 @@ func TestLimits(t *testing.T) {
 func TestContentWithHashLines(t *testing.T) {
 	s := testStore(t)
 	content := "intro\n\n# heading inside content\nmore\n# 5 - fake - but no trailing pattern match?\n"
-	pad, _, err := s.CreatePad("default", "a", "t", content, false)
+	pad, _, err := create(s, "default", "a", "t", content, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +210,7 @@ func TestContentWithHashLines(t *testing.T) {
 
 func TestWait(t *testing.T) {
 	s := testStore(t)
-	pad, _, err := s.CreatePad("default", "a", "t", "c", false)
+	pad, _, err := create(s, "default", "a", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +252,7 @@ func TestConcurrentPosts(t *testing.T) {
 	s := testStore(t)
 	limits := config.DefaultLimits
 	s.limits = limits // plenty of room
-	pad, _, err := s.CreatePad("default", "seed", "t", "c", false)
+	pad, _, err := create(s, "default", "seed", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +288,7 @@ func TestConcurrentPosts(t *testing.T) {
 
 func TestAuthorsRoster(t *testing.T) {
 	s := testStore(t)
-	pad, _, err := s.CreatePad("default", "frontend", "t", "c", false)
+	pad, _, err := create(s, "default", "frontend", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,11 +345,11 @@ func TestParseRef(t *testing.T) {
 
 func TestDeleteAndProjects(t *testing.T) {
 	s := testStore(t)
-	pad, _, err := s.CreatePad("p1", "a", "t", "c", false)
+	pad, _, err := create(s, "p1", "a", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.CreatePad("p2", "a", "t", "c", false); err != nil {
+	if _, _, err := create(s, "p2", "a", "t", "c", false); err != nil {
 		t.Fatal(err)
 	}
 	projects, err := s.Projects()
@@ -369,7 +384,7 @@ func post(t *testing.T, s *Store, ref, author, title string, meta Meta, openTask
 // before anything is written, and a task without an owner is refused.
 func TestTaskWritePathEnforcesItsRules(t *testing.T) {
 	s := testStore(t)
-	p, _, err := s.CreatePad("default", "pm", "kickoff", "starting", false)
+	p, _, err := create(s, "default", "pm", "kickoff", "starting", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +436,7 @@ func TestTaskWritePathEnforcesItsRules(t *testing.T) {
 // that `--unacked` and `pad who` report.
 func TestCrossReferenceIsNotATaskEvent(t *testing.T) {
 	s := testStore(t)
-	p, _, err := s.CreatePad("default", "pm", "kickoff", "starting", false)
+	p, _, err := create(s, "default", "pm", "kickoff", "starting", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +481,7 @@ func TestCrossReferenceIsNotATaskEvent(t *testing.T) {
 // refused rather than silently stored.
 func TestReplyImpliesAddressingAndValidates(t *testing.T) {
 	s := testStore(t)
-	p, _, err := s.CreatePad("default", "frontend", "question", "how?", false)
+	p, _, err := create(s, "default", "frontend", "question", "how?", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +504,7 @@ func TestReplyImpliesAddressingAndValidates(t *testing.T) {
 // filtering decides what INTERRUPTS you, never what you are told about.
 func TestWaitWakesSelectivelyButCatchesUpFully(t *testing.T) {
 	s := testStore(t)
-	p, _, err := s.CreatePad("default", "pm", "kickoff", "starting", false)
+	p, _, err := create(s, "default", "pm", "kickoff", "starting", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +538,7 @@ func TestWaitWakesSelectivelyButCatchesUpFully(t *testing.T) {
 func TestWaitReturnsOnUnacked(t *testing.T) {
 	s := testStore(t)
 	// Opened by someone else, so pm is free to post the message that goes unanswered.
-	p, _, err := s.CreatePad("default", "ios", "kickoff", "starting", false)
+	p, _, err := create(s, "default", "ios", "kickoff", "starting", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,7 +566,7 @@ func TestWaitReturnsOnUnacked(t *testing.T) {
 // sender is told at the moment they can still act, and the post still succeeds.
 func TestPostWarnsAboutASilentAddressee(t *testing.T) {
 	s := testStore(t)
-	p, _, err := s.CreatePad("default", "ios", "kickoff", "starting", false)
+	p, _, err := create(s, "default", "ios", "kickoff", "starting", false)
 	if err != nil {
 		t.Fatal(err)
 	}

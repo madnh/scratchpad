@@ -27,6 +27,6 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&flagNonInteractive, "non-interactive", false,
 		"never prompt; fail instead of asking (also via "+config.EnvNonInteractive+")")
 	root.AddCommand(newInitCmd(), newServeCmd(), newUICmd(), newDoctorCmd(), newSkillsCmd(), newVersionCmd(),
-		newPadCmd(), newProjectCmd())
+		newPadCmd(), newProjectCmd(), newRulesCmd())
 	return root
 }

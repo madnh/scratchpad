@@ -16,9 +16,12 @@ here: this guide, the marker config, the pads, and the runtime socket.
 <this dir>/
 ├── scratchpad.config.json    # marker + settings (this dir is "initialized" iff it exists)
 ├── config.md                 # this guide
+├── _rules.md                 # rules for every pad in this store (optional)
 ├── scratchpad.sock           # unix socket while `serve` runs (derived: <instance>.sock)
 └── projects/
-    └── <project>/<padid>.md  # one markdown file per pad
+    └── <project>/
+        ├── _rules.md         # rules for every pad in this project (optional)
+        └── <padid>.md        # one markdown file per pad
 ```
 
 The socket and `projects/` paths are **derived** from this directory — they are never
@@ -26,6 +29,19 @@ configured separately. Move the whole directory and everything moves with it.
 
 Pads are plain markdown: you can `cat`, `grep`, and `rm` them directly. Scratchpad
 keeps no state outside the pad files — deleting a file deletes the pad, cleanly.
+
+### Which files are pads
+
+| Name | What it is |
+|---|---|
+| `_<anything>` | a file belonging to the tool — never a pad |
+| `<padid>.md`, `<padid>` matching `[a-z0-9]{1,64}` | a pad |
+| anything else | ignored; `scratchpad doctor` lists it as a stray file |
+
+Pad ids are drawn from `a-z0-9`, so a name starting with `_` can never collide with
+one. That is why the tool's own files carry the prefix: the two namespaces are kept
+apart by a rule, not by luck. A file that is neither is skipped rather than parsed as
+a broken pad — but `doctor` names it, so a pad renamed by hand does not simply vanish.
 
 ## How this directory is found
 
@@ -178,17 +194,18 @@ first.
 | Key | Meaning | Absent means |
 |---|---|---|
 | `ts` | when it was posted (RFC 3339, UTC) | — always present |
-| `kind` | `message` (the conversation) or `task` (the work ledger) | `message` |
+| `kind` | `message` (the conversation), `task` (the work ledger) or `rules` | `message` |
 | `to` | comma-separated authors it is addressed to | broadcast |
 | `re` | the section number it answers | not a reply |
 | `task` | the task number it concerns | unrelated to a task |
 | `status` | `open`, `wip`, `blocked`, `done` or `dropped` | no change |
+| `rules` | `replace` on a rules section: ignore the project and store rules | extend them |
 
 - **Addressing is not access control.** Every agent can read every section; `to` only
   decides who is *woken* by `pad wait --wake-for me`. Nothing is ever hidden by it.
 - **Only messages take turns.** Turn state comes from the last `kind: message` section,
-  so a coordinator can open several tasks in a row and a progress report never takes the
-  turn from anyone.
+  so a coordinator can open several tasks in a row, a progress report never takes the
+  turn from anyone, and stating the rules does not either.
 - **Tasks are events, not rows.** A task is opened by one section and moved by later
   ones; `pad tasks` folds them into its current state, per owner. Nothing is edited, and
   no state is stored outside these files.
@@ -204,6 +221,40 @@ first.
   last section by hand removes them from the pad.
 - **Unknown keys are ignored, never an error**, so a pad written by a newer version
   still reads here.
+
+## Rules — how a pad is meant to be worked
+
+Rules are prose: message length, when to open a task instead of narrating, whether to
+address or broadcast. They exist because a pad that runs for hundreds of sections
+without them becomes unreadable, and no validator can measure that.
+
+Three levels apply in order, each **extending** the one above:
+
+| Level | Where | Edited with |
+|---|---|---|
+| store | `_rules.md` in this dir | `scratchpad rules --set -`, or the Web UI's Settings |
+| project | `projects/<p>/_rules.md` | `scratchpad project rules <p> --set -`, or the UI |
+| pad | a `kind: rules` section | `scratchpad pad rules <ref> --set -`, `pad_post(set_rules)`, or the UI |
+
+- A missing or blank file means "no rules at this level" — blank the file to switch
+  rules off without deleting it.
+- **`replace` cuts the chain**: a first line of `<!-- rules: replace -->` in a file, or
+  `rules: replace` on a rules section, ignores the levels above instead of extending
+  them.
+- A pad's rules are a normal append, so **several rules sections are versions of one
+  rule set**: the last one is in force and the earlier ones stay as history. Removing
+  the file removes them with it, like everything else about a pad.
+- **The gate**: an author posting to a pad for the FIRST time must quote the digest of
+  the rules in force (`--ack-rules` / `ack_rules`), else `rules_unread` — which hands
+  back the rules and the digest to repeat. It fires once per author per pad; later rule
+  changes travel as an ordinary broadcast section instead.
+
+### The reserved author `scratchpad`
+
+Sections written by a PERSON through a surface that has no identity of its own — today,
+editing a pad's rules in the Web UI — are authored `scratchpad`. Agents may not claim
+that name (`invalid_input`), and it is left out of the pad's roster, its participants
+and its inbox: it is the tool recording a change, not a teammate.
 - A pad written before this line existed has a bare `ts` and parses as a broadcast
   message. **Nothing needs migrating.** Conversely a pad written *now*, read by a
   version that predates the extra keys, loses the timestamps of the sections that use

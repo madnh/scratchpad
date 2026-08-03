@@ -30,8 +30,18 @@ there is no state outside the pad files. Appends take an exclusive `flock` on th
 file; reads a shared one. The CLI and the MCP server share `internal/store` — never
 write a second disk path.
 
+**Naming law, one definition.** A file starting with `_` belongs to the tool
+(`_rules.md`); a pad is `[a-z0-9]{1,64}.md` and nothing else. The predicates live in
+`internal/pad` (`IsPadFileName`, `IsToolFileName`) and the store, the watcher and
+`doctor` all call them — never re-derive "is this a pad" from a `.md` suffix.
+
+**Turn state filters on `== KindMessage`, never `!= KindTask`.** Every stream added
+later is bookkeeping until proven otherwise; the negative form silently hands the turn
+to each new `kind` on the day it appears.
+
 The MCP surface is **append-only by design**: no delete/update tools. Deletion/purge
-exist only in the CLI.
+exist only in the CLI, and so is writing the store/project `_rules.md` (rewriting a file
+is not an append) — a PAD's rules are set through `pad_post`, because that is one.
 
 ## Surfaces — who each one is for
 
@@ -40,8 +50,11 @@ exist only in the CLI.
 - **MCP** (`serve`) — hosts that can't spawn a CLI, or cross-machine over TCP.
 - **Web UI** (`ui`, `internal/webui`) — for a PERSON: browse, read, watch. Separate
   loopback listener, not a fourth MCP transport (browsers can't use the Unix socket,
-  and its auth is a one-time link → session cookie). **Read-only for pad content** —
-  posting needs an author and obeys the turn rule, so it stays an agent surface.
+  and its auth is a one-time link → session cookie). **Read-only for the conversation** —
+  posting a message or moving a task needs an author and obeys the turn rule, so those
+  stay an agent surface. **Rules are the sole exception** and only because they fail
+  neither test: a rules section takes no turn, and it is authored by the reserved
+  `pad.SystemAuthor` ("scratchpad"), which agents may not claim. Do not widen this.
 
 `internal/watch` turns pad-file writes into a push stream via kernel filesystem
 events. It watches the STORE, never the writers: any writer — CLI, MCP, or a person

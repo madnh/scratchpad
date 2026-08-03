@@ -31,6 +31,10 @@ import (
 	"github.com/madnh/scratchpad/internal/pad"
 )
 
+// SystemAuthor is re-exported for the same reason the types below are: a surface that
+// writes rules on a person's behalf already imports store.
+const SystemAuthor = pad.SystemAuthor
+
 // The pad vocabulary, re-exported so a caller that already imports store for I/O does
 // not need a second import to name what comes back.
 type (
@@ -106,14 +110,19 @@ func (s *Store) readPadFile(f *os.File, ref string) ([]byte, error) {
 // limits. It holds no open handles or caches — every operation goes to disk, which is
 // what lets separate processes (CLI, server) share one store safely.
 type Store struct {
+	dir         string // the Scratchpad dir; the store-wide rules file lives here
 	projectsDir string
 	limits      config.Limits
 }
 
-// New builds a Store rooted at projectsDir with the given limits (zero fields have
-// been defaulted by the config loader).
-func New(projectsDir string, limits config.Limits) *Store {
-	return &Store{projectsDir: projectsDir, limits: limits}
+// New builds a Store over a Scratchpad dir and its projects directory, with the given
+// limits (zero fields have been defaulted by the config loader).
+//
+// Both paths are passed rather than one derived from the other: the store's own files
+// (today the store-wide rules) sit BESIDE projects/, and a `filepath.Dir` on the way back
+// out is the sort of implicit path this layout is arranged to avoid.
+func New(dir, projectsDir string, limits config.Limits) *Store {
+	return &Store{dir: dir, projectsDir: projectsDir, limits: limits}
 }
 
 // ProjectsDir returns the root the store operates under.
@@ -166,11 +175,29 @@ func (s *Store) validateContent(content string) error {
 	return nil
 }
 
+// CreateRequest is one pad creation. Like PostRequest it is a struct rather than a
+// parameter list: the call already carried five positional arguments before rules added a
+// sixth, and two adjacent strings are how call sites start passing them the wrong way
+// round.
+type CreateRequest struct {
+	Project string
+	Author  string
+	Title   string
+	Content string
+	Protect bool
+
+	// AckRules quotes the digest of the rules that apply in this project. A pad's first
+	// section is its author's first post, so the same gate applies here — with the two
+	// file levels, since there is no pad yet.
+	AckRules string
+}
+
 // CreatePad creates a new pad with its first section and returns the parsed pad plus,
 // when protect is set, the freshly generated password (returned exactly once — only
 // its bcrypt hash is stored, in the pad file's header). The project directory is
 // auto-created; the pad id is random and uniqueness comes from O_EXCL creation.
-func (s *Store) CreatePad(project, author, title, content string, protect bool) (*Pad, string, error) {
+func (s *Store) CreatePad(req CreateRequest) (*Pad, string, error) {
+	project, author, title, content, protect := req.Project, req.Author, req.Title, req.Content, req.Protect
 	if err := ValidateProject(project); err != nil {
 		return nil, "", err
 	}
@@ -181,6 +208,16 @@ func (s *Store) CreatePad(project, author, title, content string, protect bool) 
 		return nil, "", err
 	}
 	if err := s.validateContent(content); err != nil {
+		return nil, "", err
+	}
+	// The rules of the project this pad is about to join. There is no pad to check
+	// against yet, so this is the two file levels — the same reading an agent would get
+	// from `project rules` before it starts.
+	rules, err := s.buildRules(project, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := pad.CheckAck(nil, author, req.AckRules, rules); err != nil {
 		return nil, "", err
 	}
 
@@ -256,6 +293,17 @@ type PostRequest struct {
 	// under the same lock as the append, or two agents opening a task at once would
 	// choose the same number.
 	OpenTask bool
+
+	// AckRules quotes the digest of the rules the author has read. It is required only
+	// on an author's FIRST post to a pad that has rules (see pad.CheckAck).
+	AckRules string
+
+	// SystemPost marks the one append a person makes through a surface with no identity
+	// of its own: editing the pad's rules in the Web UI, written as pad.SystemAuthor.
+	// It is a field rather than an inference from the author name, so claiming that
+	// identity has to be a deliberate act of the calling code, never a string an agent
+	// can send.
+	SystemPost bool
 }
 
 // PostResult is what an append produced.
@@ -275,7 +323,11 @@ type PostResult struct {
 // the section number and any new task number, then append. The lock makes
 // check-allocate-append atomic against concurrent writers (CLI or server).
 func (s *Store) Post(req PostRequest) (*PostResult, error) {
-	if err := pad.ValidateAuthor(req.Author); err != nil {
+	validateAuthor := pad.ValidateAuthor
+	if req.SystemPost {
+		validateAuthor = pad.ValidateAuthorAllowSystem
+	}
+	if err := validateAuthor(req.Author); err != nil {
 		return nil, err
 	}
 	if err := s.validateTitle(req.Title); err != nil {
@@ -330,6 +382,9 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 		if !containsStr(meta.To, parent.Author) && parent.Author != req.Author {
 			meta.To = append(meta.To, parent.Author)
 		}
+	}
+	if err := s.checkRules(project, id, data, p, req); err != nil {
+		return nil, err
 	}
 	if err := p.CheckTurn(req.Author, meta.Kind); err != nil {
 		return nil, err
@@ -496,12 +551,20 @@ type PadMeta struct {
 	Title        string   `json:"title"`
 	SectionCount int      `json:"section_count"`
 	Authors      []string `json:"authors"`
-	LastAuthor   string   `json:"last_author"`
-	LastTS       int64    `json:"last_ts"`
-	CreatedTS    int64    `json:"created_ts"`
-	Protected    bool     `json:"protected"`
-	OpenTasks    int      `json:"open_tasks,omitempty"`
-	Overdue      int      `json:"overdue,omitempty"`
+	// LastAuthor wrote the most recent SECTION, whatever its kind; TurnAuthor wrote the
+	// most recent MESSAGE and therefore holds the turn. They are different questions and
+	// both are published, because collapsing them gets one of the two wrong: a change
+	// notification must name who actually just wrote, while "whose move is it" must not
+	// be answered by whoever filed a task event or edited the rules — neither takes the
+	// turn. (A pad ending in a task event had the same problem before rules existed; it
+	// merely looked plausible, since a task event is at least written by an agent.)
+	LastAuthor string `json:"last_author"`
+	TurnAuthor string `json:"turn_author,omitempty"`
+	LastTS     int64  `json:"last_ts"`
+	CreatedTS  int64  `json:"created_ts"`
+	Protected  bool   `json:"protected"`
+	OpenTasks  int    `json:"open_tasks,omitempty"`
+	Overdue    int    `json:"overdue,omitempty"`
 }
 
 // meta reduces a parsed pad to its listing entry.
@@ -514,6 +577,7 @@ func meta(p *Pad) PadMeta {
 		SectionCount: len(p.Sections),
 		Authors:      p.Authors(),
 		LastAuthor:   last.Author,
+		TurnAuthor:   p.TurnState().LastAuthor,
 		LastTS:       last.TS,
 		CreatedTS:    p.CreatedTS,
 		Protected:    p.Protected(),
@@ -549,7 +613,10 @@ func (s *Store) List(project string) (pads []PadMeta, warnings []string, err err
 			continue
 		}
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			// Only a pad file is a pad. The store's own files (`_rules.md`) and anything
+			// a person happened to drop in here are skipped rather than parsed and
+			// reported as broken pads — `doctor` is where the unexpected ones surface.
+			if e.IsDir() || !pad.IsPadFileName(e.Name()) {
 				continue
 			}
 			id := strings.TrimSuffix(e.Name(), ".md")
@@ -700,6 +767,36 @@ func (s *Store) Delete(ref string) error {
 	return nil
 }
 
+// StrayFiles lists entries inside the projects tree that are neither pads nor files
+// belonging to the tool, as paths relative to the projects dir.
+//
+// Skipping such a file silently is right for every command that lists pads — it is not a
+// pad, and pretending otherwise is how a stray note becomes a "corrupt pad" warning. But
+// silence everywhere would hide a real mistake: a pad renamed by hand, or a rules file
+// spelled `rules.md`, simply disappears. `doctor` reports what this returns, so the two
+// behaviours are one decision made in one place.
+func (s *Store) StrayFiles() ([]string, error) {
+	names, err := s.projectNames()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, name := range names {
+		entries, err := os.ReadDir(filepath.Join(s.projectsDir, name))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || pad.IsPadFileName(e.Name()) || pad.IsToolFileName(e.Name()) {
+				continue
+			}
+			out = append(out, filepath.Join(name, e.Name()))
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // projectNames lists the project directories under the store root, sorted.
 func (s *Store) projectNames() ([]string, error) {
 	entries, err := os.ReadDir(s.projectsDir)
@@ -727,7 +824,7 @@ func countPads(projDir string) (int, error) {
 	}
 	n := 0
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+		if !e.IsDir() && pad.IsPadFileName(e.Name()) {
 			n++
 		}
 	}

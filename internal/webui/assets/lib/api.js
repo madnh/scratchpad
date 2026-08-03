@@ -31,6 +31,19 @@ async function request(path, opts = {}) {
   return body;
 }
 
+// projectSegment refuses a project name that is not one before it becomes a URL path
+// segment. `encodeURIComponent` leaves "." and ".." intact, and a path containing them is
+// normalised by the browser AND by Go's router before any handler sees it — so
+// `/api/projects/../rules` silently becomes `/api/rules` and would edit the STORE's rules
+// while the caller believed it was editing a project's. The server's own name rule
+// (a-z0-9) can never catch that, because the request never reaches it.
+function projectSegment(name) {
+  if (!/^[a-z0-9]{1,64}$/.test(name)) {
+    throw new ApiError("invalid_project_name", `${name} is not a project name (a-z0-9 only)`, 0);
+  }
+  return encodeURIComponent(name);
+}
+
 export const api = {
   status: () => request("/api/status"),
   projects: () => request("/api/projects"),
@@ -82,4 +95,27 @@ export const api = {
   // One pad at a time. Bulk cleanup by age stays in the CLI (`pad purge`), where the
   // victim list is printed and confirmed before anything is removed.
   deletePad: (ref) => request(`/api/pads/${encodeURIComponent(ref)}`, { method: "DELETE" }),
+
+  // Rules — the one part of a pad this UI may write. The store and project levels are
+  // files; a pad's own rules are appended as a section authored by "scratchpad", the
+  // identity that means a PERSON changed this. Messages and tasks stay agent-only,
+  // which is what "read-only" was ever protecting.
+  storeRules: () => request("/api/rules"),
+  setStoreRules: (text, replace) =>
+    request("/api/rules", { method: "PUT", body: JSON.stringify({ text, replace: !!replace }) }),
+
+  projectRules: (name) => request(`/api/projects/${projectSegment(name)}/rules`),
+  setProjectRules: (name, text, replace) =>
+    request(`/api/projects/${projectSegment(name)}/rules`, {
+      method: "PUT",
+      body: JSON.stringify({ text, replace: !!replace }),
+    }),
+
+  // No GET counterpart: a pad's rules ride along with the pad view, because the header
+  // has to know whether there ARE rules before the person opens them.
+  setPadRules: (ref, text, replace) =>
+    request(`/api/pads/${encodeURIComponent(ref)}/rules`, {
+      method: "PUT",
+      body: JSON.stringify({ text, replace: !!replace }),
+    }),
 };

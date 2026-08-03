@@ -66,9 +66,16 @@ func parseMetaLine(line string) (ts time.Time, m Meta, ok bool) {
 		val = strings.TrimSpace(val)
 		switch strings.TrimSpace(key) {
 		case "kind":
-			if Kind(val) == KindTask {
+			switch Kind(val) {
+			case KindTask:
 				m.Kind = KindTask
+			case KindRules:
+				m.Kind = KindRules
 			}
+		case "rules":
+			// The only value that means anything today. An unknown one is ignored like
+			// an unknown key, so `rules: something-later` degrades to "extend".
+			m.Replace = val == "replace"
 		case "to":
 			m.To = splitTargets(val)
 		case "re":
@@ -96,8 +103,11 @@ func renderMetaLine(ts time.Time, m Meta) string {
 	var b strings.Builder
 	b.WriteString(metaPrefix)
 	b.WriteString(ts.UTC().Format(time.RFC3339))
-	if m.Kind == KindTask {
-		b.WriteString(metaSep + "kind: " + string(KindTask))
+	if m.Kind == KindTask || m.Kind == KindRules {
+		b.WriteString(metaSep + "kind: " + string(m.Kind))
+	}
+	if m.Kind == KindRules && m.Replace {
+		b.WriteString(metaSep + "rules: replace")
 	}
 	if m.Task > 0 {
 		b.WriteString(metaSep + "task: " + strconv.Itoa(m.Task))
@@ -129,8 +139,22 @@ func splitTargets(s string) []string {
 
 // ValidateAuthor rejects authors that would break the section-header format
 // (`# <n> - <author> - <title>` splits on " - ") or the metadata line (which splits on
-// "; " and ": ").
+// "; " and ": "), plus the reserved SystemAuthor.
+//
+// Reserving the name here covers `to` as well, since a `to` target is validated as an
+// author — which is right: nobody holds a conversation with the tool.
 func ValidateAuthor(author string) error {
+	if strings.EqualFold(strings.TrimSpace(author), SystemAuthor) {
+		return Coded(CodeInvalidInput,
+			"%q is reserved for changes a person makes through the UI; post under your own agent name", SystemAuthor)
+	}
+	return ValidateAuthorAllowSystem(author)
+}
+
+// ValidateAuthorAllowSystem is ValidateAuthor without the reservation. The one caller
+// allowed to use it is the rules-writing path, which posts as SystemAuthor on a person's
+// behalf; everything else must go through ValidateAuthor.
+func ValidateAuthorAllowSystem(author string) error {
 	switch {
 	case strings.TrimSpace(author) == "":
 		return Coded(CodeInvalidInput, "author is required (who is posting?)")
@@ -164,6 +188,14 @@ func ValidateMeta(m Meta) error {
 	}
 	if m.Status != "" && m.Kind != KindTask {
 		return Coded(CodeInvalidInput, "status belongs to a task event; pass a task number too")
+	}
+	// A rules section says how the pad works; it is not about a piece of work and not
+	// addressed at anyone in particular — the rules reach everyone by being the rules.
+	if m.Kind == KindRules && (m.Task > 0 || m.Status != "" || len(m.To) > 0) {
+		return Coded(CodeInvalidInput, "a rules section takes no task, status or `to` — it applies to the whole pad")
+	}
+	if m.Replace && m.Kind != KindRules {
+		return Coded(CodeInvalidInput, "`replace` belongs to a rules section")
 	}
 	if m.Kind == KindTask && m.Task == 0 {
 		return Coded(CodeInvalidInput, "a task event must name its task")

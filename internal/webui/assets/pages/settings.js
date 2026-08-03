@@ -11,12 +11,13 @@ import "/vendor/puredashboard/alert.js";
 import "/vendor/puredashboard/empty.js";
 import { toast } from "/vendor/puredashboard/toast.js";
 
+import { showRules, rulesBody } from "/components/rules-dialog.js";
 import { api } from "/lib/api.js";
 import { connectionStatus } from "/lib/bus.js";
 import * as notify from "/lib/notify.js";
 import * as wl from "/lib/watchlist.js";
 import * as prefs from "/lib/prefs.js";
-import { el, pageHead, skeleton, errorView } from "/lib/ui.js";
+import { el, pageHead, skeleton, errorView, setChildren } from "/lib/ui.js";
 
 export default function mount(outlet) {
   outlet.replaceChildren(skeleton(5));
@@ -35,6 +36,7 @@ export default function mount(outlet) {
       pageHead("Settings"),
       readingCard(),
       notificationsCard(),
+      storeRulesCard(),
       watchListCard(),
       diagnosticsCard(status),
     );
@@ -248,6 +250,48 @@ function watchListCard() {
   return card;
 }
 
+// storeRulesCard is where the store-wide rules live, because they are a property of this
+// deployment rather than of any one pad — the same reason the store path and the watcher
+// mode are on this page.
+//
+// It shows the digest and opens the shared dialog rather than rendering the text inline:
+// one place edits rules, at every level, so the pad view and this page cannot grow two
+// different ideas of what editing them does.
+function storeRulesCard() {
+  const card = el("puredashboard-card", { title: "Rules for every pad in this store" });
+  const box = el("div", { class: "rules rules--inline" }, el("p", { class: "muted", text: "loading…" }));
+  let rules = null;
+
+  // Edit opens the EDITOR, not a read-only copy of what is already on screen. The card
+  // shows the rules in place, so a dialog that then made you press "Edit" a second time
+  // would be a step that shows you nothing you were not already looking at.
+  const open = el("button", {
+    type: "button", class: "ghost-btn", text: "Edit", disabled: true,
+    "data-card-extra": "", // the card projects this into its header
+    onclick: () => showRules({ kind: "store" }, rules, {
+      startEditing: "store",
+      onChange: (next) => { rules = next; paint(); },
+    }),
+  });
+
+  // The rules themselves, not a summary of them: this card is short, and a person who
+  // came here to check what the store asks of its agents should not have to open a
+  // dialog to find out. The dialog is for CHANGING them.
+  const paint = () => {
+    const layer = (rules?.layers || []).find((l) => l.level === "store");
+    setChildren(box, layer
+      ? rulesBody(layer.text)
+      : el("p", { class: "muted", text: "None yet — agents joining a pad here are told nothing about how this store works." }));
+    open.disabled = false;
+  };
+  api.storeRules()
+    .then((r) => { rules = r; paint(); })
+    .catch(() => setChildren(box, el("p", { class: "muted", text: "Could not read the rules." })));
+
+  card.append(open, box);
+  return card;
+}
+
 function diagnosticsCard(status) {
   const card = el("puredashboard-card", { title: "This instance" });
 
@@ -257,7 +301,7 @@ function diagnosticsCard(status) {
     { label: "Deployment", value: status.display_name },
     { label: "Store", value: status.projects_dir },
     { label: "Version", value: status.version },
-    { label: "Surface", value: status.read_only ? "read-only (posting is an agent surface)" : "read-write" },
+    { label: "Surface", value: status.read_only ? "read-only for the conversation (posting is an agent surface); rules are editable" : "read-write" },
     { label: "Live stream", value: connectionStatus() },
     {
       label: "Change detection",

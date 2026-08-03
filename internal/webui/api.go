@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/madnh/scratchpad/internal/buildinfo"
+	"github.com/madnh/scratchpad/internal/pad"
 	"github.com/madnh/scratchpad/internal/store"
 )
 
@@ -82,7 +83,12 @@ type statusResponse struct {
 	ProjectsDir string `json:"projects_dir"`
 	Version     string `json:"version"`
 	Watcher     string `json:"watcher"` // "push" | "rescan"
-	ReadOnly    bool   `json:"read_only"`
+
+	// ReadOnly is about the CONVERSATION: this surface never posts a message and never
+	// moves a task, because both need an agent identity and obey the turn rule. It stays
+	// true now that rules can be edited here — rules are neither, and saying otherwise
+	// would advertise a posting UI that does not exist.
+	ReadOnly bool `json:"read_only"`
 }
 
 func (s *Server) handleStatus(_ *http.Request, _ *session) (any, error) {
@@ -106,6 +112,10 @@ type projectEntry struct {
 	Name     string `json:"name"`
 	PadCount int    `json:"pad_count"`
 	LastTS   int64  `json:"last_ts"`
+	// Rules says which levels apply here — "project+store", "store", or "" — not the
+	// rules themselves: a listing shows what EXISTS, and the text belongs to the page
+	// that opens it.
+	Rules string `json:"rules,omitempty"`
 }
 
 func (s *Server) handleProjects(_ *http.Request, _ *session) (any, error) {
@@ -123,9 +133,24 @@ func (s *Server) handleProjects(_ *http.Request, _ *session) (any, error) {
 			last[p.Project] = p.LastTS
 		}
 	}
+	storeText, _, err := s.store.StoreRules()
+	if err != nil {
+		return nil, err
+	}
 	out := make([]projectEntry, 0, len(projects))
 	for _, p := range projects {
-		out = append(out, projectEntry{Name: p.Name, PadCount: p.PadCount, LastTS: last[p.Name]})
+		e := projectEntry{Name: p.Name, PadCount: p.PadCount, LastTS: last[p.Name]}
+		if text, _, err := s.store.ProjectRules(p.Name); err == nil && strings.TrimSpace(text) != "" {
+			e.Rules = "project"
+		}
+		if strings.TrimSpace(storeText) != "" {
+			if e.Rules == "" {
+				e.Rules = "store"
+			} else {
+				e.Rules += "+store"
+			}
+		}
+		out = append(out, e)
 	}
 	return map[string]any{"projects": out}, nil
 }
@@ -267,6 +292,13 @@ type padResponse struct {
 	// is pure latency. The task board, which sits behind a tab, is a separate endpoint
 	// for the mirror-image reason.
 	Participants []store.Participant `json:"participants,omitempty"`
+
+	// Rules rides along too, and for the stronger version of the same reason: the header
+	// must say whether this pad HAS rules before the person decides whether to open
+	// them, so the digest has to be here anyway — and once it is, the text costs a few
+	// hundred bytes on a response that already carries the whole table of contents.
+	// Withheld for a locked pad, like the section titles.
+	Rules *pad.Rules `json:"rules,omitempty"`
 }
 
 func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
@@ -302,14 +334,20 @@ func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
 		})
 	}
 	turn := pad.TurnState()
-	return padResponse{
+	resp := padResponse{
 		Ref: pad.Ref(), Project: pad.Project, PadID: pad.ID,
 		Title: pad.Title(), CreatedTS: pad.CreatedTS,
 		Protected: pad.Protected(), Locked: false,
 		SectionCount: len(pad.Sections), Authors: pad.Authors(),
 		Turn: &turn, Sections: toc,
 		Participants: pad.Participants(),
-	}, nil
+	}
+	// From the pad already in hand: the password gate was applied by the Get above, and
+	// re-reading the file here would rebuild every section body a second time.
+	if rules, err := s.store.RulesOf(pad); err == nil && !rules.Empty() {
+		resp.Rules = &rules
+	}
+	return resp, nil
 }
 
 // handleTasks serves the derived task board, or one task with its thread.
@@ -455,6 +493,75 @@ func (s *Server) handleDelete(r *http.Request, _ *session) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"ref": ref, "deleted": true}, nil
+}
+
+// Rules are the one thing in a pad this UI may WRITE, and the exception is narrower than
+// it looks. The reason the UI does not post is that a message needs an author and obeys
+// the turn rule; a rules section has neither problem — it never takes the turn, and the
+// author is pad.SystemAuthor, the identity that means "a person changed this here".
+// Messages and task events remain agent-only, which is the part that mattered.
+
+// rulesBody is the shared write payload for all three levels.
+type rulesBody struct {
+	Text    string `json:"text"`
+	Replace bool   `json:"replace"`
+}
+
+// decodeRulesBody reads a rules payload, bounded by the deployment's own content limit —
+// the same ceiling the CLI and MCP write through.
+func (s *Server) decodeRulesBody(r *http.Request) (rulesBody, error) {
+	var body rulesBody
+	limit := int64(s.cfg.Limits.MaxContentKB)*1024 + 1024
+	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit)).Decode(&body); err != nil {
+		return rulesBody{}, badInput("expected a JSON body with a text field")
+	}
+	return body, nil
+}
+
+func (s *Server) handleStoreRules(_ *http.Request, _ *session) (any, error) {
+	return s.store.ProjectRuleSet("")
+}
+
+func (s *Server) handleSetStoreRules(r *http.Request, _ *session) (any, error) {
+	body, err := s.decodeRulesBody(r)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.SetStoreRules(body.Text, body.Replace); err != nil {
+		return nil, err
+	}
+	return s.store.ProjectRuleSet("")
+}
+
+func (s *Server) handleProjectRules(r *http.Request, _ *session) (any, error) {
+	return s.store.ProjectRuleSet(r.PathValue("name"))
+}
+
+func (s *Server) handleSetProjectRules(r *http.Request, _ *session) (any, error) {
+	project := r.PathValue("name")
+	body, err := s.decodeRulesBody(r)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.SetProjectRules(project, body.Text, body.Replace); err != nil {
+		return nil, err
+	}
+	return s.store.ProjectRuleSet(project)
+}
+
+// handleSetPadRules appends the pad's rules as pad.SystemAuthor. A protected pad must
+// have been unlocked in this session first, exactly as reading it must.
+func (s *Server) handleSetPadRules(r *http.Request, sess *session) (any, error) {
+	ref := r.PathValue("ref")
+	body, err := s.decodeRulesBody(r)
+	if err != nil {
+		return nil, err
+	}
+	password := sess.unlocked(ref)
+	if _, err := s.store.SetPadRules(ref, store.SystemAuthor, "", body.Text, password, body.Replace); err != nil {
+		return nil, err
+	}
+	return s.store.PadRules(ref, password)
 }
 
 // badInput builds the store-shaped error for a malformed request parameter, so the
