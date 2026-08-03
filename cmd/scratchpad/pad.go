@@ -600,8 +600,14 @@ func newPadWhoCmd() *cobra.Command {
 				for _, o := range part.Owes {
 					owes = append(owes, fmt.Sprintf("%s (%s)", o.What, humanAge(now.Sub(time.Unix(o.TS, 0)))))
 				}
-				fmt.Fprintf(w, "%s\t§%d\t%s\t%s\n", part.Author, part.LastSection,
-					humanAge(now.Sub(time.Unix(part.LastTS, 0))), strings.Join(owes, " · "))
+				// An author who has only ever been ADDRESSED has no last section, and an
+				// age counted from the epoch would print "20668d" — the exact row this
+				// command exists to make legible, rendered as noise. Say "never".
+				last, age := fmt.Sprintf("§%d", part.LastSection), humanAge(now.Sub(time.Unix(part.LastTS, 0)))
+				if part.LastSection == 0 {
+					last, age = "—", "never"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", part.Author, last, age, strings.Join(owes, " · "))
 			}
 			return w.Flush()
 		},
