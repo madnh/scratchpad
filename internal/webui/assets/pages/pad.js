@@ -644,35 +644,38 @@ export default function mount(outlet, ctx) {
 
   // Repainted from a key rather than on every call: syncToolbar runs on scrolls and
   // filter changes too, and rebuilding this strip under a hovering cursor for a scroll
-  // event would be work nobody asked for. An agent joining, or falling behind, changes
-  // the key.
+  // event would be work nobody asked for.
+  //
+  // The key is what is ON SCREEN, not the data behind it. Every age here is relative,
+  // so the two things that change it are an agent moving (new data) and time passing
+  // (same data, different words) — and a key over the raw participants would catch only
+  // the first, which is how a strip that says "2 minutes ago" comes to say it an hour
+  // later. Keying on the rendered strings covers both, and still skips the rebuild in
+  // the common case where a minute has ticked and no wording actually changed.
   function paintPeople() {
-    const people = pad.participants || [];
-    const key = JSON.stringify(people);
+    const view = (pad.participants || []).map((p) => ({
+      author: p.author,
+      last: p.last_section ? `#${p.last_section} · ${relTime(p.last_ts)}` : "never posted",
+      lastTitle: p.last_ts ? absTime(p.last_ts) : "has never posted in this pad",
+      owes: (p.owes || []).map((o) => `${o.what} ${relTime(o.ts)}`).join(" · "),
+      owesTitle: (p.owes || []).map((o) => `${o.what}: ${o.title || ""}`).join("\n"),
+    }));
+    const key = JSON.stringify(view);
     if (key === peopleKey) return;
     peopleKey = key;
 
-    const cells = people.map((p) => {
-      const owes = p.owes || [];
+    const cells = view.map((v) => {
       const face = el("span", {
-        class: "person__avatar", text: agentInitials(p.author), "aria-hidden": "true",
+        class: "person__avatar", text: agentInitials(v.author), "aria-hidden": "true",
       });
-      face.style.setProperty("--avatar-bg", `var(--avatar-c${agentColorIndex(p.author)})`);
-      const cell = el("div", { class: "person", dataset: { owing: String(owes.length > 0) } },
+      face.style.setProperty("--avatar-bg", `var(--avatar-c${agentColorIndex(v.author)})`);
+      const cell = el("div", { class: "person", dataset: { owing: String(!!v.owes) } },
         face,
-        el("span", { class: "person__name", text: p.author }),
-        el("span", {
-          class: "person__last",
-          title: p.last_ts ? absTime(p.last_ts) : "has never posted in this pad",
-          text: p.last_section ? `#${p.last_section} · ${relTime(p.last_ts)}` : "never posted",
-        }),
+        el("span", { class: "person__name", text: v.author }),
+        el("span", { class: "person__last", title: v.lastTitle, text: v.last }),
       );
-      if (owes.length) {
-        cell.append(el("span", {
-          class: "person__owes",
-          title: owes.map((o) => `${o.what}: ${o.title || ""}`).join("\n"),
-          text: owes.map((o) => `${o.what} ${relTime(o.ts)}`).join(" · "),
-        }));
+      if (v.owes) {
+        cell.append(el("span", { class: "person__owes", title: v.owesTitle, text: v.owes }));
       }
       return cell;
     });
@@ -1150,8 +1153,16 @@ export default function mount(outlet, ctx) {
 
   loadPad();
 
+  // Nothing arrives on a quiet pad, and "last heard from 2 minutes ago" is exactly the
+  // reading a person acts on — left ticking at whatever it said when the tab opened, it
+  // reports a team that is all present. The sidebar already keeps its own ages honest
+  // this way; a minute is close enough here too, and the display key means a tick that
+  // changes no wording costs one comparison.
+  const ageTick = setInterval(() => { if (!disposed && peopleStrip) paintPeople(); }, 60_000);
+
   return () => {
     disposed = true;
+    clearInterval(ageTick);
     off();
     offPrefs();
     // The lazy elements disconnect their own observers as they leave the DOM.
