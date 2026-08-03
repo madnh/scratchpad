@@ -86,10 +86,25 @@ type Rules struct {
 	Text    string  `json:"text,omitempty"`    // the layers in force, joined, as an agent reads them
 	Digest  string  `json:"digest,omitempty"`  // "" when there are no rules at all
 	History []int   `json:"history,omitempty"` // earlier pad-level versions, newest first
+
+	// Versions is the compare-and-set token of each level that applies here, including
+	// the levels that are currently EMPTY (NoRules) — an empty level is a version too,
+	// and it is the one two agents race to fill.
+	//
+	// It is deliberately NOT Digest. Digest answers "what am I bound by", so it spans
+	// every level in force; a version answers "is the thing I am about to overwrite
+	// still the thing I read", which is a question about ONE file or ONE section. Folding
+	// them into one token would make editing a pad's rules fail because someone touched
+	// the store's — a conflict the writer can neither see nor resolve.
+	Versions map[RuleLevel]string `json:"versions,omitempty"`
 }
 
 // Empty reports whether this pad has no rules in force.
 func (r Rules) Empty() bool { return r.Digest == "" }
+
+// Version is the compare-and-set token of one level, NoRules when that level is empty and
+// "" when the level does not apply here (asking for the pad's version of a project view).
+func (r Rules) Version(level RuleLevel) string { return r.Versions[level] }
 
 // ParseRulesFile splits a rules file into its text and its replace marker. A file that is
 // blank (or only the marker) carries no rules, which is the same as not existing — that
@@ -121,8 +136,11 @@ func RenderRulesFile(text string, replace bool) string {
 // The pad's rules always come last: the most specific level has the final word, exactly
 // as a repo's CLAUDE.md follows the global one.
 func BuildRules(storeText string, storeReplace bool, projectName, projectText string, projectReplace bool, p *Pad) Rules {
-	var r Rules
+	r := Rules{Versions: map[RuleLevel]string{}}
 	add := func(l Layer) {
+		// The version is recorded for every level that APPLIES, empty or not: a writer
+		// filling an empty level still has to say which empty it read.
+		r.Versions[l.Level] = LevelDigest(l.Text, l.Replace)
 		if strings.TrimSpace(l.Text) == "" {
 			return
 		}
@@ -143,6 +161,8 @@ func BuildRules(storeText string, storeReplace bool, projectName, projectText st
 				TS: sec.TS, Replace: sec.Replace,
 			})
 			r.History = history
+		} else {
+			r.Versions[LevelPad] = NoRules
 		}
 	}
 
@@ -169,6 +189,65 @@ func BuildRules(storeText string, storeReplace bool, projectName, projectText st
 		r.Digest = hex.EncodeToString(sum[:])[:DigestLen]
 	}
 	return r
+}
+
+// NoRules is the version of a level that holds no rules. It is a WORD rather than an
+// empty string because it has to be typed: a writer filling an empty level quotes it the
+// same way it would quote a hex digest, and `--if-digest ""` is indistinguishable from
+// forgetting the flag — which is precisely the mistake the flag exists to catch.
+const NoRules = "none"
+
+// LevelDigest is the compare-and-set token of ONE level of rules: the sha256 of what that
+// level would look like on disk, so flipping `replace` moves it as surely as editing a
+// line does. Two agents that read the same version quote the same token; the one that
+// writes second is told what it missed.
+//
+// Like every other digest here it is a "did you read this" token, not a security
+// boundary — an agent determined to clobber the rules can always read them first. What it
+// stops is the accident: an agent that read the rules ten minutes ago and writes over a
+// version it never saw.
+func LevelDigest(text string, replace bool) string {
+	body := RenderRulesFile(text, replace)
+	if body == "" {
+		return NoRules
+	}
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])[:DigestLen]
+}
+
+// CheckVersion is the compare-and-set on a rules WRITE: the version the writer quotes
+// must be the one currently in place. A blank quote and a stale one get the same remedy —
+// read, then write again — but not the same sentence, because they are not the same
+// mistake and telling them apart is what makes the second one obvious.
+//
+// The current rules travel WITH the refusal, exactly as they do on the unread gate: an
+// agent that has to merge its change into someone else's needs the other version in hand,
+// and making it spend a second round trip on a read it already tried to do is how a
+// mechanism meant to protect rules ends up being routed around.
+func CheckVersion(level RuleLevel, quoted, current, currentText string) error {
+	quoted = strings.TrimSpace(quoted)
+	if strings.EqualFold(quoted, current) {
+		return nil
+	}
+	if quoted == "" {
+		return Coded(CodeRulesConflict,
+			"writing the %s rules means saying which version you are replacing — repeat with the digest %s%s",
+			level, current, rulesTail(currentText))
+	}
+	return Coded(CodeRulesConflict,
+		"the %s rules are at %s, not the %q you quoted — someone changed them since you read;"+
+			" merge your change into this and repeat with %s%s",
+		level, current, quoted, current, rulesTail(currentText))
+}
+
+// rulesTail appends the text a conflicting writer has to merge with, and nothing when the
+// level is empty — "here is the version you missed:" followed by a blank is worse than
+// silence.
+func rulesTail(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return " (that level is empty)"
+	}
+	return ":\n\n" + strings.TrimSpace(text)
 }
 
 // DigestLen is how much of the sha256 an ack carries. Eight hex characters is short

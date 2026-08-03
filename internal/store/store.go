@@ -113,16 +113,22 @@ type Store struct {
 	dir         string // the Scratchpad dir; the store-wide rules file lives here
 	projectsDir string
 	limits      config.Limits
+	rules       config.RulesPolicy
 }
 
-// New builds a Store over a Scratchpad dir and its projects directory, with the given
-// limits (zero fields have been defaulted by the config loader).
+// New builds a Store over a loaded deployment config: its dir, its projects directory,
+// its limits and its rules policy (all already defaulted by the loader).
 //
-// Both paths are passed rather than one derived from the other: the store's own files
-// (today the store-wide rules) sit BESIDE projects/, and a `filepath.Dir` on the way back
-// out is the sort of implicit path this layout is arranged to avoid.
-func New(dir, projectsDir string, limits config.Limits) *Store {
-	return &Store{dir: dir, projectsDir: projectsDir, limits: limits}
+// It takes the whole config rather than the three fields it reads today, because a policy
+// that a call site can forget to pass is a policy that a call site WILL forget to pass —
+// and the one it would silently drop is the one deciding who may rewrite the rules.
+func New(cfg config.Config) *Store {
+	return &Store{
+		dir:         cfg.RootDir,
+		projectsDir: cfg.ProjectsDir,
+		limits:      cfg.Limits,
+		rules:       cfg.Rules,
+	}
 }
 
 // ProjectsDir returns the root the store operates under.
@@ -298,6 +304,12 @@ type PostRequest struct {
 	// on an author's FIRST post to a pad that has rules (see pad.CheckAck).
 	AckRules string
 
+	// RulesDigest quotes the version of the PAD's rules this section replaces, and is
+	// required only when Meta.Kind is rules (see checkPadRulesWrite). It is a different
+	// token from AckRules and answers a different question: AckRules is "I have read what
+	// binds me", this is "I am replacing the version I saw".
+	RulesDigest string
+
 	// SystemPost marks the one append a person makes through a surface with no identity
 	// of its own: editing the pad's rules in the Web UI, written as pad.SystemAuthor.
 	// It is a field rather than an inference from the author name, so claiming that
@@ -383,8 +395,33 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 			meta.To = append(meta.To, parent.Author)
 		}
 	}
-	if err := s.checkRules(project, id, data, p, req); err != nil {
+	// Both rules gates need section BODIES, which the append path deliberately does not
+	// parse. Parse them at most once, and only when a gate actually fires: the common
+	// append — an author who has posted here before, writing a message — pays nothing.
+	var full *Pad
+	fullPad := func() (*Pad, error) {
+		if full == nil {
+			var err error
+			if full, err = pad.Parse(project, id, data); err != nil {
+				return nil, fmt.Errorf("pad %s is corrupt: %w", req.Ref, err)
+			}
+		}
+		return full, nil
+	}
+	if err := s.checkRules(project, fullPad, p, req); err != nil {
 		return nil, err
+	}
+	// Writing the pad's rules is checked AFTER the read gate: an agent that has not read
+	// what binds it has no business replacing it, and the read gate is the one that hands
+	// back the text it was supposed to have.
+	if meta.Kind == pad.KindRules {
+		fp, err := fullPad()
+		if err != nil {
+			return nil, err
+		}
+		if err := s.checkPadRulesWrite(fp, req); err != nil {
+			return nil, err
+		}
 	}
 	if err := p.CheckTurn(req.Author, meta.Kind); err != nil {
 		return nil, err

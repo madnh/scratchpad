@@ -283,6 +283,56 @@ Like the turn rule and task ownership this is a **guard rail, not security**: an
 that fetched the rules and did not read them can still quote the digest. It stops the
 accident, which is what all the rules here do.
 
+### The second gate: write on top of what you read
+
+The read gate says nothing about *writing* rules, and the first deployment showed why it
+had to. Rules are the only thing in this store that is **edited** rather than appended: a
+message an agent disagrees with sits in the transcript beside its reply, but a rule it
+overwrites is simply gone, and nothing records that it ever said something else. Two
+agents both "improving" a pad's rules is not a conflict anyone notices — it is the second
+one winning, silently.
+
+So a rules write answers two more questions.
+
+**On top of what** — every level carries its own version (`pad.LevelDigest`: 8 hex of
+sha256 over what that level would look like on disk, so flipping `replace` moves it), and
+a write quotes the one it replaces (`--if-digest` / `rules_digest`). Mismatch is
+`rules_conflict`, and the refusal carries the version that won so the merge costs no
+second read. A level with no rules yet is at `none`, quoted the same way — filling an
+empty level is exactly the write two agents are most likely to race on.
+
+This is per-LEVEL and deliberately not the combined digest the read gate uses. The two
+answer different questions: `digest` is "what am I bound by", which spans every level in
+force; a version is "is the thing I am about to overwrite still the thing I read", which
+is about one file or one section. One token for both would fail a pad-rules edit because
+somebody touched the store's — a conflict the writer can neither see nor resolve.
+
+At the pad level the check runs inside `Post`, under the append's own exclusive flock, so
+it is a true compare-and-set. At the file levels it is a read-then-write, and knowingly
+so: serialising them would mean a lock file in the store dir — a fourth thing `doctor`
+has to know about — to close a window of microseconds, when what this defends against is
+measured in minutes.
+
+**Who** — the marker's `rules` group, whose defaults say no:
+
+| Level | Default | Because |
+|---|---|---|
+| `store`, `project` | `ui` | They are the operator's standing instruction to every agent that will ever work here. An agent that could rewrite them could rewrite its own instructions. The Web UI writes them, and so does an editor — they are markdown files in a directory the operator owns. The CLI and MCP get `rules_readonly`, which names both of those. |
+| `pad` | `opener` | A pad is nearly always opened by the agent handing out the work, so the one who framed the job says how it is worked. Anyone else gets `not_rules_owner`, which names who can. |
+
+Set to `agent` / `any` for a deployment where the distinction protects nobody. An unknown
+value makes the marker fail to LOAD: every other bad setting degrades to something merely
+wrong, this one would degrade to a permission nobody granted.
+
+The Web UI is exempt from the policy — it is the surface the policy points at — and NOT
+from the version check, because two tabs lose an edit exactly the way two agents do. Both
+are claimed through `store.RulesWriter` (`ByUI` / `ByAgent`), a field on the request like
+`SystemPost` beside it, so the exemption is something calling code states rather than
+something an agent can arrange.
+
+Like the read gate this is a guard rail, not security: an agent determined to clobber the
+rules can read them first. It stops the accident.
+
 ### The reserved author `scratchpad`
 
 A person must be able to edit rules at every level, including a pad's. The file levels
@@ -297,6 +347,12 @@ passes `ValidateAuthorAllowSystem`, and claiming the identity is a *field on the
 (`SystemPost`) rather than an inference from the author string, so it takes a deliberate
 act of the calling code and never a string an agent can send. It is excluded from the
 roster, participants and inboxes: it is the tool recording a change, not a teammate.
+
+It belongs to the **Web UI alone**. `scratchpad pad rules --set` used to fall back to it
+when `--as` was omitted — a convenience for a person at a terminal that turned out to be
+a hole straight through the opener policy, since any agent could take it by simply not
+naming itself. The CLI now requires `--as`; a person deciding how a pad works uses the
+UI, which is the surface that has no name to give.
 
 This is also what lets the **Web UI write rules** without reopening the question its
 read-only rule settled. That rule exists because posting needs an agent identity and
@@ -421,7 +477,7 @@ Following the convention: names are `<entity>_<verb>` in snake_case, and **the s
 | `pad_read` | Read section content |
 | `pad_wait` | Long-poll waiting for a section that matches the caller's selectors (timeout capped) |
 | `pad_tasks` | The derived task board, or one task with its thread |
-| `pad_rules` | The rules in force (store + project + pad), as layers plus a digest |
+| `pad_rules` | The rules in force (store + project + pad), as layers plus a digest and a per-level version |
 | `pad_list` | List pads |
 | `project_list` | List projects + pad count |
 
@@ -445,7 +501,8 @@ input:  { ref, author, title, content, password?,
            to?: [author], re?: n,
            task_open?: bool, task?: n,
            status?: "open"|"wip"|"blocked"|"done"|"dropped",
-           ack_rules?: string, set_rules?: bool, replace?: bool }
+           ack_rules?: string, set_rules?: bool, replace?: bool,
+           rules_digest?: string }
 output: { ref, section, next, task?, turn: {...}, warnings?: [string] }
 ```
 
@@ -471,6 +528,11 @@ output: { ref, section, next, task?, turn: {...}, warnings?: [string] }
   pad has rules; else `rules_unread`, whose message carries the rules and the digest to
   repeat with. `set_rules: true` makes the section the pad's rules — no `to`, no task, no
   turn taken.
+- `set_rules` carries two more checks (see *Rules*): by default only the pad's **opener**
+  may set them (`not_rules_owner`), and `rules_digest` must quote the pad level's current
+  version from `pad_rules.versions` — `"none"` when it has none yet — else
+  `rules_conflict`, whose message carries the version that won. It is a different token
+  from `ack_rules`: that one says what binds you, this one says what you are replacing.
 
 ### `pad_get`
 
@@ -563,13 +625,19 @@ There is no `pad_task_update`. A task moves by `pad_post`.
 input:  { ref? , project?, password? }
 output: { ref?, layers: [ { level, source, text, author?, section?, ts?,
                             replace?, superseded? } ],
-          text, digest, history?: [n] }
+          text, digest, versions: { store, project?, pad? }, history?: [n] }
 ```
 
 Read-only, and the store/project levels have **no writing tool at all**: those are files,
 and rewriting a file is not an append. A pad's own rules are set through `pad_post`
 (`set_rules`) like any other section, which is what keeps this surface append-only in the
-true sense — the same reasoning that keeps `pad_delete` out of it.
+true sense — the same reasoning that keeps `pad_delete` out of it. Under the default
+policy those levels are not an agent's to write anyway, so the shape of the surface and
+what the deployment permits agree; widening `rules.store` opens the CLI, not a new tool.
+
+`versions` carries every level that APPLIES here, empty ones included (`"none"`), because
+filling an empty level is a write like any other. It is what `rules_digest` /
+`--if-digest` quotes, and is not `digest`: see *The second gate* above.
 
 `layers` is deliberately not flattened into `text` alone: an agent (and a person) needs
 to know which line came from the store and which from this pad, because that is what says
@@ -601,6 +669,9 @@ The author is always **self-declared, from a single source**: the `author` param
 
 - `not_your_turn` — includes who is currently blocked, and suggests `pad_wait`. Derived from the last `message` section only.
 - `rules_unread` — a first post to a pad with rules, without the right `ack_rules`. The message carries the rules IN FULL plus the digest, so the retry needs no second call.
+- `rules_conflict` — a rules write whose `rules_digest`/`--if-digest` is missing or stale. Missing and stale share the code (the remedy is the same) and not the sentence (they are not the same mistake); both carry the version that won, so merging needs no second call.
+- `not_rules_owner` — a pad's rules written by someone other than its opener. Names the opener, so the caller knows who to ask.
+- `rules_readonly` — the store's or a project's rules written by an agent under the default policy. Names both places a person can make the change.
 - `not_task_owner` — names the task's current owners and its opener, so the caller can see whether to ask an owner or the opener.
 - `no_such_task` — `task: <n>` references a task this pad never opened.
 - `task_needs_owner` — a task was opened without `to`.
@@ -1208,6 +1279,7 @@ laid on top of the current shape.
 | **1** | `internal/pad` split + Selector + the `make check` invariant; the metadata line (`to`, `re`); `--wake-for`; `--unacked`; the post-time silence warning; `pad who`; UI routing chips, reply links, participants strip |
 | **2** | `kind: task` + ownership + the two-level fold; `pad tasks` / `pad_tasks`; task selectors (`mine`, `task:<n>`, `tasks`); UI Tasks tab, task thread filter, `/api/stuck`, notification filters |
 | **3** | `kind: rules` + the three levels + the `_` naming law; `rules` / `project rules` / `pad rules`; `--ack-rules` and the `rules_unread` gate; `pad_rules`; the reserved `scratchpad` author; UI rules dialog and the three `PUT`s |
+| **3b** | Who may CHANGE rules, and on top of what: the marker's `rules` policy group (`store`/`project` = `ui`, `pad` = `opener`); per-level versions + `--if-digest` / `rules_digest`; `rules_conflict` / `not_rules_owner` / `rules_readonly`; `--as` required by `pad rules --set`; the UI's merge-on-conflict editor |
 
 Phase 1 addresses the stale-agent, fake-mention and irrelevant-wake problems; phase 2
 addresses tracking a pad too long to read.

@@ -72,8 +72,10 @@ type postInput struct {
 	Task     int      `json:"task,omitempty" jsonschema:"the number of an EXISTING task this section concerns; combine with status to move it, or use it alone on a message that merely references the task"`
 	Status   string   `json:"status,omitempty" jsonschema:"move the task to open, wip, blocked, done or dropped. Setting this is what makes the section a task EVENT — exempt from the turn rule, part of the task's record, and the owner's answer for it. Only its owners (their own slice) or its opener (reassign/drop/force-close) may set it"`
 	AckRules string   `json:"ack_rules,omitempty" jsonschema:"the digest of the rules in force on this pad (see pad_rules). Required on your FIRST post to a pad that has rules; a rules_unread error carries them in full along with the digest to quote"`
-	SetRules bool     `json:"set_rules,omitempty" jsonschema:"post this section as the pad's RULES rather than a message: how agents here are expected to work. It replaces the pad's previous rules (the old ones stay in the pad as history), takes no to/task/status, and does not take the turn"`
+	SetRules bool     `json:"set_rules,omitempty" jsonschema:"post this section as the pad's RULES rather than a message: how agents here are expected to work. It replaces the pad's previous rules (the old ones stay in the pad as history), takes no to/task/status, and does not take the turn. By default only the agent that OPENED the pad may do this"`
 	Replace  bool     `json:"replace,omitempty" jsonschema:"with set_rules: these rules REPLACE the project's and the store's instead of extending them"`
+
+	RulesDigest string `json:"rules_digest,omitempty" jsonschema:"with set_rules: REQUIRED. The pad level's version from pad_rules (versions.pad), or 'none' when the pad has no rules yet. It is NOT ack_rules: this one says which version you are replacing, so a rules_conflict tells you someone changed them since you read"`
 }
 
 type postOutput struct {
@@ -100,6 +102,7 @@ func (s *Server) padPost(_ context.Context, _ *mcp.CallToolRequest, in postInput
 	res, err := s.store.Post(store.PostRequest{
 		Ref: in.Ref, Author: in.Author, Title: in.Title, Content: in.Content,
 		Password: in.Password, Meta: meta, OpenTask: in.TaskOpen, AckRules: in.AckRules,
+		RulesDigest: in.RulesDigest,
 	})
 	if err != nil {
 		return nil, postOutput{}, err
@@ -186,6 +189,11 @@ type rulesOutput struct {
 // are files, and rewriting a file is not an append. A pad's own rules ARE an append, so
 // they are set through pad_post (set_rules) like every other section — which is what
 // keeps this surface append-only in the true sense.
+//
+// That the file levels have no tool here is now the deployment's default POLICY as well
+// as this surface's shape, and the two agree on purpose: an agent that wants the store's
+// rules changed hands its text to a person either way. Setting rules.store = "agent" opens
+// the CLI, not a new MCP tool — appending is what this surface does.
 func (s *Server) padRules(_ context.Context, _ *mcp.CallToolRequest, in rulesInput) (*mcp.CallToolResult, rulesOutput, error) {
 	if in.Ref != "" {
 		rules, err := s.store.PadRules(in.Ref, in.Password)

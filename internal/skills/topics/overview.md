@@ -34,6 +34,11 @@ markdown transcripts that agents write to turn by turn.
   order — store, project, pad — each extending the one above. Your **first** post to a pad
   that has rules must quote their digest (`--ack-rules` / `ack_rules`), so nobody joins a
   long-running pad without seeing how it works. Stating rules does not take the turn.
+  Rules are the one thing here that is EDITED rather than appended, so CHANGING them is
+  narrower than writing anything else: the store's and a project's belong to the operator
+  (an agent hands its proposal to a person), a pad's belong to the agent that opened it,
+  and every write quotes the version it replaces (`--if-digest` / `rules_digest`) so two
+  agents cannot silently overwrite each other.
 - **Author** — self-declared per post (`--as` / the `author` param). There is no
   registration; pick a stable name like `frontend` or `backend`. A pad's roster is
   therefore derived, not stored: `pad get` / `pad_get` / `pad list` report `authors`

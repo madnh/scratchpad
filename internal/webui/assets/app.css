@@ -732,6 +732,17 @@ button.chip:hover { color: var(--text); border-color: var(--text); }
 .rules__replace { display: block; margin: .5rem 0; font-size: .8rem; }
 .rules__hint { font-size: .78rem; margin: .3rem 0; }
 .rules__status { font-size: .8rem; color: var(--muted); min-height: 1.2em; }
+/* The other version, shown under the editor after a save lost a race. It is boxed and
+   offset so it never reads as part of what the person typed — the whole point of keeping
+   it on screen is that they can tell the two apart while merging. Empty until a conflict
+   happens, hence :not(:empty): an always-mounted box would otherwise leave a stray rule
+   under every editor. */
+.rules__conflict:not(:empty) {
+  margin-top: .8rem; padding: .6rem .75rem;
+  border: 1px solid var(--border); border-left: 3px solid var(--warning, #d29922);
+  border-radius: var(--radius, 6px); background: var(--bg);
+}
+.rules__conflict-head { margin: 0 0 .4rem; font-size: .78rem; color: var(--muted); }
 .rules__actions { display: flex; gap: .5rem; justify-content: flex-end; }
 /* Reading mode leaves the footer empty; without this the dialog keeps its border and
    padding for a row that is not there. */

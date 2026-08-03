@@ -255,3 +255,67 @@ func TestRulesMetaValidation(t *testing.T) {
 		t.Errorf("a plain rules section must validate: %v", err)
 	}
 }
+
+// A level's version is what a writer quotes to say which text it is replacing. Every
+// level that APPLIES has one, empty levels included — filling an empty level is exactly
+// the write two agents are most likely to race on.
+func TestLevelVersions(t *testing.T) {
+	r := BuildRules("- be brief", false, "proj", "", false, nil)
+	if got := r.Version(LevelProject); got != NoRules {
+		t.Fatalf("an empty project level is %q, want %q", got, NoRules)
+	}
+	if r.Version(LevelStore) == NoRules || r.Version(LevelStore) == "" {
+		t.Fatalf("a written level must have a digest: %q", r.Version(LevelStore))
+	}
+	// A level that does not apply here has no version at all, which is not the same as
+	// having none: there is no pad to write rules on.
+	if got := r.Version(LevelPad); got != "" {
+		t.Fatalf("a project view has no pad version, got %q", got)
+	}
+
+	// The versions are per-level, so a change at one level leaves the others where they
+	// were — the whole reason they are not the combined digest.
+	r2 := BuildRules("- be brief", false, "proj", "- always --to", false, nil)
+	if r2.Version(LevelStore) != r.Version(LevelStore) {
+		t.Fatal("writing the project's rules must not move the store's version")
+	}
+	if r2.Digest == r.Digest {
+		t.Fatal("the combined digest, by contrast, must move when any level changes")
+	}
+
+	// `replace` is part of what a level SAYS, so flipping it alone moves the version.
+	if LevelDigest("- be brief", true) == LevelDigest("- be brief", false) {
+		t.Fatal("replace must be part of a level's version")
+	}
+}
+
+func TestCheckVersion(t *testing.T) {
+	cur := LevelDigest("- be brief", false)
+	if err := CheckVersion(LevelStore, cur, cur, "- be brief"); err != nil {
+		t.Fatalf("the current version must be accepted: %v", err)
+	}
+	if err := CheckVersion(LevelStore, "  "+strings.ToUpper(cur)+"\n", cur, "- be brief"); err != nil {
+		t.Fatalf("a digest is a token, not a byte comparison: %v", err)
+	}
+	// Blank and stale get the same code — the remedy is the same — but not the same
+	// sentence, because they are not the same mistake.
+	blank := CheckVersion(LevelStore, "", cur, "- be brief")
+	stale := CheckVersion(LevelStore, "deadbeef", cur, "- be brief")
+	if !HasCode(blank, CodeRulesConflict) || !HasCode(stale, CodeRulesConflict) {
+		t.Fatalf("want rules_conflict for both: %v / %v", blank, stale)
+	}
+	if blank.Error() == stale.Error() {
+		t.Fatal("forgetting the version and quoting a stale one must read differently")
+	}
+	// Both carry the version that won, so the retry needs no extra read.
+	for _, err := range []error{blank, stale} {
+		if !strings.Contains(err.Error(), "- be brief") || !strings.Contains(err.Error(), cur) {
+			t.Fatalf("a conflict must carry the current rules and digest: %v", err)
+		}
+	}
+	// An empty level has nothing to merge with, so it says so rather than trailing off.
+	empty := CheckVersion(LevelPad, "deadbeef", NoRules, "")
+	if !strings.Contains(empty.Error(), "empty") {
+		t.Fatalf("a conflict on an empty level: %v", empty)
+	}
+}

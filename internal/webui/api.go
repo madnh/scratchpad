@@ -61,6 +61,12 @@ func httpStatusFor(err error) (int, string) {
 		return http.StatusBadRequest, store.CodeInvalidProjectName
 	case store.HasCode(err, store.CodeInvalidInput):
 		return http.StatusBadRequest, store.CodeInvalidInput
+	// A lost race on the rules, which is the one error here that is neither the caller's
+	// fault nor the server's: what was sent was fine, the world moved. 409 is the status
+	// that says retry after re-reading, and the dialog branches on the code to do exactly
+	// that without throwing away what the person typed.
+	case store.HasCode(err, store.CodeRulesConflict):
+		return http.StatusConflict, store.CodeRulesConflict
 	default:
 		return http.StatusInternalServerError, "internal"
 	}
@@ -298,6 +304,10 @@ type padResponse struct {
 	// them, so the digest has to be here anyway — and once it is, the text costs a few
 	// hundred bytes on a response that already carries the whole table of contents.
 	// Withheld for a locked pad, like the section titles.
+	//
+	// Present even when the pad has NO rules, which the header reads off the empty digest
+	// as before. What is not empty in that case is `versions`, and the person about to
+	// write the first rules here is precisely the one who needs it.
 	Rules *pad.Rules `json:"rules,omitempty"`
 }
 
@@ -344,7 +354,7 @@ func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
 	}
 	// From the pad already in hand: the password gate was applied by the Get above, and
 	// re-reading the file here would rebuild every section body a second time.
-	if rules, err := s.store.RulesOf(pad); err == nil && !rules.Empty() {
+	if rules, err := s.store.RulesOf(pad); err == nil {
 		resp.Rules = &rules
 	}
 	return resp, nil
@@ -505,6 +515,11 @@ func (s *Server) handleDelete(r *http.Request, _ *session) (any, error) {
 type rulesBody struct {
 	Text    string `json:"text"`
 	Replace bool   `json:"replace"`
+	// IfDigest is the version the dialog was showing when the person started typing.
+	// The UI is exempt from the POLICY on rules — it is the surface the policy points
+	// at — but not from the version check: a tab left open while an agent posted new
+	// rules, or a second tab, loses an edit exactly the way an agent would.
+	IfDigest string `json:"if_digest"`
 }
 
 // decodeRulesBody reads a rules payload, bounded by the deployment's own content limit —
@@ -527,7 +542,9 @@ func (s *Server) handleSetStoreRules(r *http.Request, _ *session) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.store.SetStoreRules(body.Text, body.Replace); err != nil {
+	if err := s.store.SetStoreRules(store.RulesWrite{
+		Text: body.Text, Replace: body.Replace, IfDigest: body.IfDigest, By: store.ByUI,
+	}); err != nil {
 		return nil, err
 	}
 	return s.store.ProjectRuleSet("")
@@ -543,7 +560,9 @@ func (s *Server) handleSetProjectRules(r *http.Request, _ *session) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.store.SetProjectRules(project, body.Text, body.Replace); err != nil {
+	if err := s.store.SetProjectRules(project, store.RulesWrite{
+		Text: body.Text, Replace: body.Replace, IfDigest: body.IfDigest, By: store.ByUI,
+	}); err != nil {
 		return nil, err
 	}
 	return s.store.ProjectRuleSet(project)
@@ -558,7 +577,10 @@ func (s *Server) handleSetPadRules(r *http.Request, sess *session) (any, error) 
 		return nil, err
 	}
 	password := sess.unlocked(ref)
-	if _, err := s.store.SetPadRules(ref, store.SystemAuthor, "", body.Text, password, body.Replace); err != nil {
+	if _, err := s.store.SetPadRules(store.PadRulesRequest{
+		Ref: ref, Text: body.Text, Password: password, Replace: body.Replace,
+		IfDigest: body.IfDigest, By: store.ByUI,
+	}); err != nil {
 		return nil, err
 	}
 	return s.store.PadRules(ref, password)

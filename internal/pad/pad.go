@@ -175,6 +175,20 @@ func (p *Pad) Authors() []string {
 	return out
 }
 
+// Opener is the author of section 1 — the agent that started this pad. It is who the
+// `opener` rules policy trusts with the pad's rules, and the reason that policy is the
+// default: a pad is nearly always opened by the agent handing work to the others, so the
+// one who framed the job is the one who says how it is worked.
+//
+// Derived, like everything else here: the opener exists only as the first section's
+// author, so a pad edited by hand carries its own answer with it.
+func (p *Pad) Opener() string {
+	if len(p.Sections) == 0 {
+		return ""
+	}
+	return p.Sections[0].Author
+}
+
 // HasPosted reports whether an author has any section in this pad. It is what "first
 // time here" means — derived from the transcript, so no membership list is stored and a
 // hand-deleted section takes the membership with it.

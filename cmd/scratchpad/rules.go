@@ -25,16 +25,24 @@ const rulesLong = "Rules are how a pad is expected to be worked: message length,
 	"An agent posting to a pad for the first time must quote the digest of the rules in\n" +
 	"force (`--ack-rules`), so nobody joins a long-running pad without having seen how\n" +
 	"it works. Later changes are not gated: a pad's rules section is a broadcast, so it\n" +
-	"wakes everyone already there."
+	"wakes everyone already there.\n\n" +
+	"WRITING rules asks two more questions. Each level prints its own digest, and\n" +
+	"--set must quote it in --if-digest — a rule set is EDITED, not appended to, so\n" +
+	"writing one without saying which version you read is how one agent silently drops\n" +
+	"another's. And who may write at all is the deployment's to decide (the marker's\n" +
+	"`rules` group): by default the store's and a project's rules are the operator's,\n" +
+	"changed in the Web UI or by editing the file, and a pad's belong to the agent that\n" +
+	"opened it."
 
 func newRulesCmd() *cobra.Command {
 	var (
-		dir     dirFlags
-		set     string
-		replace bool
+		dir      dirFlags
+		set      string
+		replace  bool
+		ifDigest string
 	)
 	cmd := &cobra.Command{
-		Use:   "rules [--set <text|->]",
+		Use:   "rules [--set <text|-> --if-digest <digest>]",
 		Short: "Read or write the rules that apply to every pad in this store",
 		Long:  "Read or write the store-wide rules.\n\n" + rulesLong,
 		Args:  cobra.NoArgs,
@@ -48,7 +56,9 @@ func newRulesCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := st.SetStoreRules(text, replace); err != nil {
+				if err := st.SetStoreRules(store.RulesWrite{
+					Text: text, Replace: replace, IfDigest: ifDigest, By: store.ByAgent,
+				}); err != nil {
 					return err
 				}
 			}
@@ -60,18 +70,19 @@ func newRulesCmd() *cobra.Command {
 		},
 	}
 	dir.bind(cmd)
-	bindRuleWriteFlags(cmd, &set, &replace)
+	bindRuleWriteFlags(cmd, &set, &replace, &ifDigest)
 	return cmd
 }
 
 func newProjectRulesCmd() *cobra.Command {
 	var (
-		dir     dirFlags
-		set     string
-		replace bool
+		dir      dirFlags
+		set      string
+		replace  bool
+		ifDigest string
 	)
 	cmd := &cobra.Command{
-		Use:   "rules <project> [--set <text|->]",
+		Use:   "rules <project> [--set <text|-> --if-digest <digest>]",
 		Short: "Read or write the rules of one project",
 		Long:  "Read or write a project's rules — they extend the store's.\n\n" + rulesLong,
 		Args:  cobra.ExactArgs(1),
@@ -86,7 +97,9 @@ func newProjectRulesCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := st.SetProjectRules(project, text, replace); err != nil {
+				if err := st.SetProjectRules(project, store.RulesWrite{
+					Text: text, Replace: replace, IfDigest: ifDigest, By: store.ByAgent,
+				}); err != nil {
 					return err
 				}
 			}
@@ -98,7 +111,7 @@ func newProjectRulesCmd() *cobra.Command {
 		},
 	}
 	dir.bind(cmd)
-	bindRuleWriteFlags(cmd, &set, &replace)
+	bindRuleWriteFlags(cmd, &set, &replace, &ifDigest)
 	return cmd
 }
 
@@ -107,20 +120,23 @@ func newPadRulesCmd() *cobra.Command {
 		dir      dirFlags
 		set      string
 		replace  bool
+		ifDigest string
 		author   string
 		title    string
 		password string
 	)
 	cmd := &cobra.Command{
-		Use:   "rules <ref> [--set <text|->]",
+		Use:   "rules <ref> [--as <agent> --set <text|-> --if-digest <digest>]",
 		Short: "Read the rules in force on a pad, or write the pad's own",
 		Long: "Read the three levels of rules in force on a pad, or append a new rules section\n" +
 			"to it with --set.\n\n" +
 			"Writing rules is an APPEND like everything else in a pad: the previous rules stay\n" +
 			"readable as history and the newest section is what is in force. It does not take\n" +
 			"the turn, so stating the rules never blocks the conversation.\n\n" +
-			"Without --as, the section is written as \"" + pad.SystemAuthor + "\" — the identity for a change a\n" +
-			"PERSON made. An agent setting the rules of a pad it works on passes its own --as.\n\n" +
+			"--set needs --as. The reserved identity \"" + pad.SystemAuthor + "\" belongs to the Web UI alone —\n" +
+			"it used to be what this command wrote under when --as was omitted, which meant any\n" +
+			"agent could write any pad's rules by simply not naming itself. A person deciding\n" +
+			"how a pad works does it in the Web UI; an agent names itself.\n\n" +
 			rulesLong,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -134,15 +150,14 @@ func newPadRulesCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// The operator identity is the DEFAULT here, unlike every other writing
-				// command: `pad rules --set` at a terminal is a person deciding how the
-				// pad works, and making them invent an agent name to say so would put a
-				// fictional teammate in the transcript.
-				a := strings.TrimSpace(author)
-				if a == "" {
-					a = pad.SystemAuthor
+				if strings.TrimSpace(author) == "" {
+					return fmt.Errorf("--set needs --as <agent>: a pad's rules are written by an agent" +
+						" on the pad, not anonymously (a person edits them in the Web UI)")
 				}
-				res, err := st.SetPadRules(ref, a, title, text, password, replace)
+				res, err := st.SetPadRules(store.PadRulesRequest{
+					Ref: ref, Author: author, Title: title, Text: text, Password: password,
+					Replace: replace, IfDigest: ifDigest, By: store.ByAgent,
+				})
 				if err != nil {
 					return err
 				}
@@ -157,14 +172,14 @@ func newPadRulesCmd() *cobra.Command {
 	}
 	dir.bind(cmd)
 	authorFlag(cmd, &author)
-	bindRuleWriteFlags(cmd, &set, &replace)
+	bindRuleWriteFlags(cmd, &set, &replace, &ifDigest)
 	f := cmd.Flags()
 	f.StringVar(&title, "title", "", "title of the rules section (default \"Pad rules\")")
 	f.StringVar(&password, "password", "", "the pad's password (when protected)")
 	return cmd
 }
 
-// bindRuleWriteFlags binds the two flags every level shares. Writing is behind an
+// bindRuleWriteFlags binds the three flags every level shares. Writing is behind an
 // explicit --set rather than "an argument means write", so a mistyped read can never
 // overwrite the rules with the word the person meant as a filter.
 //
@@ -172,11 +187,18 @@ func newPadRulesCmd() *cobra.Command {
 // because rules are a bullet list: `--set "- keep it short"` as a positional would be
 // parsed as a flag by any getopt-style parser, and every rule set anyone writes starts
 // with a dash. As a flag value it is simply the value.
-func bindRuleWriteFlags(cmd *cobra.Command, set *string, replace *bool) {
+//
+// --if-digest is not optional in practice — the store refuses a write without it — but it
+// is a plain flag rather than a required one so the refusal comes from the store, in the
+// same words on every surface, and carries the current rules along with it.
+func bindRuleWriteFlags(cmd *cobra.Command, set *string, replace *bool, ifDigest *string) {
 	f := cmd.Flags()
 	f.StringVar(set, "set", "", "write these rules, replacing what was there (\"-\" reads them from stdin)")
 	f.BoolVar(replace, "replace", false,
 		"with --set: these rules REPLACE the levels above instead of extending them")
+	f.StringVar(ifDigest, "if-digest", "",
+		"with --set: the digest of the version you are replacing, as this level printed it (\""+
+			pad.NoRules+"\" when it has none)")
 }
 
 // ruleText resolves --set: the flag's own value, or stdin when it is "-".
@@ -201,6 +223,7 @@ func printRules(cmd *cobra.Command, rules pad.Rules) error {
 	out := cmd.OutOrStdout()
 	if rules.Empty() && len(rules.Layers) == 0 {
 		fmt.Fprintln(out, "no rules here — write some with --set (see --help)")
+		printRuleVersions(out, rules)
 		return nil
 	}
 	fmt.Fprintf(out, "digest: %s\n", rules.Digest)
@@ -213,7 +236,31 @@ func printRules(cmd *cobra.Command, rules pad.Rules) error {
 	if len(rules.History) > 0 {
 		fmt.Fprintf(out, "\nearlier versions: %s\n", joinSections(rules.History))
 	}
+	printRuleVersions(out, rules)
 	return nil
+}
+
+// printRuleVersions lists what each level is at, which is what --if-digest quotes.
+//
+// It covers the levels with NO rules too, and that is the point of printing it as its own
+// line rather than tucking each digest into its layer's heading: a level nobody has
+// written yet has no heading to tuck it into, and filling an empty level is exactly the
+// write two agents are most likely to race on.
+//
+// It is one line, last, and in the levels' own order — a reader after the RULES should
+// meet the text first and the machine tokens after it, the same way `digest:` sits above
+// the text it summarises for the one caller that needs it before reading anything.
+func printRuleVersions(out io.Writer, rules pad.Rules) {
+	var parts []string
+	for _, level := range []pad.RuleLevel{pad.LevelStore, pad.LevelProject, pad.LevelPad} {
+		if v := rules.Version(level); v != "" {
+			parts = append(parts, fmt.Sprintf("%s %s", level, v))
+		}
+	}
+	if len(parts) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "\nversions (--if-digest): %s\n", strings.Join(parts, " · "))
 }
 
 // ruleAuthorSuffix names who wrote a pad-level rule set and when — the file levels carry

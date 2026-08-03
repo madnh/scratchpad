@@ -35,5 +35,5 @@ func (d *dirFlags) open() (*store.Store, config.Config, error) {
 	if err != nil {
 		return nil, config.Config{}, err
 	}
-	return store.New(cfg.RootDir, cfg.ProjectsDir, cfg.Limits), cfg, nil
+	return store.New(cfg), cfg, nil
 }

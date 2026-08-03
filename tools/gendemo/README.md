@@ -32,9 +32,10 @@ Two things keep that from becoming a second, rotting implementation of the forma
 - Sections are rendered by **`pad.RenderSection` / `pad.RenderHeader`** — the same
   functions the store writes with. A new metadata key appears in the demo for free.
 - Every event is checked by the **store's own rules** before it is appended:
-  `ValidateMeta`, `CheckTurn`, `CheckTaskRef`, `CheckTaskOwner`, `NextTaskNo`, in the
-  order `store.Post` checks them. A scenario that could not have happened cannot be
-  built, and when a rule changes, the scenarios that no longer make sense fail loudly.
+  `ValidateMeta`, `CheckTurn`, the opener's claim on a rules section, `CheckTaskRef`,
+  `CheckTaskOwner`, `NextTaskNo`, in the order `store.Post` checks them. A scenario that
+  could not have happened cannot be built, and when a rule changes, the scenarios that no
+  longer make sense fail loudly.
 
 ## The two files
 
@@ -80,7 +81,8 @@ Where to look for specific behaviour:
 - **Rules, versioned** — §4 states the pad's rules and §48 tightens them after the
   release. The LAST one is in force; §4 renders as superseded, and the dialog lists it
   under "earlier versions". §48 following pm's own §47 is the proof that a rules section
-  does not take the turn.
+  does not take the turn. Both are written by `pm`, who also opened the pad at §1 —
+  under the default policy that is the only agent here whose rules these could be.
 
 ### Rules files (the two levels that are not sections)
 
@@ -92,6 +94,11 @@ at the top of `scenario.go`.
 Without them the rules dialog would be empty, `rules_unread` would never fire, and
 `projects/` would have no file exercising the `_` naming law — so a demo of this feature
 would be a demo of nothing.
+
+The demo store is written with a plain marker, so it carries the DEFAULT rules policy:
+those two files are the operator's (the UI edits them; `scratchpad rules --set` against
+the demo store is refused with `rules_readonly`), and `mobile-crash9x`'s own rules are
+`pm`'s. That is the point — the demo should refuse what a real store refuses.
 
 ### `mobile-apiq7k` — a plain pad (8 sections, 2 agents, no tasks)
 
@@ -151,6 +158,7 @@ authoritative version is `internal/pad` and `store.Post`.
 |---|---|
 | `not_your_turn: you ("pm") posted section 12` | two **messages** in a row from one author. Task events are exempt — put someone else's line in between, or make the event a real task event |
 | `not_task_owner` | only a task's owners (their own slice) or its opener (reassign / drop / force-close) may set `status` |
+| `rules written by "x", but "y" opened the pad` | under the default `rules.pad = "opener"` policy a pad's rules belong to whoever wrote its first section. A scenario that needs otherwise has to ship a marker that allows it, not slip past the build |
 | `task_needs_owner` | `Opens` without `To` |
 | `no_such_task` | `Task` names a label that no earlier event opened |
 | `re "x" names no earlier section` | the label is missing, misspelled, or defined *below* this event |

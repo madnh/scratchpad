@@ -195,6 +195,14 @@ func build(sc scenario, now time.Time) (string, error) {
 			if err := p.CheckTurn(ev.Author, meta.Kind); err != nil {
 				return "", fmt.Errorf("event %d (%q): %w", i+1, ev.Title, err)
 			}
+			// The DEFAULT rules policy, checked here for the same reason the turn is: a
+			// demo whose pads a real store would refuse to build is a demo that teaches
+			// the wrong thing. A scenario that wants a non-opener writing the rules has to
+			// say so by shipping a marker that allows it, not by slipping past this loop.
+			if meta.Kind == pad.KindRules && ev.Author != p.Opener() {
+				return "", fmt.Errorf("event %d (%q): rules written by %q, but %q opened the pad"+
+					" (rules.pad = %q)", i+1, ev.Title, ev.Author, p.Opener(), config.RulesWriteOpener)
+			}
 			if meta.Task > 0 && ev.Opens == "" {
 				if err := p.CheckTaskRef(meta.Task); err != nil {
 					return "", fmt.Errorf("event %d (%q): %w", i+1, ev.Title, err)

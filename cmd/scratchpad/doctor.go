@@ -109,6 +109,11 @@ type doctorStore struct {
 	ProjectRules int    `json:"project_rules"`
 	RulesDigest  string `json:"rules_digest,omitempty"`
 
+	// RulesPolicy is who may CHANGE each level. It belongs beside the rules themselves
+	// rather than under the config groups: "the agent says it may not edit the rules" is
+	// the same conversation as "the agents ignore the rules", and this is the answer.
+	RulesPolicy config.RulesPolicy `json:"rules_policy"`
+
 	// Strays are files under projects/ that are neither pads nor tool files. Every
 	// listing skips them; this is the one place that says they exist, so a pad renamed
 	// by hand does not simply vanish.
@@ -202,7 +207,7 @@ func runDoctor(dir *dirFlags, wantContent, wantVerdict bool) *doctorReport {
 
 	rep.Store = statStore(cfg)
 	if wantContent {
-		st := store.New(cfg.RootDir, cfg.ProjectsDir, cfg.Limits)
+		st := store.New(cfg)
 		if pads, _, err := st.List(""); err == nil {
 			for _, p := range pads {
 				rep.Content = append(rep.Content, doctorPadInfo{
@@ -261,7 +266,7 @@ func statStore(cfg config.Config) *doctorStore {
 	ds.Exists = true
 	ds.Writable = unix.Access(cfg.ProjectsDir, unix.W_OK) == nil
 
-	st := store.New(cfg.RootDir, cfg.ProjectsDir, cfg.Limits)
+	st := store.New(cfg)
 	if projects, err := st.Projects(); err == nil {
 		ds.ProjectCount = len(projects)
 		for _, p := range projects {
@@ -293,6 +298,7 @@ func statStore(cfg config.Config) *doctorStore {
 	if rules, err := st.ProjectRuleSet(cfg.DefaultProject); err == nil {
 		ds.RulesDigest = rules.Digest
 	}
+	ds.RulesPolicy = cfg.Rules
 	if strays, err := st.StrayFiles(); err == nil {
 		ds.Strays = strays
 	}
@@ -306,6 +312,23 @@ func yesNo(cond bool, yes, no string) string {
 		return yes
 	}
 	return no
+}
+
+// rulesWriterHint says what a policy value MEANS to whoever is reading a diagnosis. The
+// value itself is in --json for anything that wants to branch on it; a person here is
+// working out why an agent told them it could not edit the rules.
+func rulesWriterHint(v string) string {
+	switch v {
+	case config.RulesWriteUI:
+		return "ui/file only"
+	case config.RulesWriteAgent:
+		return "agents too"
+	case config.RulesWriteOpener:
+		return "the agent that opened it"
+	case config.RulesWriteAny:
+		return "any agent on the pad"
+	}
+	return v
 }
 
 // verdict walks the failure modes outermost-in and states a conclusion + next step.
@@ -393,6 +416,12 @@ func (r *doctorReport) writeText(w io.Writer) {
 		} else {
 			fmt.Fprintln(w, "  digest        —  (no rules apply; agents join with no guidance)")
 		}
+		// Who may CHANGE them, spelled out in what it MEANS rather than in the marker's
+		// values: an operator reading this is asking why an agent said it could not edit
+		// the rules, and "store: ui" alone does not answer that.
+		p := r.Store.RulesPolicy
+		fmt.Fprintf(w, "  may change    store: %s · project: %s · pad: %s\n",
+			rulesWriterHint(p.Store), rulesWriterHint(p.Project), rulesWriterHint(p.Pad))
 
 		// Not a warning: a stray file breaks nothing. It is reported because every
 		// listing skips it silently, so this is the only place a pad renamed by hand
