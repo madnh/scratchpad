@@ -87,6 +87,12 @@ a typo can never silently seed a store in the wrong place.
   "ui": {
     "port": 6711,
     "no_auth": false
+  },
+
+  "rules": {
+    "store": "ui",
+    "project": "ui",
+    "pad": "opener"
   }
 }
 ```
@@ -134,6 +140,26 @@ Field reference:
   user of.
   There is no origin allow-list here: the UI binds loopback, so the browser's own
   origin is the only one that can ever reach it.
+- **`rules`** — who may WRITE each level of the rules (see *Rules* below for what they
+  are). This is the one group whose defaults deliberately say **no**: rules are the one
+  thing in this store that is EDITED rather than appended, so an overwritten rule is
+  simply gone, with nothing in any pad recording that it once said something else.
+
+  | Key | Values | Default | Means |
+  |---|---|---|---|
+  | `store` | `ui`, `agent` | `ui` | `ui`: the store's rules are the operator's. The Web UI writes them, and so does an editor — `_rules.md` is a markdown file in a directory you own. The CLI and MCP are refused with `rules_readonly`. `agent`: `scratchpad rules --set` works too. |
+  | `project` | `ui`, `agent` | `ui` | The same, for `projects/<p>/_rules.md`. |
+  | `pad` | `opener`, `any` | `opener` | `opener`: only the agent that wrote the pad's **section 1** may write its rules. A pad is nearly always opened by the agent handing out the work, so this leaves the house style with whoever framed the job. `any`: any agent on the pad may. |
+
+  A value this binary does not know makes the marker fail to LOAD rather than fall back
+  to something looser than you asked for.
+
+  The Web UI is exempt from all three — it is the surface they point at. An agent that
+  wants the store's or a project's rules changed puts its proposed text in its reply and
+  a person pastes it in.
+
+  Separately from WHO may write, every rules write must say WHICH VERSION it replaces —
+  see *Rules* below.
 
 Only `type`, `version`, `display_name`, and `instance` are written at init; add the
 optional groups when you need them.
@@ -232,9 +258,9 @@ Three levels apply in order, each **extending** the one above:
 
 | Level | Where | Edited with |
 |---|---|---|
-| store | `_rules.md` in this dir | `scratchpad rules --set -`, or the Web UI's Settings |
-| project | `projects/<p>/_rules.md` | `scratchpad project rules <p> --set -`, or the UI |
-| pad | a `kind: rules` section | `scratchpad pad rules <ref> --set -`, `pad_post(set_rules)`, or the UI |
+| store | `_rules.md` in this dir | the Web UI's Settings, or the file itself (`scratchpad rules --set -` only when `rules.store = "agent"`) |
+| project | `projects/<p>/_rules.md` | the UI, or the file (`scratchpad project rules <p> --set -` only when `rules.project = "agent"`) |
+| pad | a `kind: rules` section | `scratchpad pad rules <ref> --as <agent> --set -`, `pad_post(set_rules)`, or the UI |
 
 - A missing or blank file means "no rules at this level" — blank the file to switch
   rules off without deleting it.
@@ -244,10 +270,41 @@ Three levels apply in order, each **extending** the one above:
 - A pad's rules are a normal append, so **several rules sections are versions of one
   rule set**: the last one is in force and the earlier ones stay as history. Removing
   the file removes them with it, like everything else about a pad.
-- **The gate**: an author posting to a pad for the FIRST time must quote the digest of
-  the rules in force (`--ack-rules` / `ack_rules`), else `rules_unread` — which hands
+- **The read gate**: an author posting to a pad for the FIRST time must quote the digest
+  of the rules in force (`--ack-rules` / `ack_rules`), else `rules_unread` — which hands
   back the rules and the digest to repeat. It fires once per author per pad; later rule
   changes travel as an ordinary broadcast section instead.
+
+### Changing rules: who, and on top of what
+
+Two separate questions, and a write has to answer both.
+
+**Who** is the `rules` group in the marker (see above): by default the two file levels
+belong to the operator, and a pad's belong to the agent that opened it. The refusals are
+`rules_readonly` and `not_rules_owner`, and each names where the change CAN be made.
+
+**On top of what** is the per-level version. Each level carries its own digest —
+`versions` in `pad_rules`, the `versions (--if-digest)` line in the CLI — and a write
+quotes the one it is replacing:
+
+```
+scratchpad pad rules mobile-crash9x --as pm --set - --if-digest 3b0e55da
+```
+
+A level that has no rules yet is at `none`, and that is quoted the same way. A digest
+that no longer matches means someone wrote these rules since you read them: the write is
+refused with `rules_conflict`, and the refusal carries the version that won so the merge
+costs no second read.
+
+This is a per-LEVEL token, deliberately not the combined `digest` that `--ack-rules`
+quotes. `digest` answers "what am I bound by" and spans every level in force; a version
+answers "is the thing I am about to overwrite still the thing I read". Folding them into
+one would fail a pad-rules edit because somebody touched the store's — a conflict the
+writer can neither see nor resolve.
+
+Like the read gate, this is a "did you read this" mechanism, not a security boundary: an
+agent determined to clobber the rules can always read them first. What it stops is the
+accident — a write over a version the writer never saw.
 
 ### The reserved author `scratchpad`
 
@@ -255,6 +312,10 @@ Sections written by a PERSON through a surface that has no identity of its own �
 editing a pad's rules in the Web UI — are authored `scratchpad`. Agents may not claim
 that name (`invalid_input`), and it is left out of the pad's roster, its participants
 and its inbox: it is the tool recording a change, not a teammate.
+
+It belongs to the **Web UI alone**. `scratchpad pad rules --set` needs `--as <agent>`:
+writing a pad's rules anonymously from the CLI used to be allowed, and meant any agent
+could set any pad's rules by simply not naming itself.
 - A pad written before this line existed has a bare `ts` and parses as a broadcast
   message. **Nothing needs migrating.** Conversely a pad written *now*, read by a
   version that predates the extra keys, loses the timestamps of the sections that use

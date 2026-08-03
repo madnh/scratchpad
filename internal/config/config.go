@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/madnh/scratchpad/internal/appinfo"
@@ -117,6 +118,52 @@ type UI struct {
 	NoAuth bool `json:"no_auth,omitempty"`
 }
 
+// Who may WRITE each level of the rules. The values a level accepts differ because the
+// levels are different KINDS of thing: the two file levels are edited, so the question is
+// which surface may edit them; a pad's rules are a section, so the question is which
+// author may append one.
+const (
+	// RulesWriteUI: the file is the operator's. The Web UI writes it, and so does an
+	// editor — it is a markdown file in a directory the operator owns. An agent asking
+	// through the CLI or MCP is refused and told where to hand its proposal.
+	RulesWriteUI = "ui"
+	// RulesWriteAgent: an agent may write this level too. For a deployment with one
+	// operator and one agent, where the round trip through a person buys nothing.
+	RulesWriteAgent = "agent"
+	// RulesWriteOpener: only the agent that opened the pad may write its rules. A pad is
+	// nearly always opened by the agent handing out the work, so this puts the house
+	// style in the hands of the one who framed the job.
+	RulesWriteOpener = "opener"
+	// RulesWriteAny: any agent on the pad may write its rules — the behaviour before
+	// there was a policy at all.
+	RulesWriteAny = "any"
+)
+
+// RulesPolicy says who may write each level of the rules. It exists because rules are the
+// one thing in this store that is EDITED rather than appended: a message an agent
+// disagrees with stays in the transcript beside its reply, but a rule it overwrites is
+// simply gone, and nothing in the pad records that it ever said something else.
+//
+// The defaults are deliberately narrow. The store's and a project's rules are the
+// operator's standing instruction to every agent that will ever work here, so an agent
+// that could rewrite them could rewrite its own instructions; a pad's are the opener's,
+// for the same reason on a smaller scale. Widen either only for a deployment where that
+// distinction has no one to protect.
+type RulesPolicy struct {
+	// Store and Project take RulesWriteUI (default) or RulesWriteAgent.
+	Store   string `json:"store,omitempty"`
+	Project string `json:"project,omitempty"`
+	// Pad takes RulesWriteOpener (default) or RulesWriteAny.
+	Pad string `json:"pad,omitempty"`
+}
+
+// DefaultRulesPolicy is what a marker that says nothing about rules gets.
+var DefaultRulesPolicy = RulesPolicy{
+	Store:   RulesWriteUI,
+	Project: RulesWriteUI,
+	Pad:     RulesWriteOpener,
+}
+
 // Config is the marker file: a schema header (type/version), identity, and optional
 // setting groups. `init` writes only the header + identity; the optional groups are
 // added by an operator when needed (config.md documents the defaults).
@@ -143,10 +190,11 @@ type Config struct {
 	// (overridden by SCRATCHPAD_PROJECT_NAME / --project).
 	DefaultProject string `json:"default_project,omitempty"`
 
-	Limits Limits `json:"limits,omitzero"`
-	Wait   Wait   `json:"wait,omitzero"`
-	TCP    TCP    `json:"tcp,omitzero"`
-	UI     UI     `json:"ui,omitzero"`
+	Limits Limits      `json:"limits,omitzero"`
+	Wait   Wait        `json:"wait,omitzero"`
+	TCP    TCP         `json:"tcp,omitzero"`
+	UI     UI          `json:"ui,omitzero"`
+	Rules  RulesPolicy `json:"rules,omitzero"`
 
 	// RootDir is the Scratchpad dir itself, absolute — derived, never persisted. It is
 	// published because the store's own files live beside projects/ (the store-wide
@@ -188,6 +236,12 @@ func LoadDir(dir string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", MarkerPath(abs), err)
 	}
 	c.applyDefaults()
+	// After the defaults, so an empty group is "the default" rather than an error, and
+	// before anything derived: a marker that misspells a policy must not start a server
+	// that silently falls back to something looser than the operator asked for.
+	if err := c.validateRules(); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", MarkerPath(abs), err)
+	}
 	c.RootDir = abs
 	c.ProjectsDir = filepath.Join(abs, "projects")
 	c.SocketPath = filepath.Join(abs, c.Instance+".sock")
@@ -241,6 +295,35 @@ func (c *Config) applyDefaults() {
 	if c.UI.Port <= 0 {
 		c.UI.Port = DefaultUIPort
 	}
+	if strings.TrimSpace(c.Rules.Store) == "" {
+		c.Rules.Store = DefaultRulesPolicy.Store
+	}
+	if strings.TrimSpace(c.Rules.Project) == "" {
+		c.Rules.Project = DefaultRulesPolicy.Project
+	}
+	if strings.TrimSpace(c.Rules.Pad) == "" {
+		c.Rules.Pad = DefaultRulesPolicy.Pad
+	}
+}
+
+// validateRules rejects a policy value this binary does not know. Failing to LOAD is the
+// only safe reading of a misspelling here: every other unknown setting degrades to a
+// default that is merely wrong, while this one would degrade to a permission the operator
+// did not grant, and would do it silently.
+func (c *Config) validateRules() error {
+	for _, f := range []struct {
+		name, value string
+		allowed     []string
+	}{
+		{"store", c.Rules.Store, []string{RulesWriteUI, RulesWriteAgent}},
+		{"project", c.Rules.Project, []string{RulesWriteUI, RulesWriteAgent}},
+		{"pad", c.Rules.Pad, []string{RulesWriteOpener, RulesWriteAny}},
+	} {
+		if !slices.Contains(f.allowed, f.value) {
+			return fmt.Errorf("rules.%s = %q is not one of %s", f.name, f.value, strings.Join(f.allowed, ", "))
+		}
+	}
+	return nil
 }
 
 // WriteMarker creates dir (0700) and writes the marker file (0600). It refuses to

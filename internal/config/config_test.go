@@ -131,3 +131,42 @@ func TestResolveProject(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// The rules policy: a marker that says nothing gets the narrow defaults, and one that
+// misspells a value fails to LOAD rather than degrading to a permission nobody granted.
+func TestRulesPolicy(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) {
+		if err := os.WriteFile(MarkerPath(dir), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`{"type":"scratchpad","version":1}`)
+	c, err := LoadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Rules != DefaultRulesPolicy {
+		t.Fatalf("a marker that says nothing about rules must get the defaults: %+v", c.Rules)
+	}
+
+	// A group may set one level and leave the others alone.
+	write(`{"type":"scratchpad","version":1,"rules":{"pad":"any"}}`)
+	if c, err = LoadDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if c.Rules.Pad != RulesWriteAny || c.Rules.Store != RulesWriteUI {
+		t.Fatalf("a partial rules group must default the rest: %+v", c.Rules)
+	}
+
+	for _, body := range []string{
+		`{"type":"scratchpad","version":1,"rules":{"store":"anyone"}}`,
+		`{"type":"scratchpad","version":1,"rules":{"pad":"ui"}}`, // a real value, wrong level
+	} {
+		write(body)
+		if _, err := LoadDir(dir); err == nil || !strings.Contains(err.Error(), "rules.") {
+			t.Fatalf("an unknown policy value must refuse to load (%s): %v", body, err)
+		}
+	}
+}

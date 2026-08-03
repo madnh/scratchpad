@@ -125,13 +125,20 @@ export function showRules(scope, rules, opts = {}) {
     });
     const replace = el("input", { type: "checkbox", checked: !!layer?.replace });
     const status = el("div", { class: "rules__status" });
+    // The version this editor opened on. Held HERE rather than read at save time, because
+    // that is the whole question the server is being asked: is what I am about to replace
+    // still the thing I was shown when I started typing. It moves only when the person
+    // has been SHOWN what changed underneath them — see the conflict branch below.
+    let openedAt = current.versions?.[level] || "none";
+    // Empty until a conflict fills it; declared before Save so the handler can reach it.
+    const conflict = el("div", { class: "rules__conflict" });
     const save = el("button", {
       type: "button", class: "ghost-btn rules__save", text: "Save",
       onclick: async () => {
         save.disabled = true;
         status.textContent = "saving…";
         try {
-          current = await write(scope, level, area.value, replace.checked);
+          current = await write(scope, level, area.value, replace.checked, openedAt);
           if (editOnly) {
             // The caller repaints from onChange, so the page behind already shows the
             // new text; a toast says it landed without making them dismiss anything.
@@ -142,7 +149,35 @@ export function showRules(scope, rules, opts = {}) {
           render();
         } catch (err) {
           save.disabled = false;
-          status.textContent = err.message || "could not save";
+          if (err.code !== "rules_conflict") {
+            status.textContent = err.message || "could not save";
+            return;
+          }
+          // A conflict is the one failure where the typed text must NOT be thrown away:
+          // somebody else wrote these rules while this editor was open, and what is in
+          // the box is the only copy of the person's change. So the editor stays and
+          // their version appears under it to merge from — re-rendering the dialog here
+          // would lose exactly the work the check exists to protect.
+          //
+          // Once it has been SHOWN, the editor is no longer stale: the next Save quotes
+          // the version now on screen. Leaving openedAt behind would make the conflict
+          // permanent, which teaches people to route around the check rather than merge.
+          try {
+            current = await refresh(scope);
+            opts.onChange?.(current);
+            openedAt = current.versions?.[level] || "none";
+          } catch {
+            status.textContent = err.message || "could not save";
+            return;
+          }
+          const theirs = (current.layers || []).find((l) => l.level === level);
+          status.textContent =
+            "Someone else changed these rules while this was open. Your text is untouched —" +
+            " merge in what you want from theirs, then save again.";
+          setChildren(conflict,
+            el("p", { class: "rules__conflict-head", text: "Saved meanwhile, by someone else:" }),
+            theirs ? rulesBody(theirs.text) : el("p", { class: "muted rules__text", text: "They emptied this level." }),
+          );
         }
       },
     });
@@ -160,6 +195,7 @@ export function showRules(scope, rules, opts = {}) {
         ? el("p", { class: "rules__hint muted", text: "Saved as a new section by “scratchpad”. The previous version stays in the pad as history, and this does not take anyone's turn." })
         : null,
       status,
+      conflict,
     );
     setChildren(footer,
       el("button", {
@@ -173,13 +209,26 @@ export function showRules(scope, rules, opts = {}) {
 
   // write persists one level and returns the refreshed rule set, so the dialog always
   // renders what the server actually stored rather than what was typed.
-  async function write(sc, level, text, replace) {
+  //
+  // ifDigest is the version of THAT level the editor opened on. It is per-level rather
+  // than the combined digest above, because a person editing this pad's rules has no way
+  // to resolve — and no business being blocked by — someone else's change to the store's.
+  async function write(sc, level, text, replace, ifDigest) {
     let out;
-    if (level === "store") out = await api.setStoreRules(text, replace);
-    else if (level === "project") out = await api.setProjectRules(sc.project, text, replace);
-    else out = await api.setPadRules(sc.ref, text, replace);
+    if (level === "store") out = await api.setStoreRules(text, replace, ifDigest);
+    else if (level === "project") out = await api.setProjectRules(sc.project, text, replace, ifDigest);
+    else out = await api.setPadRules(sc.ref, text, replace, ifDigest);
     opts.onChange?.(out);
     return out;
+  }
+
+  // refresh re-reads the whole rule set for this scope. Used after a conflict, where the
+  // dialog must show what is actually stored now — the failed write's own reply cannot,
+  // since the server refused before writing anything.
+  async function refresh(sc) {
+    if (sc.kind === "pad") return (await api.pad(sc.ref)).rules || {};
+    if (sc.kind === "project") return api.projectRules(sc.project);
+    return api.storeRules();
   }
 
   if (opts.startEditing && canEdit(scope, opts.startEditing)) {

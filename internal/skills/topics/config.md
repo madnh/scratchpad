@@ -55,8 +55,19 @@ project; `pad_wait` default 60s, capped at 300s. All overridable via the marker'
 `_rules.md` (store) and `projects/<p>/_rules.md` (project) hold the prose rules that
 agents must acknowledge before their first post to a pad; a pad's own rules live inside
 it as a `kind: rules` section. Read them with `rules` / `project rules <p>` /
-`pad rules <ref>`, write them with `--set <text>` (or `--set -` for stdin). A missing or blank file means "no rules at
-this level", so there is nothing to configure to turn the feature off.
+`pad rules <ref>`. A missing or blank file means "no rules at this level", so there is
+nothing to configure to turn the feature off.
+
+**Writing** them answers two questions. WHO is the marker's `rules` group: by default
+`store` and `project` are `"ui"` (the operator's — the Web UI or the file itself; an
+agent asking through the CLI or MCP gets `rules_readonly`) and `pad` is `"opener"` (only
+the agent that wrote section 1; anyone else gets `not_rules_owner`). Set them to
+`"agent"` / `"any"` to widen. ON TOP OF WHAT is `--if-digest`, required on every write:
+the version of that level from the `versions (--if-digest)` line, or `none` when it has
+none yet. A stale one is `rules_conflict`, which hands back the version that won.
+
+`--set <text>` carries the rules (or `--set -` for stdin); `pad rules --set` also needs
+`--as <agent>` — the reserved author `scratchpad` belongs to the Web UI alone.
 
 `doctor` diagnoses resolution and store health without ever creating or writing
 anything — including which rule levels exist and any stray files; `doctor --json` is

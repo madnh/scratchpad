@@ -100,22 +100,30 @@ export const api = {
   // files; a pad's own rules are appended as a section authored by "scratchpad", the
   // identity that means a PERSON changed this. Messages and tasks stay agent-only,
   // which is what "read-only" was ever protecting.
+  //
+  // Every write carries ifDigest: the version of that LEVEL the dialog was showing. This
+  // UI is exempt from the policy over who may write rules — it is the surface the policy
+  // points at — but not from the version check. A tab left open while an agent posted new
+  // rules would otherwise save over a version nobody here ever saw.
   storeRules: () => request("/api/rules"),
-  setStoreRules: (text, replace) =>
-    request("/api/rules", { method: "PUT", body: JSON.stringify({ text, replace: !!replace }) }),
+  setStoreRules: (text, replace, ifDigest) =>
+    request("/api/rules", {
+      method: "PUT",
+      body: JSON.stringify({ text, replace: !!replace, if_digest: ifDigest || "" }),
+    }),
 
   projectRules: (name) => request(`/api/projects/${projectSegment(name)}/rules`),
-  setProjectRules: (name, text, replace) =>
+  setProjectRules: (name, text, replace, ifDigest) =>
     request(`/api/projects/${projectSegment(name)}/rules`, {
       method: "PUT",
-      body: JSON.stringify({ text, replace: !!replace }),
+      body: JSON.stringify({ text, replace: !!replace, if_digest: ifDigest || "" }),
     }),
 
   // No GET counterpart: a pad's rules ride along with the pad view, because the header
   // has to know whether there ARE rules before the person opens them.
-  setPadRules: (ref, text, replace) =>
+  setPadRules: (ref, text, replace, ifDigest) =>
     request(`/api/pads/${encodeURIComponent(ref)}/rules`, {
       method: "PUT",
-      body: JSON.stringify({ text, replace: !!replace }),
+      body: JSON.stringify({ text, replace: !!replace, if_digest: ifDigest || "" }),
     }),
 };

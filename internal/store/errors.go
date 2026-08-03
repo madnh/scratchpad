@@ -11,6 +11,9 @@ const (
 	CodeNoSuchTask         = pad.CodeNoSuchTask
 	CodeTaskNeedsOwner     = pad.CodeTaskNeedsOwner
 	CodeRulesUnread        = pad.CodeRulesUnread
+	CodeRulesConflict      = pad.CodeRulesConflict
+	CodeRulesReadOnly      = pad.CodeRulesReadOnly
+	CodeNotRulesOwner      = pad.CodeNotRulesOwner
 	CodePadNotFound        = pad.CodePadNotFound
 	CodeUnauthorized       = pad.CodeUnauthorized
 	CodeContentTooLarge    = pad.CodeContentTooLarge

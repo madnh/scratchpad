@@ -43,9 +43,12 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, *http.Client, *stor
 	cfg := config.Config{
 		Type: config.ConfigType, Version: config.ConfigVersion,
 		DisplayName: "Test", Instance: "scratchpad",
-		ProjectsDir: projects, Limits: config.DefaultLimits,
+		RootDir: dir, ProjectsDir: projects, Limits: config.DefaultLimits,
+		// The DEFAULT policy: this UI is the surface it points at, so what the UI may do
+		// to the rules under it is exactly what these tests should be exercising.
+		Rules: config.DefaultRulesPolicy,
 	}
-	st := store.New(dir, projects, config.DefaultLimits)
+	st := store.New(cfg)
 
 	srv, err := New(st, cfg, Options{Port: config.DefaultUIPort})
 	if err != nil {
@@ -356,9 +359,12 @@ func TestRunStopsPromptlyWithAnOpenEventStream(t *testing.T) {
 	cfg := config.Config{
 		Type: config.ConfigType, Version: config.ConfigVersion,
 		DisplayName: "Test", Instance: "scratchpad",
-		ProjectsDir: projects, Limits: config.DefaultLimits,
+		RootDir: dir, ProjectsDir: projects, Limits: config.DefaultLimits,
+		// The DEFAULT policy: this UI is the surface it points at, so what the UI may do
+		// to the rules under it is exactly what these tests should be exercising.
+		Rules: config.DefaultRulesPolicy,
 	}
-	srv, err := New(store.New(dir, projects, config.DefaultLimits), cfg,
+	srv, err := New(store.New(cfg), cfg,
 		Options{Port: freePort(t), NoAuth: true})
 	if err != nil {
 		t.Fatal(err)
@@ -471,9 +477,12 @@ func newNoAuthServer(t *testing.T) (*Server, *httptest.Server, *store.Store) {
 	cfg := config.Config{
 		Type: config.ConfigType, Version: config.ConfigVersion,
 		DisplayName: "Test", Instance: "scratchpad",
-		ProjectsDir: projects, Limits: config.DefaultLimits,
+		RootDir: dir, ProjectsDir: projects, Limits: config.DefaultLimits,
+		// The DEFAULT policy: this UI is the surface it points at, so what the UI may do
+		// to the rules under it is exactly what these tests should be exercising.
+		Rules: config.DefaultRulesPolicy,
 	}
-	st := store.New(dir, projects, config.DefaultLimits)
+	st := store.New(cfg)
 	srv, err := New(st, cfg, Options{Port: config.DefaultUIPort, NoAuth: true})
 	if err != nil {
 		t.Fatal(err)
@@ -679,15 +688,26 @@ func TestRulesEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code := putJSON(t, client, ts.URL+"/api/rules", `{"text":"- be brief"}`, nil); code != http.StatusOK {
+	// Every write says which version it replaces — the UI is exempt from the policy over
+	// WHO may write rules, not from the check that it is not overwriting something unseen.
+	if code := putJSON(t, client, ts.URL+"/api/rules", `{"text":"- be brief"}`, nil); code != http.StatusConflict {
+		t.Fatalf("PUT with no if_digest gave %d, want 409", code)
+	}
+	if code := putJSON(t, client, ts.URL+"/api/rules",
+		`{"text":"- be brief","if_digest":"none"}`, nil); code != http.StatusOK {
 		t.Fatalf("PUT /api/rules gave %d", code)
 	}
-	if code := putJSON(t, client, ts.URL+"/api/projects/demo/rules", `{"text":"- always --to"}`, nil); code != http.StatusOK {
+	if code := putJSON(t, client, ts.URL+"/api/rules",
+		`{"text":"- something else","if_digest":"none"}`, nil); code != http.StatusConflict {
+		t.Fatalf("PUT with a stale if_digest gave %d, want 409", code)
+	}
+	if code := putJSON(t, client, ts.URL+"/api/projects/demo/rules",
+		`{"text":"- always --to","if_digest":"none"}`, nil); code != http.StatusOK {
 		t.Fatalf("PUT project rules gave %d", code)
 	}
 	var padRules pad.Rules
 	if code := putJSON(t, client, ts.URL+"/api/pads/"+p.Ref()+"/rules",
-		`{"text":"- progress on the task"}`, &padRules); code != http.StatusOK {
+		`{"text":"- progress on the task","if_digest":"none"}`, &padRules); code != http.StatusOK {
 		t.Fatalf("PUT pad rules gave %d", code)
 	}
 	if len(padRules.Layers) != 3 {
@@ -748,7 +768,10 @@ func TestProtectedPadRulesNeedUnlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SetPadRules(locked.Ref(), store.SystemAuthor, "", "- secret house style", password, false); err != nil {
+	if _, err := st.SetPadRules(store.PadRulesRequest{
+		Ref: locked.Ref(), Text: "- secret house style", Password: password,
+		IfDigest: pad.NoRules, By: store.ByUI,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -761,7 +784,7 @@ func TestProtectedPadRulesNeedUnlock(t *testing.T) {
 	}
 
 	if code := putJSON(t, client, ts.URL+"/api/pads/"+locked.Ref()+"/rules",
-		`{"text":"- injected"}`, nil); code != http.StatusForbidden {
+		`{"text":"- injected","if_digest":"none"}`, nil); code != http.StatusForbidden {
 		t.Fatalf("writing rules into a locked pad gave %d, want 403", code)
 	}
 
@@ -781,7 +804,12 @@ func TestProtectedPadRulesNeedUnlock(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unlock gave %d", resp.StatusCode)
 	}
-	if code := putJSON(t, client, ts.URL+"/api/pads/"+locked.Ref()+"/rules", `{"text":"- allowed now"}`, nil); code != http.StatusOK {
+	unlockedRules, err := st.PadRules(locked.Ref(), password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rulesBody := `{"text":"- allowed now","if_digest":"` + unlockedRules.Version(pad.LevelPad) + `"}`
+	if code := putJSON(t, client, ts.URL+"/api/pads/"+locked.Ref()+"/rules", rulesBody, nil); code != http.StatusOK {
 		t.Fatalf("writing rules after unlocking gave %d", code)
 	}
 }
@@ -820,7 +848,8 @@ func TestDotDotInProjectPathIsNormalisedToTheStoreRules(t *testing.T) {
 	srv, ts, client, st := newTestServer(t)
 	authenticate(t, srv, ts, client)
 
-	if code := putJSON(t, client, ts.URL+"/api/projects/../rules", `{"text":"- store level"}`, nil); code != http.StatusOK {
+	if code := putJSON(t, client, ts.URL+"/api/projects/../rules",
+		`{"text":"- store level","if_digest":"none"}`, nil); code != http.StatusOK {
 		t.Fatalf("normalised path gave %d, want it to land on /api/rules (200)", code)
 	}
 	text, _, err := st.StoreRules()
@@ -844,7 +873,9 @@ func TestListingSeparatesLastWriterFromTurnHolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SetPadRules(p.Ref(), store.SystemAuthor, "", "- be brief", "", false); err != nil {
+	if _, err := st.SetPadRules(store.PadRulesRequest{
+		Ref: p.Ref(), Text: "- be brief", IfDigest: pad.NoRules, By: store.ByUI,
+	}); err != nil {
 		t.Fatal(err)
 	}
 

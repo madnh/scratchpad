@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/madnh/scratchpad/internal/config"
 	"github.com/madnh/scratchpad/internal/pad"
 )
 
@@ -112,19 +113,98 @@ func (s *Store) ProjectRules(project string) (text string, replace bool, err err
 	return s.readRulesFile(s.projectRulesPath(project))
 }
 
+// RulesWriter says which SURFACE is asking to write the rules — not which agent, which is
+// a separate question the pad level asks on top of this one.
+//
+// It is a parameter rather than something inferred, for the same reason PostRequest.
+// SystemPost is: the Web UI's standing permission to edit the operator's files must be
+// something the calling code claims deliberately, never something an agent can arrange by
+// choosing a name or sending a header.
+type RulesWriter string
+
+const (
+	// ByAgent is the CLI and the MCP server — whoever is on the other end, the store
+	// treats it as an agent, because it cannot tell a person at a terminal from the
+	// agent that person is running.
+	ByAgent RulesWriter = "agent"
+	// ByUI is the Web UI: a person, on a loopback listener they authenticated to.
+	ByUI RulesWriter = "ui"
+)
+
+// RulesWrite is one write to a FILE level of the rules.
+type RulesWrite struct {
+	Text    string
+	Replace bool
+
+	// IfDigest is the version being replaced (pad.LevelDigest of the current file, or
+	// pad.NoRules for a level that is empty). It is required: writing rules without
+	// saying which version you read is how one agent silently drops another's.
+	IfDigest string
+
+	// By is the surface asking. See RulesWriter.
+	By RulesWriter
+}
+
 // SetStoreRules replaces the store-wide rules.
-func (s *Store) SetStoreRules(text string, replace bool) error {
-	return s.writeRulesFile(s.storeRulesPath(), text, replace)
+func (s *Store) SetStoreRules(w RulesWrite) error {
+	if err := s.checkRulesPolicy(pad.LevelStore, w.By); err != nil {
+		return err
+	}
+	return s.writeRulesLevel(pad.LevelStore, s.storeRulesPath(), w)
 }
 
 // SetProjectRules replaces one project's rules. The project directory is created if it
 // does not exist yet — writing the way a project works before its first pad is a
 // legitimate order of operations.
-func (s *Store) SetProjectRules(project, text string, replace bool) error {
+func (s *Store) SetProjectRules(project string, w RulesWrite) error {
 	if err := ValidateProject(project); err != nil {
 		return err
 	}
-	return s.writeRulesFile(s.projectRulesPath(project), text, replace)
+	if err := s.checkRulesPolicy(pad.LevelProject, w.By); err != nil {
+		return err
+	}
+	return s.writeRulesLevel(pad.LevelProject, s.projectRulesPath(project), w)
+}
+
+// checkRulesPolicy applies the deployment's policy to a FILE level. The refusal names both
+// ways a person can make the change, because an agent told only "you may not" has nothing
+// useful to say back to the person who asked it for the change.
+func (s *Store) checkRulesPolicy(level pad.RuleLevel, by RulesWriter) error {
+	if by == ByUI {
+		return nil
+	}
+	policy, where := s.rules.Store, s.storeRulesPath()
+	if level == pad.LevelProject {
+		policy = s.rules.Project
+		where = filepath.Join(s.projectsDir, "<project>", pad.RulesFileName)
+	}
+	if policy == config.RulesWriteAgent {
+		return nil
+	}
+	return coded(CodeRulesReadOnly,
+		"the %s rules are the operator's, not an agent's (rules.%s = %q): they are changed in the Web UI,"+
+			" or by editing %s. Put your proposed text in your reply and let the person running this paste it in.",
+		level, level, policy, where)
+}
+
+// writeRulesLevel is the compare-and-set: read what is there, refuse unless the writer
+// quoted that version, then replace it.
+//
+// The check and the write are not one atomic step, and deliberately so — serialising them
+// would mean a lock file in the store dir, a fourth thing `doctor` has to know about, to
+// close a window of microseconds. What this defends against is the real case, which is
+// measured in minutes: an agent that read the rules, went away to think, and came back to
+// write over a version somebody else had put there meanwhile. Two writers landing inside
+// the same microsecond end up exactly where they do today, which is no worse than before.
+func (s *Store) writeRulesLevel(level pad.RuleLevel, path string, w RulesWrite) error {
+	cur, curReplace, err := s.readRulesFile(path)
+	if err != nil {
+		return err
+	}
+	if err := pad.CheckVersion(level, w.IfDigest, pad.LevelDigest(cur, curReplace), cur); err != nil {
+		return err
+	}
+	return s.writeRulesFile(path, w.Text, w.Replace)
 }
 
 // ProjectRuleSet returns what would apply to a pad in this project — the two file levels,
@@ -181,16 +261,16 @@ func (s *Store) buildRules(project string, p *Pad) (pad.Rules, error) {
 // point (an agent about to write its first message here) and what keeps it free: the
 // common append pays one map-free scan of authors and no file I/O at all.
 //
-// data is re-parsed WITH bodies in that case, because the rules are a section body and
-// the append path deliberately parses metadata only. The bytes are already in hand, so
-// this costs no extra read.
-func (s *Store) checkRules(project, id string, data []byte, p *Pad, req PostRequest) error {
+// fullPad yields the pad re-parsed WITH bodies in that case, because the rules are a
+// section body and the append path deliberately parses metadata only. The bytes are
+// already in hand, so this costs no extra read.
+func (s *Store) checkRules(project string, fullPad func() (*Pad, error), p *Pad, req PostRequest) error {
 	// A person editing the rules through the UI is not an agent joining a conversation:
 	// they are the one WRITING the rules, so there is nothing for them to have read.
 	if req.SystemPost || p.HasPosted(req.Author) {
 		return nil
 	}
-	full, err := pad.Parse(project, id, data)
+	full, err := fullPad()
 	if err != nil {
 		return err
 	}
@@ -201,20 +281,70 @@ func (s *Store) checkRules(project, id string, data []byte, p *Pad, req PostRequ
 	return pad.CheckAck(full, req.Author, req.AckRules, rules)
 }
 
+// PadRulesRequest is one write to a pad's own rules.
+type PadRulesRequest struct {
+	Ref      string
+	Author   string // ignored when By is ByUI, which always writes as pad.SystemAuthor
+	Title    string
+	Text     string
+	Password string
+	Replace  bool
+
+	// IfDigest is the version being replaced — pad.LevelDigest of the rules section in
+	// force, or pad.NoRules when the pad has none yet. Required, like the file levels.
+	IfDigest string
+
+	// By is the surface asking. See RulesWriter.
+	By RulesWriter
+}
+
 // SetPadRules appends a new rules section to a pad. It is an ordinary append — the rules
 // are versioned the way everything else in a pad is, so the previous set stays readable
 // instead of being overwritten.
 //
-// author is normally pad.SystemAuthor, for a person editing the rules through a surface
-// that has no identity of its own (the Web UI). An agent setting the rules of a pad it
-// works on passes its own name.
-func (s *Store) SetPadRules(ref, author, title, text, password string, replace bool) (*PostResult, error) {
+// The reserved identity belongs to the Web UI ALONE. It used to be what the CLI wrote
+// under when no --as was given, which quietly meant any agent could write any pad's rules
+// by simply not naming itself — the exact hole the opener policy exists to close. An agent
+// names itself; a person editing in the UI has no name to give, and gets pad.SystemAuthor.
+func (s *Store) SetPadRules(req PadRulesRequest) (*PostResult, error) {
+	title, author := req.Title, req.Author
 	if title == "" {
 		title = "Pad rules"
 	}
+	if req.By == ByUI {
+		author = pad.SystemAuthor
+	}
 	return s.Post(PostRequest{
-		Ref: ref, Author: author, Title: title, Content: text, Password: password,
-		Meta:       Meta{Kind: pad.KindRules, Replace: replace},
-		SystemPost: author == pad.SystemAuthor,
+		Ref: req.Ref, Author: author, Title: title, Content: req.Text, Password: req.Password,
+		Meta:        Meta{Kind: pad.KindRules, Replace: req.Replace},
+		RulesDigest: req.IfDigest,
+		SystemPost:  req.By == ByUI,
 	})
+}
+
+// checkPadRulesWrite is the pad level's half of the same two questions the file levels
+// ask: may this writer touch the rules, and is it replacing the version it read.
+//
+// It runs inside Post, under the exclusive flock — so unlike the file levels this
+// compare-and-set really is atomic: the version it compares cannot move between the check
+// and the append, because the append happens before the lock is released.
+//
+// The UI is exempt from the OWNER question and not from the version one. A person editing
+// through the UI is not an agent overstepping; two browser tabs, or a tab left open while
+// an agent posted new rules, is the same lost edit as anywhere else.
+func (s *Store) checkPadRulesWrite(p *Pad, req PostRequest) error {
+	if !req.SystemPost && s.rules.Pad == config.RulesWriteOpener {
+		if opener := p.Opener(); req.Author != opener {
+			return coded(CodeNotRulesOwner,
+				"the rules of pad %s belong to the agent that opened it (%s), and you are %q"+
+					" (rules.pad = %q). Ask %s to write them, or edit them in the Web UI.",
+				p.Ref(), opener, req.Author, s.rules.Pad, opener)
+		}
+	}
+	cur, _, ok := p.RulesSection()
+	current, currentText := pad.NoRules, ""
+	if ok {
+		current, currentText = pad.LevelDigest(cur.Content, cur.Replace), cur.Content
+	}
+	return pad.CheckVersion(pad.LevelPad, req.RulesDigest, current, currentText)
 }

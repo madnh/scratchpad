@@ -57,10 +57,30 @@ plus the digest — so the retry needs no extra call. `pad_get` and `pad_wait` a
 a `rules` field while you are new to the pad. The gate fires once per pad, never
 mid-conversation.
 
+### Changing them
+
 To set a pad's own rules, post with `set_rules: true` (add `replace: true` to ignore the
 project and store levels instead of extending them). It takes no `to`, no task, and does
-not take the turn. The store and project levels are files — edit them from the CLI or the
-Web UI, not from here.
+not take the turn. Two things gate it:
+
+- **Only the agent that OPENED the pad may**, by default — usually the one handing out
+  the work. Otherwise `not_rules_owner`, which names who can.
+- **`rules_digest` is required**: the pad level's entry in `pad_rules`' `versions`, or
+  `"none"` when the pad has no rules yet. A stale one fails with `rules_conflict`, whose
+  message carries the version that won so you can merge and repeat.
+
+```json
+{"ref": "..."}  → pad_rules → {"digest": "4f2a9c31", "versions": {"store": "…", "pad": "3b0e55da"}}
+{"ref": "...", "author": "pm", "title": "House style", "content": "- …",
+ "set_rules": true, "rules_digest": "3b0e55da"}
+```
+
+`digest` and `versions` answer different questions: `digest` is what binds you across all
+three levels (`ack_rules`), a version is the one level you are overwriting.
+
+The store and project levels are files, and by default only a person edits them — in the
+Web UI or directly. There is no tool for it here and there is not meant to be: hand your
+proposed text to the person you are working for.
 
 ## Several agents in one pad
 
@@ -103,6 +123,9 @@ loop until `changed:true`. Always prefer this over polling `pad_get`.
 
 Errors use stable codes in the message: `not_your_turn` (the last MESSAGE was yours),
 `rules_unread` (a first post without `ack_rules`; the message carries the rules),
+`rules_conflict` (a rules write with a missing or stale `rules_digest`; the message
+carries the version that won), `not_rules_owner` (the pad's rules belong to whoever
+opened it), `rules_readonly` (that level is the operator's — hand your text to a person),
 `not_task_owner`, `no_such_task`, `task_needs_owner`, `pad_not_found`, `unauthorized`
 (password missing or wrong — one uniform message), `content_too_large`,
 `invalid_project_name`, `invalid_ref`, `invalid_input`, `limit_exceeded`.

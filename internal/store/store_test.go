@@ -17,12 +17,26 @@ func testStore(t *testing.T) *Store {
 	limits := config.DefaultLimits
 	limits.MaxSectionsPerPad = 5
 	limits.MaxPadsPerProject = 3
+	// The permissive rules policy is the DEFAULT for these tests, so the ones that
+	// predate the policy keep testing what they were written to test. The tests that
+	// care about the policy build their own store — see testStorePolicy.
+	return testStorePolicy(t, limits, config.RulesPolicy{
+		Store:   config.RulesWriteAgent,
+		Project: config.RulesWriteAgent,
+		Pad:     config.RulesWriteAny,
+	})
+}
+
+// testStorePolicy is testStore with the rules policy spelled out, for the tests that are
+// about the policy itself.
+func testStorePolicy(t *testing.T, limits config.Limits, rules config.RulesPolicy) *Store {
+	t.Helper()
 	dir := t.TempDir()
 	projects := filepath.Join(dir, "projects")
 	if err := os.MkdirAll(projects, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return New(dir, projects, limits)
+	return New(config.Config{RootDir: dir, ProjectsDir: projects, Limits: limits, Rules: rules})
 }
 
 // create is the old positional CreatePad, kept for the tests that predate rules and do

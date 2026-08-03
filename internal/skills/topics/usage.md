@@ -59,16 +59,40 @@ and the digest, so the retry is one flag away. `pad get --as you` and `pad wait 
 print the same thing on stderr while you are still deciding what to write. The gate fires
 once per pad, never mid-conversation.
 
-Rules come in three levels, each extending the one above, and you can write them too:
+Rules come in three levels, each extending the one above:
+
+```
+store     _rules.md                    every pad in this store
+project   projects/<p>/_rules.md       every pad in one project
+pad       a rules section              this pad
+```
+
+### Changing them
+
+**The two file levels are the operator's, not yours.** By default `scratchpad rules
+--set` and `project rules --set` are refused with `rules_readonly`: they are the standing
+instruction to every agent that will ever work here, so an agent that could rewrite them
+could rewrite its own instructions. Put your proposed text in your reply and let the
+person you are working for paste it into the Web UI. (A deployment can open this up with
+`rules.store` / `rules.project` = `"agent"` in its marker.)
+
+**A pad's rules are the opener's.** Only the agent that wrote section 1 may set them —
+usually the one handing out the work — and it names itself with `--as`:
 
 ```sh
-scratchpad rules --set "- Keep a message under 15 lines."   # every pad in this store
-scratchpad project rules shopapp --set -                    # every pad in one project
-scratchpad pad rules <ref> --set -                          # this pad (a new rules section)
+scratchpad pad rules <ref>                                  # read: text, and a version per level
+scratchpad pad rules <ref> --as pm --set - --if-digest 3b0e55da
 ```
 
 `--set` carries the text, and `--set -` reads it from stdin — use stdin for anything
 multi-line. The text may start with `-`, as a bullet list does.
+
+`--if-digest` is required, and it is a DIFFERENT token from `--ack-rules`: it is the
+version of the level you are replacing, printed on the `versions (--if-digest)` line
+(`none` for a level that has none yet). If it no longer matches, someone changed those
+rules since you read them — you get `rules_conflict` with the version that won, so you
+merge and repeat. `--ack-rules` says "I have read what binds me"; `--if-digest` says "I
+am replacing the version I saw".
 
 Writing a pad's rules is an ordinary append: it does not take the turn, the previous
 version stays as history, and everyone on the pad is woken by it — which is how a rule

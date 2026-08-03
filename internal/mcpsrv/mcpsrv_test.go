@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/madnh/scratchpad/internal/config"
+	"github.com/madnh/scratchpad/internal/pad"
 	"github.com/madnh/scratchpad/internal/store"
 )
 
@@ -22,17 +23,22 @@ func setup(t *testing.T) (*mcp.ClientSession, *store.Store) {
 	t.Helper()
 	ctx := context.Background()
 
-	cfg := config.Config{
-		DefaultProject: "default",
-		Limits:         config.DefaultLimits,
-		Wait:           config.Wait{DefaultS: 1, MaxS: 2}, // keep tests fast
-	}
 	dir := t.TempDir()
 	projects := filepath.Join(dir, "projects")
 	if err := os.MkdirAll(projects, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	st := store.New(dir, projects, cfg.Limits)
+	cfg := config.Config{
+		DefaultProject: "default",
+		Limits:         config.DefaultLimits,
+		Wait:           config.Wait{DefaultS: 1, MaxS: 2}, // keep tests fast
+		// The DEFAULT rules policy, because this surface is the one an agent reaches
+		// through: what it can and cannot do to the rules is part of what is under test.
+		Rules:       config.DefaultRulesPolicy,
+		RootDir:     dir,
+		ProjectsDir: projects,
+	}
+	st := store.New(cfg)
 
 	ms := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
 	New(st, cfg).AddTools(ms)
@@ -273,7 +279,11 @@ func TestListAndProjects(t *testing.T) {
 // the surface is still append-only.
 func TestRulesOverMCP(t *testing.T) {
 	cs, st := setup(t)
-	if err := st.SetStoreRules("- keep it under 15 lines", false); err != nil {
+	// As the operator would, through the UI: this surface has no tool for it, and under
+	// the default policy would be refused if it did.
+	if err := st.SetStoreRules(store.RulesWrite{
+		Text: "- keep it under 15 lines", IfDigest: pad.NoRules, By: store.ByUI,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -297,9 +307,19 @@ func TestRulesOverMCP(t *testing.T) {
 
 	// Setting the pad's rules through pad_post: no turn taken, so pm may still not post
 	// an ordinary message afterwards.
-	call(t, cs, "pad_post", map[string]any{
+	if v := rules.Version(pad.LevelPad); v != "" {
+		t.Fatalf("a project view has no pad level to version: %q", v)
+	}
+	// Which version is being replaced has to be quoted, even the empty one.
+	if msg := callErr(t, cs, "pad_post", map[string]any{
 		"ref": created.Ref, "author": "pm", "title": "House style",
 		"content": "- progress goes on the task", "set_rules": true,
+	}); !strings.Contains(msg, "rules_conflict") {
+		t.Fatalf("set_rules without rules_digest must be refused: %s", msg)
+	}
+	call(t, cs, "pad_post", map[string]any{
+		"ref": created.Ref, "author": "pm", "title": "House style",
+		"content": "- progress goes on the task", "set_rules": true, "rules_digest": pad.NoRules,
 	}, nil)
 	if msg := callErr(t, cs, "pad_post", map[string]any{
 		"ref": created.Ref, "author": "pm", "title": "again", "content": "x",
@@ -335,6 +355,16 @@ func TestRulesOverMCP(t *testing.T) {
 	call(t, cs, "pad_get", map[string]any{"ref": created.Ref, "author": "ios"}, &settled)
 	if settled.Rules != nil {
 		t.Fatalf("the rules should not be repeated to an author already on the pad: %+v", settled.Rules)
+	}
+
+	// Being on the pad is not the same as owning its rules: ios has read them, quoted
+	// them and posted, and still may not say how the pad is worked.
+	call(t, cs, "pad_rules", map[string]any{"ref": created.Ref}, &padRules)
+	if msg := callErr(t, cs, "pad_post", map[string]any{
+		"ref": created.Ref, "author": "ios", "title": "mine now", "content": "- anything goes",
+		"set_rules": true, "rules_digest": padRules.Version(pad.LevelPad),
+	}); !strings.Contains(msg, "not_rules_owner") {
+		t.Fatalf("only the pad's opener may set its rules: %s", msg)
 	}
 }
 
