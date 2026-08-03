@@ -148,6 +148,10 @@ func TestCreatePostGetReadFlow(t *testing.T) {
 	if got.SectionCount != 2 || got.LastAuthor != "backend" {
 		t.Fatalf("bad get output: %+v", got)
 	}
+	// The roster: everyone who has posted, in first-appearance order.
+	if len(got.Authors) != 2 || got.Authors[0] != "frontend" || got.Authors[1] != "backend" {
+		t.Fatalf("bad authors: %v", got.Authors)
+	}
 	for _, sec := range got.Sections {
 		if sec.Content != "" {
 			t.Fatalf("pad_get must not return content: %+v", sec)

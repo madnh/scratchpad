@@ -29,10 +29,14 @@ type padEvent struct {
 	Project      string `json:"project"`
 	Title        string `json:"title,omitempty"`
 	SectionCount int    `json:"section_count,omitempty"`
-	LastAuthor   string `json:"last_author,omitempty"`
-	LastTitle    string `json:"last_title,omitempty"` // empty for a protected pad
-	LastTS       int64  `json:"last_ts,omitempty"`
-	Protected    bool   `json:"protected,omitempty"`
+	// Authors rides along because the Pads table repaints a changed row IN PLACE from
+	// this event: a new agent joining a pad has to reach the table the same way a new
+	// section count does, or the row would keep the roster it was first painted with.
+	Authors    []string `json:"authors,omitempty"`
+	LastAuthor string   `json:"last_author,omitempty"`
+	LastTitle  string   `json:"last_title,omitempty"` // empty for a protected pad
+	LastTS     int64    `json:"last_ts,omitempty"`
+	Protected  bool     `json:"protected,omitempty"`
 
 	// Routing and task fields, so a notification can say "T3 → done" rather than "the
 	// pad changed", and so the task panel stays live without refetching.
@@ -143,6 +147,7 @@ func (h *hub) enrich(ev watch.Event) padEvent {
 	}
 	out.Title = m.Title
 	out.SectionCount = m.SectionCount
+	out.Authors = m.Authors
 	out.LastAuthor = m.LastAuthor
 	out.LastTitle = lastTitle
 	out.LastTS = m.LastTS

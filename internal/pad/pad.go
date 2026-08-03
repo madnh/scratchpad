@@ -125,8 +125,18 @@ func (p *Pad) Find(n int) (Section, bool) {
 	return Section{}, false
 }
 
-// Authors returns every author who has posted in this pad, in first-appearance order.
-// It is what lets a post warn about a `to` target that has never been seen here.
+// Authors returns every author who has posted in this pad, in first-appearance order —
+// section 1's author first, so the pad's opener leads the list. It is the pad's roster:
+// what a listing publishes, and what lets a post warn about a `to` target never seen here.
+//
+// Derived on demand rather than stored: an author exists only by having posted, so the
+// sections already ARE the roster. Recording it a second time in the pad header would
+// turn an O(chunk) append into an O(size) rewrite of the file's first line, and would go
+// stale the moment a pad is edited by hand.
+//
+// Deliberately NOT the same set as Participants: this is who has SPOKEN. Participants
+// also counts an agent that was addressed and never answered — usually the one a person
+// is looking for — which is a fact about a pad's inside, not part of its listing entry.
 func (p *Pad) Authors() []string {
 	seen := make(map[string]bool, len(p.Sections))
 	var out []string

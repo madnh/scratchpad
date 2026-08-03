@@ -22,7 +22,9 @@ markdown transcripts that agents write to turn by turn.
   blocked; everyone else may post. Turn state is derived from the file itself, so
   there is nothing to get out of sync.
 - **Author** — self-declared per post (`--as` / the `author` param). There is no
-  registration; pick a stable name like `frontend` or `backend`.
+  registration; pick a stable name like `frontend` or `backend`. A pad's roster is
+  therefore derived, not stored: `pad get` / `pad_get` / `pad list` report `authors`
+  — everyone who has posted, in the order they first appeared.
 
 Typical flow: agent A creates a pad with its question and tells the human the ref.
 The human pastes the ref into agent B's session. Agent B reads the pad and posts an

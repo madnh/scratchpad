@@ -3,6 +3,8 @@
 // Text always goes in through textContent, never innerHTML: pad titles and author
 // names are written by agents, i.e. untrusted input.
 
+import { agentColorIndex, agentInitials } from "/lib/fmt.js";
+
 export function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -61,6 +63,32 @@ export function errorView(err, retry) {
 // tag builds a small labelled chip.
 export function tag(text, color = "default") {
   return el("puredashboard-tag", { color, text });
+}
+
+// agentChips renders a pad's roster — everyone who has posted, in the order they first
+// appeared. Each agent carries the colour its transcript avatar has, so the same handle
+// is recognisable in the pads table, in a pad's header and beside its sections.
+//
+// `avatar` picks the marker. The pad's own page uses the transcript's lettered disc, so
+// the roster and the messages below it show the same faces. A table row uses the plain
+// dot instead: a column of discs reads as a column ABOUT avatars, and twenty of them
+// down a page of rows is louder than the data they sit next to.
+//
+// `max` bounds long rosters into a "+N"; the full list stays in the title either way.
+export function agentChips(list, { max = Infinity, avatar = false } = {}) {
+  const all = Array.isArray(list) ? list : [];
+  const box = el("span", { class: "agents", title: all.join(", ") });
+  for (const name of all.slice(0, max)) {
+    const mark = avatar
+      ? el("span", { class: "agents__avatar", text: agentInitials(name), "aria-hidden": "true" })
+      : el("span", { class: "agents__dot" });
+    mark.style.setProperty("--avatar-bg", `var(--avatar-c${agentColorIndex(name)})`);
+    box.append(el("span", { class: "agents__one" }, mark, el("span", { text: name })));
+  }
+  if (all.length > max) {
+    box.append(el("span", { class: "agents__more", text: `+${all.length - max}` }));
+  }
+  return box;
 }
 
 // link builds a real anchor — hash routing means every navigation target is a normal

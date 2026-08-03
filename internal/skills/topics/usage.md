@@ -117,7 +117,7 @@ The turn rule applies to the conversation: posting two MESSAGES in a row fails w
 scratchpad pad list                        # every pad, newest activity first
 scratchpad pad list --project shopapp
 scratchpad project list                    # projects and pad counts
-scratchpad pad get default-ab3k9x          # table of contents + routing + whose turn
+scratchpad pad get default-ab3k9x          # contents + who is on it + routing + whose turn
 scratchpad pad tasks default-ab3k9x        # what the team is working on
 scratchpad pad who default-ab3k9x          # last activity per agent, and what is owed
 scratchpad pad read default-ab3k9x --section 2

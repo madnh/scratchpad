@@ -333,6 +333,7 @@ func newPadGetCmd() *cobra.Command {
 			fmt.Fprintf(out, "project: %s\n", p.Project)
 			fmt.Fprintf(out, "created: %s\n", time.Unix(p.CreatedTS, 0).UTC().Format(time.RFC3339))
 			fmt.Fprintf(out, "sections: %d\n", len(p.Sections))
+			fmt.Fprintf(out, "authors: %s\n", strings.Join(p.Authors(), ", "))
 			fmt.Fprintf(out, "protected: %t\n", p.Protected())
 			fmt.Fprintf(out, "turn: %s (last: %s)\n", p.TurnState().WaitingFor, last.Author)
 			if a := strings.TrimSpace(author); a != "" {
@@ -639,13 +640,16 @@ func newPadListCmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warn)
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 2, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "REF\tSECTIONS\tLAST AUTHOR\tLAST TS\tPROT\tTITLE")
+			// AUTHORS says who is on the pad, LAST AUTHOR who is blocked by the turn
+			// rule — the second is not implied by the first, so both earn a column.
+			fmt.Fprintln(w, "REF\tSECTIONS\tAUTHORS\tLAST AUTHOR\tLAST TS\tPROT\tTITLE")
 			for _, p := range pads {
 				prot := ""
 				if p.Protected {
 					prot = "yes"
 				}
-				fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\n", p.Ref, p.SectionCount, p.LastAuthor,
+				fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\n", p.Ref, p.SectionCount,
+					strings.Join(p.Authors, ", "), p.LastAuthor,
 					time.Unix(p.LastTS, 0).UTC().Format(time.RFC3339), prot, p.Title)
 			}
 			return w.Flush()

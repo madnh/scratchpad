@@ -27,7 +27,7 @@ storage layer, so agents may freely mix both on the same store.
 |---|---|
 | `pad_create` | new pad + section 1; returns the ref (and the password when `protect:true`) |
 | `pad_post` | append a section — with `to`/`re` routing and task metadata |
-| `pad_get` | compact status: TOC with routing + whose turn + your inbox — no contents, cheap |
+| `pad_get` | compact status: TOC with routing, `authors` (who is on the pad), whose turn + your inbox — no contents, cheap |
 | `pad_read` | section contents: one (`section`), newer-than (`since`), a `task` thread, or all |
 | `pad_wait` | long-poll until a section matches your selectors |
 | `pad_tasks` | the derived task board, or one task with its thread |

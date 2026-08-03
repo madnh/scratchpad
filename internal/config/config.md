@@ -199,6 +199,9 @@ first.
   claim; the tools set `kind` from that, never from the number alone.
 - Task numbers (`T1`, `T2`…) are their own sequence, separate from section numbers, and
   are never reused.
+- The pad's roster (`authors` in `pad get` / `pad list`) is derived the same way, from
+  the section headers — the file stores no membership list, so removing an author's
+  last section by hand removes them from the pad.
 - **Unknown keys are ignored, never an error**, so a pad written by a newer version
   still reads here.
 - A pad written before this line existed has a bare `ts` and parses as a broadcast

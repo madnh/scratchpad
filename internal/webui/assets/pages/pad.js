@@ -36,7 +36,7 @@ import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
 import * as prefs from "/lib/prefs.js";
-import { el, pageHead, skeleton, errorView, copyButton, setChildren } from "/lib/ui.js";
+import { el, pageHead, skeleton, errorView, copyButton, setChildren, agentChips } from "/lib/ui.js";
 import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex, safeText, cutChars } from "/lib/fmt.js";
 
 // Menu icons. Inline SVG, following the library's own rule that a component carries
@@ -128,6 +128,7 @@ export default function mount(outlet, ctx) {
   // The toolbar's live parts, filled in by mountFrame().
   let frame = null;
   let watchSwitch = null;
+  let roster = null;        // the roster chips in the meta row, repainted when authors change
   let authorOptions = "";   // the author list the filter was last built from
 
   outline.loadPreview = (n, opts) => api.sectionPreview(ref, n, opts);
@@ -674,6 +675,12 @@ export default function mount(outlet, ctx) {
       toast(e.target.checked ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
     });
     row.append(watchSwitch);
+
+    // The roster gets the row to itself (it is the one part that grows with the pad),
+    // and it is shown WHOLE here: this page is where you come to find out who is on a
+    // conversation, so a "+2" would be hiding the answer.
+    roster = el("div", { class: "pad__agents" }, agentChips(pad.authors || [], { avatar: true }));
+    row.append(roster);
     return row;
   }
 
@@ -750,14 +757,21 @@ export default function mount(outlet, ctx) {
       : `${pad.section_count} sections`;
 
     // Authors only ever grow, and re-assigning the list would close an open dropdown,
-    // so it is written only when it actually changed. U+001F joins the comparison key
-    // because an author name cannot contain it — a plain separator would let two
-    // different lists compare equal — and unlike a NUL it leaves this file text, which
-    // is what keeps grep, rg and diff viewers reading it.
-    const authors = [...new Set(pad.sections.map((s) => s.author))];
+    // so it is written only when it actually changed. The roster comes from the server
+    // (`authors` on the pad response) rather than being re-derived here, so the filter,
+    // the pads table and the CLI all agree on who is on a pad.
+    //
+    // U+001F joins the comparison key because an author name cannot contain it — a
+    // plain separator would let two different lists compare equal — and unlike a NUL it
+    // leaves this file text, which is what keeps grep, rg and diff viewers reading it.
+    const authors = pad.authors || [];
     if (authors.join("\u001f") !== authorOptions) {
       authorOptions = authors.join("\u001f");
       f.filter.options = authors.map((a) => ({ value: a, label: a }));
+      // The header's roster is the same list, so it is repainted on the same condition
+      // — an agent joining a pad shows up without a reload, and nothing moves until one
+      // does.
+      roster?.replaceChildren(agentChips(authors, { avatar: true }));
     }
     if (f.filter.value !== authorFilter) f.filter.value = authorFilter;
 
@@ -1034,7 +1048,7 @@ export default function mount(outlet, ctx) {
   }
 
   async function deletePad() {
-    const authors = [...new Set(pad.sections.map((s) => s.author))].join(", ");
+    const authors = (pad.authors || []).join(", ");
     const ok = await confirm(
       `${ref} — “${pad.title || "untitled"}”\n` +
       `${pad.section_count} section${pad.section_count === 1 ? "" : "s"} between ${authors}.\n\n` +

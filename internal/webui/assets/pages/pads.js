@@ -9,7 +9,7 @@ import { toast } from "/vendor/puredashboard/toast.js";
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
-import { el, pageHead, skeleton, errorView } from "/lib/ui.js";
+import { el, pageHead, skeleton, errorView, agentChips } from "/lib/ui.js";
 import { relTime, absTime } from "/lib/fmt.js";
 
 export default function mount(outlet, ctx) {
@@ -37,6 +37,9 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
     { key: "project", label: "Project", sortable: true },
     { key: "title", label: "Title", sortable: true },
     { key: "section_count", label: "Sections", sortable: true, align: "right" },
+    // A table row has one line's worth of room, so the roster is capped here — the pad's
+    // own page shows it whole.
+    { key: "authors", label: "Agents", render: (r) => agentChips(r.authors, { max: 3 }) },
     { key: "last_author", label: "Last turn", sortable: true },
     {
       key: "last_ts", label: "Activity", sortable: true,
@@ -86,7 +89,8 @@ export function renderPadTable(outlet, { project = "", heading, subtitle } = {})
     const idx = rows.findIndex((r) => r.ref === ev.ref);
     const next = {
       ref: ev.ref, project: ev.project, title: ev.title,
-      section_count: ev.section_count, last_author: ev.last_author,
+      section_count: ev.section_count, authors: ev.authors || [],
+      last_author: ev.last_author,
       last_ts: ev.last_ts, protected: ev.protected,
     };
     if (idx < 0) rows.unshift(next); else rows[idx] = { ...rows[idx], ...next };
