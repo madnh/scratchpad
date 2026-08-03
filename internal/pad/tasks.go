@@ -216,6 +216,19 @@ func (p *Pad) NextTaskNo() int {
 	return max + 1
 }
 
+// CheckTaskRef enforces that a `task:` reference names a task this pad has opened.
+//
+// It applies to CROSS-REFERENCES as well as task events — anyone may point at a task,
+// but nobody may point at one that does not exist. Without this a mistyped number posts
+// happily and attaches the section to a task nothing will ever fold, which reads as a
+// lost remark rather than as the typo it is.
+func (p *Pad) CheckTaskRef(taskNo int) error {
+	if _, ok := p.Task(taskNo); !ok {
+		return Coded(CodeNoSuchTask, "pad %s has no task T%d", p.Ref(), taskNo)
+	}
+	return nil
+}
+
 // CheckTaskOwner enforces who may move a task: an owner reports on their own slice, and
 // the opener manages the task as a whole.
 func (p *Pad) CheckTaskOwner(taskNo int, author string) error {

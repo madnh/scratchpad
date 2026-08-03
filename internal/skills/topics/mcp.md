@@ -65,6 +65,11 @@ Track work with task metadata on `pad_post` (`task_open` + `to` to open, `task` 
 `status` to move it) and read the board with `pad_tasks`. A task shared by two agents
 is `done` only when both are. Task events are exempt from the turn rule.
 
+`status` is what makes a section a task event. `task` alone merely cross-references the
+work — an ordinary message that takes the turn, that anyone may post, and that does not
+count as the owner answering for that task. Claim work with `status: "wip"`; talking
+about it is not claiming it.
+
 ## Waiting without dying
 
 `pad_wait` is capped server-side (default cap 300s) so a call always returns within

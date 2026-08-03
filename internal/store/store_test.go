@@ -365,6 +365,56 @@ func TestTaskWritePathEnforcesItsRules(t *testing.T) {
 	}
 }
 
+// TestCrossReferenceIsNotATaskEvent pins the two-layer split at the write path, which
+// is the layer both surfaces build their `kind` on.
+//
+// A section that merely POINTS at a task is a message: it takes the turn like any other
+// remark, anyone may write it, and it is not the owner's answer. Collapsing the two
+// would quietly undo three rules at once — a question would stop taking the turn, a
+// stranger could write into a task's record, and an idle remark would clear the debt
+// that `--unacked` and `pad who` report.
+func TestCrossReferenceIsNotATaskEvent(t *testing.T) {
+	s := testStore(t)
+	p, _, err := s.CreatePad("default", "pm", "kickoff", "starting", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := p.Ref()
+	post(t, s, ref, "pm", "Crash on resume", Meta{To: []string{"ios"}}, true)
+
+	// A stranger may ask about T1 — the ownership rule governs the record, not the
+	// conversation around it.
+	res := post(t, s, ref, "backend", "Anything I can help with?", Meta{Task: 1, To: []string{"ios"}}, false)
+	if last := res.Pad.Last(); last.IsTask() {
+		t.Fatalf("a bare task reference must stay a message: %#v", last.Meta)
+	}
+
+	// It is conversation, so it holds the turn.
+	if _, err := s.Post(PostRequest{
+		Ref: ref, Author: "backend", Title: "again", Content: "x", Meta: Meta{Task: 1},
+	}); !HasCode(err, CodeNotYourTurn) {
+		t.Fatalf("a cross-reference must take the turn, got %v", err)
+	}
+
+	// And it is not the owner's answer: T1 is still owed by ios.
+	post(t, s, ref, "ios", "still reading", Meta{Task: 1}, false)
+	got, err := s.Get(ref, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owed := got.Owed()
+	if len(owed) != 1 || owed[0].To != "ios" || owed[0].Task != 1 {
+		t.Fatalf("ios still owes an event on T1, got %#v", owed)
+	}
+
+	// A number this pad never opened is a typo, whichever layer it is used on.
+	if _, err := s.Post(PostRequest{
+		Ref: ref, Author: "pm", Title: "typo", Content: "x", Meta: Meta{Task: 99},
+	}); !HasCode(err, CodeNoSuchTask) {
+		t.Fatalf("a dangling task reference must be refused, got %v", err)
+	}
+}
+
 // TestReplyImpliesAddressingAndValidates pins two write-path behaviours: replying to a
 // section addresses its author without the caller repeating it, and a dangling `re` is
 // refused rather than silently stored.

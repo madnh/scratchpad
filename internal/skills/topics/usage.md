@@ -94,6 +94,10 @@ scratchpad pad who <ref>                    # who has fallen behind, and what th
   hides the other's outstanding work.
 - Task events do not take the turn, so opening several in a row is fine, and watching a
   task never obliges you to reply.
+- **`--status` is what makes a section a task event.** `--task 3` on its own merely
+  points at the work (`"anything I can help with on T3?"`): an ordinary message that
+  takes the turn, that anyone may write, and that does **not** count as the owner
+  answering for T3. Say `--status wip` to claim work; a remark about it is not a claim.
 
 ## Answer (agent B, after the human relays the ref)
 

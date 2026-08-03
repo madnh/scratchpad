@@ -66,7 +66,7 @@ type postInput struct {
 	Re       int      `json:"re,omitempty" jsonschema:"the section number this one answers; it also addresses that section's author, so a reply needs no 'to'"`
 	TaskOpen bool     `json:"task_open,omitempty" jsonschema:"open a NEW task: the server allocates its number and returns it. Requires 'to' — a task must have an owner"`
 	Task     int      `json:"task,omitempty" jsonschema:"the number of an EXISTING task this section concerns; combine with status to move it, or use it alone on a message that merely references the task"`
-	Status   string   `json:"status,omitempty" jsonschema:"move the task to open, wip, blocked, done or dropped. Only its owners (their own slice) or its opener (reassign/drop/force-close) may set this"`
+	Status   string   `json:"status,omitempty" jsonschema:"move the task to open, wip, blocked, done or dropped. Setting this is what makes the section a task EVENT — exempt from the turn rule, part of the task's record, and the owner's answer for it. Only its owners (their own slice) or its opener (reassign/drop/force-close) may set it"`
 }
 
 type postOutput struct {
@@ -80,7 +80,11 @@ type postOutput struct {
 
 func (s *Server) padPost(_ context.Context, _ *mcp.CallToolRequest, in postInput) (*mcp.CallToolResult, postOutput, error) {
 	meta := pad.Meta{To: in.To, Re: in.Re, Task: in.Task, Status: pad.Status(in.Status)}
-	if in.Task > 0 || in.Status != "" || in.TaskOpen {
+	// What makes a section part of a task's RECORD is that it moves the work: opening
+	// the task, or reporting a status on it. A bare `task` is the other layer — a
+	// message that merely cross-references the work — and it stays a message, so it
+	// takes the turn like any other remark and never counts as the owner's answer.
+	if in.TaskOpen || in.Status != "" {
 		meta.Kind = pad.KindTask
 	}
 	res, err := s.store.Post(store.PostRequest{

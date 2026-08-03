@@ -334,9 +334,17 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if err := p.CheckTurn(req.Author, meta.Kind); err != nil {
 		return nil, err
 	}
-	if meta.Kind == pad.KindTask && !req.OpenTask {
-		if err := p.CheckTaskOwner(meta.Task, req.Author); err != nil {
+	// The two layers of a `task:` reference, checked in the order they narrow. ANY
+	// section may point at a task, and only an existing one. Being part of the task's
+	// RECORD is the stricter claim, and the only one ownership governs.
+	if meta.Task > 0 && !req.OpenTask {
+		if err := p.CheckTaskRef(meta.Task); err != nil {
 			return nil, err
+		}
+		if meta.Kind == pad.KindTask {
+			if err := p.CheckTaskOwner(meta.Task, req.Author); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if len(p.Sections) >= s.limits.MaxSectionsPerPad {

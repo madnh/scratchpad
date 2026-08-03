@@ -339,8 +339,8 @@ output: { ref, project, pad_id, section: 1, next: 2, password?, turn: {...} }
 ```
 input:  { ref, author, title, content, password?,
            to?: [author], re?: n,
-           kind?: "message" | "task",
-           task?: n | "new", status?: "open"|"wip"|"blocked"|"done"|"dropped" }
+           task_open?: bool, task?: n,
+           status?: "open"|"wip"|"blocked"|"done"|"dropped" }
 output: { ref, section, next, task?, turn: {...}, warnings?: [string] }
 ```
 
@@ -349,9 +349,14 @@ output: { ref, section, next, task?, turn: {...}, warnings?: [string] }
   agent (use pad_wait)"`. A `kind: task` section is exempt and does not change whose
   turn it is. A timeout or other error does not consume a turn.
 - Returns the section id just posted + the next id (matching IDEA.md).
-- `task: "new"` opens a task: the server allocates the next task number under the same
-  lock and returns it as `task`. `to` is then **mandatory** — a task must have an owner.
-  `task: <n>` references an existing task.
+- `task_open: true` opens a task: the server allocates the next task number under the
+  same lock and returns it as `task`. `to` is then **mandatory** — a task must have an
+  owner. `task: <n>` references an existing task; the two are mutually exclusive.
+  Opening is a separate boolean rather than the sentinel `task: "new"` because a field
+  typed `integer | "new"` has no honest JSON Schema, and the schema is what an agent
+  reads before its first call — it mirrors the CLI's `--task-open` / `--task N`.
+- `kind` is not an input: it is implied. A section carrying `task_open` or `task` +
+  `status` is a task event; anything else is a message. One fact, declared once.
 - A `kind: task` section carrying `status` must come from an owner (their own slice) or
   the opener (`dropped` / reassign / force-close), else `not_task_owner`.
 - `warnings` is advisory and never fails the post — it carries the "nobody may be

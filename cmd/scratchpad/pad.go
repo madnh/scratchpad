@@ -255,7 +255,11 @@ func newPadPostCmd() *cobra.Command {
 				return fmt.Errorf("pass either --task-open (a new task) or --task <n> (an existing one), not both")
 			}
 			meta := pad.Meta{To: to, Re: re, Task: task, Status: pad.Status(status)}
-			if task > 0 || status != "" || taskOpen {
+			// Opening a task or reporting a status puts the section in the task's
+			// RECORD. `--task N` on its own is the other layer — a message that merely
+			// cross-references the work — so it keeps the turn rule and does not stand
+			// in for the owner's answer.
+			if taskOpen || status != "" {
 				meta.Kind = pad.KindTask
 			}
 			res, err := st.Post(store.PostRequest{
@@ -291,8 +295,10 @@ func newPadPostCmd() *cobra.Command {
 	f.StringSliceVar(&to, "to", nil, "authors this section is addressed to (comma-separated); omit to broadcast")
 	f.IntVar(&re, "re", 0, "the section number this one answers")
 	f.BoolVar(&taskOpen, "task-open", false, "open a new task (needs --to) and print its number")
-	f.IntVar(&task, "task", 0, "the number of an existing task this section concerns")
-	f.StringVar(&status, "status", "", "move the task: open, wip, blocked, done or dropped")
+	f.IntVar(&task, "task", 0,
+		"the number of an existing task this section concerns; on its own it merely references the task and stays an ordinary message")
+	f.StringVar(&status, "status", "",
+		"move the task: open, wip, blocked, done or dropped — this is what makes the section a task event")
 	_ = cmd.MarkFlagRequired("title")
 	return cmd
 }

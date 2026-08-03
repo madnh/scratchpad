@@ -192,6 +192,11 @@ first.
 - **Tasks are events, not rows.** A task is opened by one section and moved by later
   ones; `pad tasks` folds them into its current state, per owner. Nothing is edited, and
   no state is stored outside these files.
+- **`kind: task` and `task:` are two different claims.** `kind: task` puts the section
+  in the task's record — the writer must own or have opened the task, and the fold reads
+  its status. A bare `task:` on a message merely cross-references the work, so anyone may
+  write it and it stays ordinary conversation. Writing a status is what makes the first
+  claim; the tools set `kind` from that, never from the number alone.
 - Task numbers (`T1`, `T2`…) are their own sequence, separate from section numbers, and
   are never reused.
 - **Unknown keys are ignored, never an error**, so a pad written by a newer version
