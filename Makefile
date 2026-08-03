@@ -26,7 +26,11 @@ PD_DIR  := internal/webui/assets/vendor/puredashboard
 # `Result.Sections` với `Pad.Sections`, đúng cái bẫy target `layers` đã vấp phải).
 GOPLS_VERSION ?= latest
 
-.PHONY: help build-dev build-release install run ui test fmt fmt-check vet layers tidy check clean vendor-ui tools
+# Store demo (tools/gendemo). Tách hẳn khỏi store thật: gendemo chỉ ghi đè thư mục do
+# chính nó tạo, nên gõ nhầm --dir sang store thật sẽ bị từ chối chứ không mất dữ liệu.
+DEMO_DIR ?= $(HOME)/.scratchpad-demo
+
+.PHONY: help build-dev build-release install run ui demo demo-ui test fmt fmt-check vet layers tidy check clean vendor-ui tools
 
 help: ## In danh sách lệnh (mặc định)
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -45,6 +49,15 @@ run: ## Chạy server (serve) — thêm ARGS="..." để truyền cờ, vd: make
 
 ui: ## Chạy Web UI (ui) — thêm ARGS="..." để truyền cờ, vd: make ui ARGS="--port 7000"
 	go run -ldflags "$(LDFLAGS)" $(PKG) ui $(ARGS)
+
+# Dựng lại từ đầu mỗi lần: store demo là thứ dùng xong bỏ, và các mốc thời gian
+# ("giao 5 tiếng trước, chưa ai trả lời") phải tính lại theo hiện tại thì các view
+# quá hạn mới có gì để hiện. Kịch bản nằm ở tools/gendemo/scenario.go.
+demo: ## Dựng store demo (mặc định ~/.scratchpad-demo) — thêm ARGS="--dir <path>"
+	go run ./tools/gendemo --dir $(DEMO_DIR) --force $(ARGS)
+
+demo-ui: demo ## Dựng store demo rồi mở Web UI trên đó
+	go run -ldflags "$(LDFLAGS)" $(PKG) ui --dir $(DEMO_DIR) --port=6592 --open
 
 vendor-ui: ## Cập nhật thư viện UI đã vendor từ puredashboard (PD_REF=<branch|tag|commit>)
 	@tmp=$$(mktemp -d) && \
