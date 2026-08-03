@@ -214,6 +214,10 @@ func TestSectionsArePagedNewestFirst(t *testing.T) {
 	if toc.Turn == nil || toc.Turn.LastAuthor != "bob" {
 		t.Fatalf("turn state missing or wrong: %+v", toc.Turn)
 	}
+	// The roster the author filter is built from: each agent once, opener first.
+	if len(toc.Authors) != 2 || toc.Authors[0] != "alice" || toc.Authors[1] != "bob" {
+		t.Fatalf("authors %v, want [alice bob]", toc.Authors)
+	}
 
 	var page struct {
 		Sections []store.Section `json:"sections"`
@@ -271,6 +275,10 @@ func TestProtectedPadLocksContentNotIdentity(t *testing.T) {
 	}
 	if view.Title != "secret talk" {
 		t.Fatalf("listing-level metadata should still come through, got title %q", view.Title)
+	}
+	// The roster is listing-level too — the pads table shows it for this pad already.
+	if len(view.Authors) != 1 || view.Authors[0] != "alice" {
+		t.Fatalf("locked pad should still name its authors, got %v", view.Authors)
 	}
 	if code := getJSON(t, client, ts.URL+"/api/pads/"+ref+"/sections", nil); code != http.StatusForbidden {
 		t.Fatalf("sections of a locked pad gave %d, want 403", code)

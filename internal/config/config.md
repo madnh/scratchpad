@@ -163,3 +163,6 @@ Answer body…
   that exact pattern count as section boundaries.
 - Turn state is derived from the last section (its author may not post next). There
   is no state anywhere else: deleting the last section by hand hands the turn back.
+- The pad's roster (`authors` in `pad get` / `pad list`) is derived the same way, from
+  the section headers — the file stores no membership list, so removing an author's
+  last section by hand removes them from the pad.

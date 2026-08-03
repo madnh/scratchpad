@@ -56,7 +56,7 @@ the other agent instead.
 scratchpad pad list                        # every pad, newest activity first
 scratchpad pad list --project shopapp
 scratchpad project list                    # projects and pad counts
-scratchpad pad get default-ab3k9x          # table of contents + whose turn
+scratchpad pad get default-ab3k9x          # table of contents + who is on it + whose turn
 scratchpad pad read default-ab3k9x --section 2
 scratchpad pad delete default-ab3k9x       # asks for confirmation; --yes to skip
 scratchpad pad purge --older-than 30d      # bulk cleanup by last activity

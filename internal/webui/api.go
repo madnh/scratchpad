@@ -247,6 +247,7 @@ type padResponse struct {
 	Protected    bool        `json:"protected"`
 	Locked       bool        `json:"locked"`
 	SectionCount int         `json:"section_count"`
+	Authors      []string    `json:"authors"`
 	Turn         *store.Turn `json:"turn,omitempty"`
 	Sections     []tocEntry  `json:"sections"`
 }
@@ -263,10 +264,13 @@ func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
 			if mErr != nil {
 				return nil, mErr
 			}
+			// Authors comes through even locked: it is listing-level metadata (the
+			// Pads table already shows it), and it tells the person waiting at the
+			// password prompt whether this is the pad they were pointed at.
 			return padResponse{
 				Ref: m.Ref, Project: m.Project, PadID: padIDOf(m.Ref, m.Project),
 				Title: m.Title, CreatedTS: m.CreatedTS, Protected: true, Locked: true,
-				SectionCount: m.SectionCount, Sections: []tocEntry{},
+				SectionCount: m.SectionCount, Authors: m.Authors, Sections: []tocEntry{},
 			}, nil
 		}
 		return nil, err
@@ -281,7 +285,8 @@ func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
 		Ref: pad.Ref(), Project: pad.Project, PadID: pad.ID,
 		Title: pad.Sections[0].Title, CreatedTS: pad.CreatedTS,
 		Protected: pad.Protected(), Locked: false,
-		SectionCount: len(pad.Sections), Turn: &turn, Sections: toc,
+		SectionCount: len(pad.Sections), Authors: pad.Authors(),
+		Turn: &turn, Sections: toc,
 	}, nil
 }
 

@@ -271,6 +271,52 @@ func TestConcurrentPosts(t *testing.T) {
 	}
 }
 
+func TestAuthorsRoster(t *testing.T) {
+	s := testStore(t)
+	pad, _, err := s.CreatePad("default", "frontend", "t", "c", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pad.Authors(); len(got) != 1 || got[0] != "frontend" {
+		t.Fatalf("fresh pad: want [frontend], got %v", got)
+	}
+	for _, who := range []string{"backend", "frontend", "qa"} {
+		if _, err := s.Post(pad.Ref(), who, "t", "c", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// First-appearance order, each author once — frontend posted twice and stays first.
+	got, err := s.Get(pad.Ref(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"frontend", "backend", "qa"}; !equalStrings(got.Authors(), want) {
+		t.Fatalf("want %v, got %v", want, got.Authors())
+	}
+
+	// The roster survives the listing path, which parses without section bodies.
+	m, _, err := s.Meta(pad.Ref())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"frontend", "backend", "qa"}; !equalStrings(m.Authors, want) {
+		t.Fatalf("meta: want %v, got %v", want, m.Authors)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestParseRef(t *testing.T) {
 	if p, id, err := ParseRef("projectx-abc123"); err != nil || p != "projectx" || id != "abc123" {
 		t.Fatalf("got %q %q %v", p, id, err)

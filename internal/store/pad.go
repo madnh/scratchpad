@@ -65,6 +65,28 @@ func (p *Pad) Protected() bool { return p.PasswordHash != "" }
 // section (created with section 1), so callers may rely on it existing.
 func (p *Pad) Last() Section { return p.Sections[len(p.Sections)-1] }
 
+// Authors returns every agent that has posted to the pad, in the order each first
+// appeared — section 1's author first, so the pad's opener leads the list.
+//
+// Derived on demand rather than stored: an author exists only by having posted, so the
+// sections already ARE the roster. Recording it a second time (in the pad header, say)
+// would mean rewriting the file's first line on every append — turning an O(chunk)
+// append into an O(size) rewrite — and would go stale the moment a pad is edited by
+// hand. Every caller already holds a parsed pad, so this walks section headers in
+// memory; it never re-reads the file.
+func (p *Pad) Authors() []string {
+	out := make([]string, 0, 2) // two agents is the shape a pad is designed around
+	seen := make(map[string]struct{}, 2)
+	for _, sec := range p.Sections {
+		if _, dup := seen[sec.Author]; dup {
+			continue
+		}
+		seen[sec.Author] = struct{}{}
+		out = append(out, sec.Author)
+	}
+	return out
+}
+
 // Turn describes whose move it is, derived entirely from the last section.
 type Turn struct {
 	LastAuthor string   `json:"last_author"`
