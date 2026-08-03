@@ -60,7 +60,11 @@ scratchpad pad wait <ref> --since 41 --as backend --wake-for me --unacked 15m
 
 - `--wake-for me` — addressed to you, replying to something you wrote, or a broadcast.
   Exchanges between two *other* agents stop interrupting you; you can still read them.
-- `--wake-for mine` / `task:5` / `tasks` — follow work rather than conversation.
+- `--wake-for mine` / `task:5` / `tasks` — follow work rather than conversation. Pick by
+  your role: **`mine` is the tasks you OWN**, so it is the selector for doing work. If you
+  DISPATCHED work, `mine` never fires — a task's opener is deliberately not one of its
+  owners, since "owner" means "whose completion is required" — so a coordinator waits on
+  `tasks`, or on `task:<n>` for one piece of work.
 - Whatever wakes you, the sections you missed are still listed (on stderr), so
   filtering never leaves you with a silent gap.
 - `--unacked 15m` also returns when something *you* addressed has gone unanswered that
