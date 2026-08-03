@@ -160,9 +160,60 @@ function notificationsCard() {
     toast(`Notifying for: ${e.target.value}`, { type: "info" });
   });
 
+  // The same choice an agent makes with `wake_for`, in the same words. With five agents
+  // in a pad most of what arrives belongs to two of them, and a person watching that pad
+  // has exactly the agents' problem — so it gets the agents' answer rather than a second
+  // model invented for the browser.
+  const filter = el("puredashboard-segmented");
+  filter.options = [
+    { value: "any", label: "Everything" },
+    { value: "tasks", label: "Tasks only" },
+    { value: "task", label: "One task" },
+    { value: "overdue", label: "Only when overdue" },
+  ];
+  filter.value = wl.notifyFilter();
+
+  // The number belongs to "One task" and appears with it: a field that does nothing
+  // where it stands is a question about the setting, not an answer.
+  const taskField = el("label", { class: "field-row" },
+    el("span", { class: "muted", text: "Task number" }),
+    el("input", {
+      type: "number", min: "1", step: "1", value: String(wl.notifyTask() || 1),
+      // `change`, not `input`: writing the preference re-renders this page, so
+      // announcing every keystroke would take the field's focus away mid-number.
+      onchange: (e) => {
+        const n = Number(e.target.value);
+        wl.setNotifyTask(n);
+        if (n > 0) toast(`Notifying about T${n}`, { type: "info" });
+      },
+    }),
+  );
+  taskField.hidden = filter.value !== "task";
+
+  filter.addEventListener("change", (e) => {
+    wl.setNotifyFilter(e.target.value);
+    if (e.target.value === "task" && !wl.notifyTask()) wl.setNotifyTask(1);
+  });
+
   card.append(
-    el("p", { class: "muted", text: "Which changes are announced:" }),
+    el("p", { class: "muted", text: "Which pads may announce anything:" }),
     scope,
+    el("p", { class: "muted", text: "And what is worth interrupting you about:" }),
+    filter,
+    taskField,
+    el("p", {
+      class: "muted",
+      text: filter.value === "task"
+        // Said plainly rather than left to be discovered: T3 in one pad is not T3 in
+        // another, so the number only pins down one task once the scope does.
+        ? "Task numbers belong to a pad, so this matches T" + (wl.notifyTask() || 1) +
+          " in every pad the scope above allows — narrow it to watched pads to follow one."
+        : filter.value === "overdue"
+          ? "Checked once a minute against what has gone unanswered across the store, " +
+            "and announced when an assignment first crosses the line — the browser's " +
+            "version of pad wait --unacked."
+          : "Mirrors the agents' --wake-for: reading is never filtered, only being interrupted is.",
+    }),
     // Stated up front rather than discovered: nothing here can outlive the tab.
     el("p", {
       class: "muted",

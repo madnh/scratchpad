@@ -12,7 +12,7 @@ import "/vendor/puredashboard/empty.js";
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
-import { el, pageHead, skeleton, errorView } from "/lib/ui.js";
+import { el, pageHead, skeleton, errorView, setChildren } from "/lib/ui.js";
 import { relTime, absTime } from "/lib/fmt.js";
 
 const RECENT = 15;
@@ -22,9 +22,13 @@ export default function mount(outlet) {
   let disposed = false;
 
   const render = async () => {
-    let pads, projects;
+    let pads, projects, stuck = [];
     try {
       [{ pads }, { projects }] = await Promise.all([api.pads(), api.projects()]);
+      // Best-effort: the stuck list is the most useful thing on this page, but it is
+      // not worth the page failing over. It is a separate call because it walks every
+      // pad's routing metadata, which the listing does not carry.
+      ({ stuck } = await api.stuck().catch(() => ({ stuck: [] })));
     } catch (err) {
       if (!disposed) outlet.replaceChildren(errorView(err, render));
       return;
@@ -54,9 +58,10 @@ export default function mount(outlet) {
     const card = el("puredashboard-card", { title: "Recent activity" });
     card.append(pads.length ? feed : el("puredashboard-empty", { description: "No pads yet" }));
 
-    outlet.replaceChildren(
+    setChildren(outlet,
       pageHead("Overview", "live view of the pad store"),
       stats,
+      stuckBlock(stuck),
       card,
     );
   };
@@ -67,6 +72,34 @@ export default function mount(outlet) {
   const off = onPad(() => render());
 
   return () => { disposed = true; off(); };
+}
+
+// What stalled. This is the question a person opens the UI with, and it spans pads —
+// answering it per-pad would mean opening every pad to find the one that is stuck,
+// which is the work this page exists to save.
+//
+// It reports what has gone UNANSWERED, which is derivable, rather than who is currently
+// listening, which is not: an append-only transcript cannot express presence, and an
+// agent busy working looks identical to one that has died.
+function stuckBlock(stuck) {
+  if (!stuck?.length) return null;
+  const card = el("puredashboard-card", {
+    title: `Waiting on someone (${stuck.length})`,
+  });
+  const box = el("div", { class: "stuck" });
+  for (const s of stuck.slice(0, 10)) {
+    box.append(el("div", { class: "stuck__row" },
+      el("a", { class: "stuck__what", href: `#/pads/${encodeURIComponent(s.ref)}`, text: s.what }),
+      el("span", { class: "muted", text: `${s.from} → ${s.to}` }),
+      el("span", { text: s.title || "" }),
+      el("span", { class: "stuck__age", title: absTime(s.ts), text: relTime(s.ts) }),
+    ));
+  }
+  if (stuck.length > 10) {
+    box.append(el("p", { class: "muted", text: `…and ${stuck.length - 10} more` }));
+  }
+  card.append(box);
+  return card;
 }
 
 function stat(title, value) {

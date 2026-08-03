@@ -1,0 +1,183 @@
+package pad
+
+import (
+	"bytes"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Pad file format (one markdown file per pad):
+//
+//	<!-- scratchpad v1; created: 2026-07-11T10:29:00Z; password: $2b$12$... -->
+//
+//	# 1 - frontend - How does API X work
+//	<!-- ts: 2026-07-11T10:30:00Z -->
+//
+//	body…
+//
+// The first line is the pad header (password appears only when protected). Every post
+// is a section headed `# <n> - <author> - <title>`; ONLY lines matching that exact
+// pattern count as section boundaries — a `# something` inside content does not (the
+// residual collision risk of a content line shaped exactly like a header is accepted
+// by design). The line beneath carries the timestamp and the section's metadata (see
+// meta.go). Turn and task state are derived from the sections; there is no other state.
+
+// HeaderPrefix opens the mandatory first line of every pad file. "scratchpad v1" names
+// the FILE format version — independent of the config marker's schema version. It stays
+// v1 through the metadata-line addition: old pads parse unchanged, and a new pad read by
+// an older binary loses a timestamp but keeps every section boundary.
+const HeaderPrefix = "<!-- scratchpad v1; created: "
+
+// sectionHeaderRe matches exactly `# <n> - <rest>`; rest is split on the first " - "
+// into author and title. Authors are validated to never contain " - ", so the split is
+// unambiguous.
+var sectionHeaderRe = regexp.MustCompile(`^# (\d+) - (.*)$`)
+
+// RenderHeader builds the pad header line.
+func RenderHeader(created time.Time, passwordHash string) string {
+	s := HeaderPrefix + created.UTC().Format(time.RFC3339)
+	if passwordHash != "" {
+		s += "; password: " + passwordHash
+	}
+	return s + " -->"
+}
+
+// RenderSection builds the on-disk text of one section, including the leading blank
+// line that separates it from what came before. Content is stored verbatim with a
+// guaranteed trailing newline.
+func RenderSection(n int, author, title string, ts time.Time, m Meta, content string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n# %d - %s - %s\n", n, author, title)
+	b.WriteString(renderMetaLine(ts, m) + "\n")
+	b.WriteString("\n")
+	b.WriteString(content)
+	if !strings.HasSuffix(content, "\n") {
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// Parse parses a pad file's full text, bodies included. project/id are taken from the
+// file's location (they are not repeated inside the file).
+func Parse(project, id string, data []byte) (*Pad, error) {
+	return scan(project, id, data, true)
+}
+
+// ParseMeta parses everything EXCEPT section bodies: same sections, same order, same
+// turn state, same task state, with Content left empty. Listings, change notifications,
+// the append path and every derived view (turn, tasks, participants) need only that, and
+// skipping the bodies means a directory of large pads costs a scan rather than a copy of
+// every pad's prose. It is what makes the task board affordable to compute often.
+func ParseMeta(project, id string, data []byte) (*Pad, error) {
+	return scan(project, id, data, false)
+}
+
+// scan walks the file line by line over the ORIGINAL bytes, holding only offsets.
+// It deliberately never splits the file into a []string: pad content is written by
+// agents, and a file that is mostly newlines would turn into one 16-byte string header
+// per line — tens of times the file's size in live heap, for every read.
+//
+// Each body is materialised (when withContent) as exactly one string sliced out of
+// data, so parsing costs the file's size once, not a multiple of it.
+func scan(project, id string, data []byte, withContent bool) (*Pad, error) {
+	firstLine, rest := splitLine(data)
+	if !strings.HasPrefix(string(firstLine), HeaderPrefix) {
+		return nil, fmt.Errorf("not a scratchpad file: missing %q header on line 1", strings.TrimSpace(HeaderPrefix))
+	}
+	header := strings.TrimSuffix(strings.TrimPrefix(string(firstLine), HeaderPrefix), " -->")
+	createdStr, passwordHash, _ := strings.Cut(header, "; password: ")
+	created, err := time.Parse(time.RFC3339, strings.TrimSpace(createdStr))
+	if err != nil {
+		return nil, fmt.Errorf("bad created timestamp in pad header: %w", err)
+	}
+
+	p := &Pad{Project: project, ID: id, CreatedTS: created.Unix(), PasswordHash: strings.TrimSpace(passwordHash)}
+
+	var cur *Section
+	// Byte range of the current section's body within data. bodyStart < 0 means the
+	// body has not begun yet (we are still on the header or the metadata line).
+	bodyStart, bodyEnd := -1, -1
+	flush := func() {
+		if cur == nil {
+			return
+		}
+		if withContent && bodyStart >= 0 && bodyEnd > bodyStart {
+			// The same trims the line-joining parser applied: one leading newline is
+			// the blank line RenderSection writes, trailing ones are the separator
+			// before the next section.
+			body := strings.TrimRight(strings.TrimPrefix(string(data[bodyStart:bodyEnd]), "\n"), "\n")
+			if body != "" {
+				body += "\n"
+			}
+			cur.Content = body
+		}
+		p.Sections = append(p.Sections, *cur)
+		cur, bodyStart, bodyEnd = nil, -1, -1
+	}
+
+	// A file with no newline at all has no lines after the header, and therefore no
+	// sections — the check below reports that.
+	for rest != nil {
+		line, next := splitLine(rest)
+		lineStart := len(data) - len(rest)
+		// A body ends where this line ends, WITHOUT its trailing newline — exactly the
+		// text strings.Join(lines, "\n") produced from the same lines.
+		lineEnd := lineStart + len(line)
+		handled := false
+
+		if isSectionHeader(line) {
+			if m := sectionHeaderRe.FindSubmatch(line); m != nil {
+				if author, title, ok := strings.Cut(string(m[2]), " - "); ok {
+					flush()
+					n, _ := strconv.Atoi(string(m[1]))
+					cur = &Section{N: n, Author: author, Title: title, Meta: Meta{Kind: KindMessage}}
+					handled = true
+				}
+			}
+		}
+		if !handled && cur != nil {
+			// The metadata line directly after the header carries the timestamp and the
+			// section's routing/task metadata.
+			if cur.TS == 0 && bodyStart < 0 && bytes.HasPrefix(line, metaPrefixBytes) {
+				if ts, meta, ok := parseMetaLine(string(line)); ok {
+					cur.TS = ts.Unix()
+					cur.Meta = meta
+					handled = true
+				}
+			}
+			if !handled {
+				if bodyStart < 0 {
+					bodyStart = lineStart
+				}
+				bodyEnd = lineEnd
+			}
+		}
+		rest = next
+	}
+	flush()
+
+	if len(p.Sections) == 0 {
+		return nil, fmt.Errorf("pad file has no sections")
+	}
+	return p, nil
+}
+
+// splitLine returns the next line (without its newline) and everything after that
+// newline. rest is nil when the line was the last one — i.e. the data ran out without
+// a newline — which is how the loop above knows to stop. Data ending in "\n" yields a
+// final empty line, matching strings.Split's behaviour.
+func splitLine(b []byte) (line, rest []byte) {
+	if i := bytes.IndexByte(b, '\n'); i >= 0 {
+		return b[:i], b[i+1:]
+	}
+	return b, nil
+}
+
+// isSectionHeader is the cheap pre-filter that keeps the regexp off the ~99% of lines
+// that are ordinary prose.
+func isSectionHeader(line []byte) bool {
+	return len(line) > 2 && line[0] == '#' && line[1] == ' '
+}

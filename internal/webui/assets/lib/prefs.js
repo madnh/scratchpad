@@ -14,6 +14,7 @@ const KEYS = {
   order: "scratchpad.ui.order",
   stickyBar: "scratchpad.ui.stickyBar",
   outline: "scratchpad.ui.outline",
+  rail: "scratchpad.ui.rail",
 };
 
 const DEFAULTS = {
@@ -85,6 +86,17 @@ export function setStickyBar(on) {
 export function outline() {
   const raw = read(KEYS.outline);
   return raw === null ? DEFAULTS.outline : raw !== "off";
+}
+
+// Which half of the rail is showing — the outline or the task board. It is a property
+// of the reader, not of a pad, so it survives navigating between pads.
+export function rail() {
+  return read(KEYS.rail) === "tasks" ? "tasks" : "outline";
+}
+
+export function setRail(which) {
+  write(KEYS.rail, which === "tasks" ? "tasks" : "outline");
+  announce("rail", which);
 }
 
 export function setOutline(on) {

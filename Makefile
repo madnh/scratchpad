@@ -20,7 +20,17 @@ PD_REPO ?= https://github.com/madnh/puredashboard.git
 PD_REF  ?= main
 PD_DIR  := internal/webui/assets/vendor/puredashboard
 
-.PHONY: help build-dev build-release install run ui test fmt fmt-check vet tidy check clean vendor-ui
+# Công cụ phát triển: pin phiên bản ở đây để mọi máy và mọi phiên Claude Code dùng
+# CÙNG một bản. gopls là language server của Go — nó cho biết một ký hiệu được dùng ở
+# đâu theo đúng ngữ nghĩa, thứ mà grep không làm được (grep không phân biệt nổi
+# `Result.Sections` với `Pad.Sections`, đúng cái bẫy target `layers` đã vấp phải).
+GOPLS_VERSION ?= latest
+
+# Store demo (tools/gendemo). Tách hẳn khỏi store thật: gendemo chỉ ghi đè thư mục do
+# chính nó tạo, nên gõ nhầm --dir sang store thật sẽ bị từ chối chứ không mất dữ liệu.
+DEMO_DIR ?= $(HOME)/.scratchpad-demo
+
+.PHONY: help build-dev build-release install run ui demo demo-ui test fmt fmt-check vet layers tidy check clean vendor-ui tools
 
 help: ## In danh sách lệnh (mặc định)
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -39,6 +49,15 @@ run: ## Chạy server (serve) — thêm ARGS="..." để truyền cờ, vd: make
 
 ui: ## Chạy Web UI (ui) — thêm ARGS="..." để truyền cờ, vd: make ui ARGS="--port 7000"
 	go run -ldflags "$(LDFLAGS)" $(PKG) ui $(ARGS)
+
+# Dựng lại từ đầu mỗi lần: store demo là thứ dùng xong bỏ, và các mốc thời gian
+# ("giao 5 tiếng trước, chưa ai trả lời") phải tính lại theo hiện tại thì các view
+# quá hạn mới có gì để hiện. Kịch bản nằm ở tools/gendemo/scenario.go.
+demo: ## Dựng store demo (mặc định ~/.scratchpad-demo) — thêm ARGS="--dir <path>"
+	go run ./tools/gendemo --dir $(DEMO_DIR) --force $(ARGS)
+
+demo-ui: demo ## Dựng store demo rồi mở Web UI trên đó
+	go run -ldflags "$(LDFLAGS)" $(PKG) ui --dir $(DEMO_DIR) --port=6592 --open
 
 vendor-ui: ## Cập nhật thư viện UI đã vendor từ puredashboard (PD_REF=<branch|tag|commit>)
 	@tmp=$$(mktemp -d) && \
@@ -64,10 +83,43 @@ fmt-check: ## Kiểm tra định dạng — fail nếu có file chưa gofmt
 vet: ## Phân tích tĩnh bằng go vet
 	go vet ./...
 
+# Ngoài internal/pad, không nơi nào được tự duyệt danh sách section.
+#
+# Trước khi có internal/pad, 14 chỗ trong mcpsrv/webui/cmd tự duyệt pad.Sections, và
+# "chọn section nào" tồn tại dưới 3 từ vựng khác nhau cho cùng một khái niệm. Mọi phép
+# suy diễn (turn, task, participants) và phép chọn giờ nằm ở internal/pad; các surface
+# chỉ dịch request thành pad.Selector. Đây là luật giữ cho điều đó không mục lại — và
+# nó tự kiểm tra được, khác với một dòng văn xuôi trong CLAUDE.md.
+# Bỏ qua *_test.go (test được phép khẳng định trực tiếp trên cấu trúc đã parse) và
+# `Select(...).Sections` (đó là kết quả của Selector, tức là đang DÙNG đúng cơ chế).
+layers: ## Kiểm tra ranh giới: chỉ internal/pad được duyệt Sections
+	@bad=$$(grep -rn "range .*\.Sections\|\.Sections\[" --include=*.go \
+		internal cmd 2>/dev/null \
+		| grep -v "^internal/pad/" | grep -v "_test\.go:" | grep -v ")\.Sections" || true); \
+	if [ -n "$$bad" ]; then \
+		echo "chỉ internal/pad được duyệt danh sách section — hãy dùng pad.Selector / các hàm suy diễn:"; \
+		echo "$$bad"; exit 1; fi
+
+# Kiểm tra cả PATH lẫn $GOPATH/bin: `go install` đặt binary vào $GOPATH/bin, thư mục
+# này thường CHƯA nằm trong PATH — nếu chỉ hỏi `command -v` thì lần chạy nào cũng cài
+# lại, và target mất tính idempotent đúng lúc hook cần nó nhất.
+tools: ## Cài công cụ phát triển (gopls) — idempotent, chạy lại bao nhiêu lần cũng được
+	@gobin=$$(go env GOBIN); [ -n "$$gobin" ] || gobin=$$(go env GOPATH)/bin; \
+	if command -v gopls >/dev/null 2>&1; then \
+		echo "gopls đã có: $$(command -v gopls) ($$(gopls version 2>/dev/null | head -1))"; \
+	elif [ -x "$$gobin/gopls" ]; then \
+		echo "gopls đã có: $$gobin/gopls ($$($$gobin/gopls version 2>/dev/null | head -1))"; \
+		echo "nhưng $$gobin KHÔNG có trong PATH — plugin gopls-lsp sẽ không tìm thấy nó"; \
+	else \
+		echo "cài gopls@$(GOPLS_VERSION)…"; \
+		go install golang.org/x/tools/gopls@$(GOPLS_VERSION); \
+		echo "xong → $$gobin/gopls — nhớ để $$gobin trong PATH"; \
+	fi
+
 tidy: ## Dọn go.mod/go.sum
 	go mod tidy
 
-check: fmt-check vet test ## Cổng kiểm tra trước khi commit (fmt-check + vet + test)
+check: fmt-check vet layers test ## Cổng kiểm tra trước khi commit (fmt-check + vet + layers + test)
 
 clean: ## Xoá artifact build
 	rm -rf $(BIN_DIR)

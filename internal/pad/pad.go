@@ -1,0 +1,161 @@
+// Package pad is the pure domain layer for pads: the on-disk format, the section
+// metadata grammar, and every rule and derived view built on them.
+//
+// It performs NO I/O and takes no locks — that is internal/store's job. The split
+// exists because the CLI, the MCP server and the Web UI all need the same answers
+// ("whose turn is it", "which sections do I want", "what is T3's status"), and when
+// those answers are computed from a raw []Section handed out by the storage layer,
+// each surface grows its own subtly different copy. Everything here is a pure function
+// over a parsed pad, so it is testable without a filesystem and there is exactly one
+// implementation of each meaning.
+package pad
+
+import "strconv"
+
+// Kind is the stream a section belongs to. Streams share one file, one numbering and
+// one append-only sequence; what differs is the rules each one carries (see CheckTurn).
+type Kind string
+
+const (
+	// KindMessage is the conversation: it takes turns.
+	KindMessage Kind = "message"
+	// KindTask is the work ledger: bookkeeping, exempt from the turn rule.
+	KindTask Kind = "task"
+)
+
+// Status is a task event's state transition. Absent on an event means "no change".
+type Status string
+
+const (
+	StatusOpen    Status = "open"
+	StatusWIP     Status = "wip"
+	StatusBlocked Status = "blocked"
+	StatusDone    Status = "done"
+	StatusDropped Status = "dropped"
+)
+
+// validStatus reports whether s is one of the five known transitions.
+func validStatus(s Status) bool {
+	switch s {
+	case StatusOpen, StatusWIP, StatusBlocked, StatusDone, StatusDropped:
+		return true
+	}
+	return false
+}
+
+// Meta is the routing/threading/task metadata carried on a section's comment line.
+// Every field is optional; the zero value is an ordinary broadcast message, which is
+// exactly what every section written before this format existed parses as.
+type Meta struct {
+	Kind   Kind     `json:"kind,omitempty"`
+	To     []string `json:"to,omitempty"`
+	Re     int      `json:"re,omitempty"`
+	Task   int      `json:"task,omitempty"`
+	Status Status   `json:"status,omitempty"`
+}
+
+// Section is one post in a pad. Meta is embedded so it flattens in JSON: a section
+// serialises as {n, author, title, ts, kind, to, …} rather than nesting a "meta" object
+// that every surface would have to reach through.
+type Section struct {
+	N       int    `json:"n"`
+	Author  string `json:"author"`
+	Title   string `json:"title"`
+	TS      int64  `json:"ts"` // unix seconds
+	Content string `json:"content,omitempty"`
+	Meta
+}
+
+// IsTask reports whether this section is part of a task's record (as opposed to merely
+// referencing a task, which a plain message may also do).
+func (s Section) IsTask() bool { return s.Kind == KindTask }
+
+// Broadcast reports whether the section is addressed to everyone. Absent `to` means
+// broadcast for a message; a task open without `to` is rejected at write time, so this
+// stays unambiguous.
+func (s Section) Broadcast() bool { return len(s.To) == 0 }
+
+// AddressedTo reports whether author is named in the section's `to` list.
+func (s Section) AddressedTo(author string) bool {
+	for _, t := range s.To {
+		if t == author {
+			return true
+		}
+	}
+	return false
+}
+
+// Label is how this section is named to a person: §12 for a section, T3 when it is a
+// task event. Two number spaces appear on the same screen, so they must never look
+// alike.
+func (s Section) Label() string {
+	if s.IsTask() && s.Task > 0 {
+		return "T" + strconv.Itoa(s.Task)
+	}
+	return "§" + strconv.Itoa(s.N)
+}
+
+// Pad is a fully parsed pad file. Sections are in file order, which is also numbering
+// order.
+type Pad struct {
+	Project      string
+	ID           string
+	CreatedTS    int64
+	PasswordHash string // "" when unprotected
+	Sections     []Section
+}
+
+// Ref returns the pad's full copy-pasteable identifier `<project>-<padid>`.
+func (p *Pad) Ref() string { return p.Project + "-" + p.ID }
+
+// Protected reports whether the pad requires a password.
+func (p *Pad) Protected() bool { return p.PasswordHash != "" }
+
+// Last returns the final section, whatever its kind. Every pad has at least one section
+// (created with section 1), so callers may rely on it existing.
+func (p *Pad) Last() Section { return p.Sections[len(p.Sections)-1] }
+
+// Find returns the section numbered n.
+func (p *Pad) Find(n int) (Section, bool) {
+	for _, sec := range p.Sections {
+		if sec.N == n {
+			return sec, true
+		}
+	}
+	return Section{}, false
+}
+
+// Authors returns every author who has posted in this pad, in first-appearance order —
+// section 1's author first, so the pad's opener leads the list. It is the pad's roster:
+// what a listing publishes, and what lets a post warn about a `to` target never seen here.
+//
+// Derived on demand rather than stored: an author exists only by having posted, so the
+// sections already ARE the roster. Recording it a second time in the pad header would
+// turn an O(chunk) append into an O(size) rewrite of the file's first line, and would go
+// stale the moment a pad is edited by hand.
+//
+// Deliberately NOT the same set as Participants: this is who has SPOKEN. Participants
+// also counts an agent that was addressed and never answered — usually the one a person
+// is looking for — which is a fact about a pad's inside, not part of its listing entry.
+func (p *Pad) Authors() []string {
+	seen := make(map[string]bool, len(p.Sections))
+	var out []string
+	for _, sec := range p.Sections {
+		if !seen[sec.Author] {
+			seen[sec.Author] = true
+			out = append(out, sec.Author)
+		}
+	}
+	return out
+}
+
+// Title is the pad's display title. A pad has no name of its own, so it borrows the
+// title of its first section — the opening question is what makes it recognisable in a
+// listing. It is a method rather than something each caller digs out of Sections[0],
+// which is how three surfaces end up disagreeing about what a pad is called.
+func (p *Pad) Title() string {
+	if len(p.Sections) == 0 {
+		return ""
+	}
+	return p.Sections[0].Title
+}

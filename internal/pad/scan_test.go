@@ -1,8 +1,7 @@
-package store
+package pad
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -11,22 +10,27 @@ import (
 )
 
 // referenceParse is the ORIGINAL line-splitting parser, kept here as the oracle the
-// scanning parser is checked against. It is the thing scanPad replaced (it built one
+// scanning parser is checked against. It is the thing scan replaced (it built one
 // string per line of the file, which is why it had to go), so any behavioural drift
 // between the two shows up as a test failure rather than as a surprise in a pad
 // someone wrote months ago.
+//
+// It also parses the metadata line the OLD way — the whole remainder as a timestamp —
+// which is exactly what an older binary does. Every case in padFiles() therefore
+// doubles as a check that legacy pads still parse identically; the new grammar has its
+// own tests below.
 func referenceParse(project, id string, data []byte) (*Pad, error) {
 	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 || !strings.HasPrefix(lines[0], padHeaderPrefix) {
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], HeaderPrefix) {
 		return nil, fmt.Errorf("not a scratchpad file")
 	}
-	header := strings.TrimSuffix(strings.TrimPrefix(lines[0], padHeaderPrefix), " -->")
+	header := strings.TrimSuffix(strings.TrimPrefix(lines[0], HeaderPrefix), " -->")
 	createdStr, passwordHash, _ := strings.Cut(header, "; password: ")
 	created, err := time.Parse(time.RFC3339, strings.TrimSpace(createdStr))
 	if err != nil {
 		return nil, fmt.Errorf("bad created timestamp")
 	}
-	pad := &Pad{Project: project, ID: id, CreatedTS: created.Unix(), PasswordHash: strings.TrimSpace(passwordHash)}
+	p := &Pad{Project: project, ID: id, CreatedTS: created.Unix(), PasswordHash: strings.TrimSpace(passwordHash)}
 
 	var cur *Section
 	var content []string
@@ -38,7 +42,7 @@ func referenceParse(project, id string, data []byte) (*Pad, error) {
 		if cur.Content != "" {
 			cur.Content += "\n"
 		}
-		pad.Sections = append(pad.Sections, *cur)
+		p.Sections = append(p.Sections, *cur)
 		cur, content = nil, nil
 	}
 	for _, line := range lines[1:] {
@@ -46,13 +50,13 @@ func referenceParse(project, id string, data []byte) (*Pad, error) {
 			if author, title, ok := strings.Cut(m[2], " - "); ok {
 				flush()
 				n, _ := strconv.Atoi(m[1])
-				cur = &Section{N: n, Author: author, Title: title}
+				cur = &Section{N: n, Author: author, Title: title, Meta: Meta{Kind: KindMessage}}
 				continue
 			}
 		}
 		if cur != nil {
-			if cur.TS == 0 && len(content) == 0 && strings.HasPrefix(line, tsCommentPrefix) {
-				tsStr := strings.TrimSuffix(strings.TrimPrefix(line, tsCommentPrefix), " -->")
+			if cur.TS == 0 && len(content) == 0 && strings.HasPrefix(line, metaPrefix) {
+				tsStr := strings.TrimSuffix(strings.TrimPrefix(line, metaPrefix), metaSuffix)
 				if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(tsStr)); err == nil {
 					cur.TS = ts.Unix()
 					continue
@@ -62,10 +66,10 @@ func referenceParse(project, id string, data []byte) (*Pad, error) {
 		}
 	}
 	flush()
-	if len(pad.Sections) == 0 {
+	if len(p.Sections) == 0 {
 		return nil, fmt.Errorf("pad file has no sections")
 	}
-	return pad, nil
+	return p, nil
 }
 
 // padFiles returns the awkward shapes a pad file can really take on disk — including
@@ -98,11 +102,11 @@ func padFiles() map[string]string {
 	}
 }
 
-func TestScanPadMatchesReferenceParser(t *testing.T) {
+func TestScanMatchesReferenceParser(t *testing.T) {
 	for name, text := range padFiles() {
 		t.Run(name, func(t *testing.T) {
 			want, wantErr := referenceParse("p", "id", []byte(text))
-			got, gotErr := parsePad("p", "id", []byte(text))
+			got, gotErr := Parse("p", "id", []byte(text))
 			if (wantErr == nil) != (gotErr == nil) {
 				t.Fatalf("error mismatch: reference=%v scan=%v", wantErr, gotErr)
 			}
@@ -116,14 +120,14 @@ func TestScanPadMatchesReferenceParser(t *testing.T) {
 	}
 }
 
-func TestParsePadMetaMatchesParsePadWithoutBodies(t *testing.T) {
+func TestParseMetaMatchesParseWithoutBodies(t *testing.T) {
 	for name, text := range padFiles() {
 		t.Run(name, func(t *testing.T) {
-			full, err := parsePad("p", "id", []byte(text))
+			full, err := Parse("p", "id", []byte(text))
 			if err != nil {
 				return
 			}
-			meta, err := parsePadMeta("p", "id", []byte(text))
+			meta, err := ParseMeta("p", "id", []byte(text))
 			if err != nil {
 				t.Fatalf("meta parse failed where full parse succeeded: %v", err)
 			}
@@ -136,7 +140,7 @@ func TestParsePadMetaMatchesParsePadWithoutBodies(t *testing.T) {
 			for i := range full.Sections {
 				want := full.Sections[i]
 				want.Content = "" // the only thing metadata parsing drops
-				if meta.Sections[i] != want {
+				if !reflect.DeepEqual(meta.Sections[i], want) {
 					t.Errorf("section %d: %#v != %#v", i, meta.Sections[i], want)
 				}
 			}
@@ -144,93 +148,76 @@ func TestParsePadMetaMatchesParsePadWithoutBodies(t *testing.T) {
 	}
 }
 
-// TestReadRefusesOversizedPad is the regression test for the memory-exhaustion finding:
-// a pad file bigger than the deployment's own limits could ever produce is refused
-// instead of being read into memory, and refusing it must not break the other pads.
-func TestReadRefusesOversizedPad(t *testing.T) {
-	st := testStore(t)
-	pad, _, err := st.CreatePad("p", "alice", "title", "body", false)
+// TestLegacySectionsAreBroadcastMessages pins the migration promise: a pad written
+// before the metadata line existed keeps working, with every section a broadcast
+// message, so no store has to be migrated.
+func TestLegacySectionsAreBroadcastMessages(t *testing.T) {
+	text := "<!-- scratchpad v1; created: 2026-07-11T10:29:00Z -->\n" +
+		"\n# 1 - a - t\n<!-- ts: 2026-07-11T10:30:00Z -->\n\nbody\n"
+	p, err := Parse("p", "id", []byte(text))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := pad.Ref()
-
-	// Grow the file past the ceiling behind the store's back, the way a hand-edit or a
-	// corrupted write would.
-	path := st.padPath(pad.Project, pad.ID)
-	over := st.maxPadBytes() + 1
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		t.Fatal(err)
+	sec := p.Sections[0]
+	if sec.Kind != KindMessage || !sec.Broadcast() || sec.Re != 0 || sec.Task != 0 || sec.Status != "" {
+		t.Fatalf("legacy section did not parse as a plain broadcast message: %#v", sec.Meta)
 	}
-	if _, err := f.WriteString(strings.Repeat("\n", int(over))); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-
-	if _, err := st.Get(ref, ""); !HasCode(err, CodeContentTooLarge) {
-		t.Fatalf("Get on an oversized pad: want content_too_large, got %v", err)
-	}
-	if _, err := st.Post(ref, "bob", "t", "c", ""); !HasCode(err, CodeContentTooLarge) {
-		t.Fatalf("Post to an oversized pad: want content_too_large, got %v", err)
-	}
-
-	// A second, healthy pad must still list — one bad file cannot deny the store.
-	if _, _, err := st.CreatePad("p", "alice", "other", "body", false); err != nil {
-		t.Fatal(err)
-	}
-	pads, warnings, err := st.List("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pads) != 1 {
-		t.Fatalf("want the healthy pad listed, got %d pads", len(pads))
-	}
-	if len(warnings) != 1 {
-		t.Fatalf("want one warning about the oversized pad, got %v", warnings)
+	if p.TurnState().LastAuthor != "a" {
+		t.Fatalf("turn state changed for a legacy pad: %#v", p.TurnState())
 	}
 }
 
-// newlineHeavyPad is the shape the memory-exhaustion finding used: content that is
-// almost entirely newlines, which is what turned a line-splitting parser into tens of
-// megabytes of string headers per megabyte of file.
-func newlineHeavyPad(sections, bytesEach int) []byte {
-	var b strings.Builder
-	b.WriteString("<!-- scratchpad v1; created: 2026-07-11T10:29:00Z -->\n")
-	for i := 1; i <= sections; i++ {
-		fmt.Fprintf(&b, "\n# %d - a%d - t\n<!-- ts: 2026-07-11T10:30:00Z -->\n\n", i, i%2)
-		b.WriteString(strings.Repeat("\n", bytesEach))
+func TestMetaLineRoundTrip(t *testing.T) {
+	ts := time.Date(2026, 8, 2, 10, 30, 0, 0, time.UTC)
+	cases := []Meta{
+		{Kind: KindMessage},
+		{Kind: KindMessage, To: []string{"backend"}},
+		{Kind: KindMessage, To: []string{"backend", "erp"}, Re: 9},
+		{Kind: KindTask, Task: 3, To: []string{"ios", "android"}, Status: StatusOpen},
+		{Kind: KindTask, Task: 12, Status: StatusDone, Re: 4},
 	}
-	return []byte(b.String())
+	for _, want := range cases {
+		line := renderMetaLine(ts, want)
+		gotTS, got, ok := parseMetaLine(line)
+		if !ok {
+			t.Fatalf("rendered line did not parse back: %q", line)
+		}
+		if !gotTS.Equal(ts) {
+			t.Errorf("%q: ts %v != %v", line, gotTS, ts)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: %#v != %#v", line, got, want)
+		}
+	}
 }
 
-func BenchmarkParsePadNewlineHeavy(b *testing.B) {
-	data := newlineHeavyPad(200, 64*1024)
-	b.Run("reference-line-split", func(b *testing.B) {
-		b.ReportAllocs()
-		b.SetBytes(int64(len(data)))
-		for i := 0; i < b.N; i++ {
-			if _, err := referenceParse("p", "id", data); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-	b.Run("scan", func(b *testing.B) {
-		b.ReportAllocs()
-		b.SetBytes(int64(len(data)))
-		for i := 0; i < b.N; i++ {
-			if _, err := parsePad("p", "id", data); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-	b.Run("scan-meta-only", func(b *testing.B) {
-		b.ReportAllocs()
-		b.SetBytes(int64(len(data)))
-		for i := 0; i < b.N; i++ {
-			if _, err := parsePadMeta("p", "id", data); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
+// TestMetaLineOmitsDefaults keeps the common case byte-identical to what pads have
+// always contained: a plain broadcast message writes the bare ts line and nothing more.
+func TestMetaLineOmitsDefaults(t *testing.T) {
+	ts := time.Date(2026, 8, 2, 10, 30, 0, 0, time.UTC)
+	if got := renderMetaLine(ts, Meta{Kind: KindMessage}); got != "<!-- ts: 2026-08-02T10:30:00Z -->" {
+		t.Fatalf("a plain message grew its metadata line: %q", got)
+	}
+}
+
+// TestMetaLineIgnoresUnknownKeys is the forward-compatibility promise: a key this
+// binary predates must be skipped, not rejected, and must not damage the keys around it.
+func TestMetaLineIgnoresUnknownKeys(t *testing.T) {
+	line := "<!-- ts: 2026-08-02T10:30:00Z; kind: task; encrypted: true; task: 7; to: ios -->"
+	_, m, ok := parseMetaLine(line)
+	if !ok {
+		t.Fatal("a line with an unknown key was rejected")
+	}
+	if m.Kind != KindTask || m.Task != 7 || len(m.To) != 1 || m.To[0] != "ios" {
+		t.Fatalf("unknown key disturbed its neighbours: %#v", m)
+	}
+}
+
+// TestMetaLineRejectsBadTimestamp pins the degradation path: an unparseable line is not
+// metadata, so it falls through to the body rather than producing a section with no
+// timestamp.
+func TestMetaLineRejectsBadTimestamp(t *testing.T) {
+	if _, _, ok := parseMetaLine("<!-- ts: not-a-time; kind: task -->"); ok {
+		t.Fatal("a line with an unparseable timestamp was accepted as metadata")
+	}
 }

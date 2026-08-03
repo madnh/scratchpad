@@ -22,6 +22,15 @@ export function el(tag, props = {}, ...children) {
   return node;
 }
 
+// setChildren replaces a node's children, DROPPING the absent ones.
+//
+// It exists because `replaceChildren` does not: passing it a null — which is what a
+// conditional block like "the stuck list, when there is one" naturally returns —
+// appends the literal string "null" to the page.
+export function setChildren(node, ...children) {
+  node.replaceChildren(...children.flat().filter((c) => c != null));
+}
+
 // pageHead builds the title row every page starts with.
 export function pageHead(title, subtitle, ...actions) {
   return el("div", { class: "page__head" },

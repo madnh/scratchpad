@@ -36,6 +36,11 @@ import (
 	"github.com/madnh/scratchpad/internal/watch"
 )
 
+// shutdownGrace bounds a stop. With the streams closed first there is normally nothing
+// left to wait for, so this is a backstop against one wedged handler, not the budget a
+// clean shutdown spends.
+const shutdownGrace = 3 * time.Second
+
 // Options configures a UI server. Port and NoAuth come from the resolved config
 // (flag > env > marker > default).
 type Options struct {
@@ -115,9 +120,20 @@ func (s *Server) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		shutCtx, stop := context.WithTimeout(context.Background(), 3*time.Second)
+		// Stop the hub FIRST. It closes every open SSE stream, so their handlers return
+		// and Shutdown has nothing left to wait for. Without this, one browser tab is
+		// enough to hold the shutdown open until the deadline.
+		cancel()
+		shutCtx, stop := context.WithTimeout(context.Background(), shutdownGrace)
 		defer stop()
-		return srv.Shutdown(shutCtx)
+		if err := srv.Shutdown(shutCtx); err != nil {
+			// Graceful, then firm. The stop was asked for and the process is leaving
+			// either way, so a connection that will not drain gets closed under it —
+			// and Ctrl-C still exits 0, because a stop that happened is not a failure.
+			log.Printf("ui: a connection did not close within %s; closing it", shutdownGrace)
+			_ = srv.Close()
+		}
+		return nil
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
@@ -137,6 +153,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/pads/{ref}", s.api(s.handlePad))
 	mux.HandleFunc("GET /api/pads/{ref}/sections", s.api(s.handleSections))
 	mux.HandleFunc("GET /api/pads/{ref}/sections/{n}/preview", s.api(s.handleSectionPreview))
+	mux.HandleFunc("GET /api/pads/{ref}/tasks", s.api(s.handleTasks))
+	mux.HandleFunc("GET /api/stuck", s.api(s.handleStuck))
 	mux.HandleFunc("POST /api/pads/{ref}/unlock", s.api(s.handleUnlock))
 	mux.HandleFunc("DELETE /api/pads/{ref}", s.api(s.handleDelete))
 	mux.HandleFunc("GET /api/events", s.requireSession(http.HandlerFunc(s.handleEvents)))

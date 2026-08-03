@@ -37,6 +37,17 @@ type padEvent struct {
 	LastTitle  string   `json:"last_title,omitempty"` // empty for a protected pad
 	LastTS     int64    `json:"last_ts,omitempty"`
 	Protected  bool     `json:"protected,omitempty"`
+
+	// Routing and task fields, so a notification can say "T3 → done" rather than "the
+	// pad changed", and so the task panel stays live without refetching.
+	//
+	// They say MORE than a listing entry does, so they follow exactly the rule the last
+	// section's title already follows: omitted entirely for a protected pad. The
+	// boundary is the level `pad list` publishes — not whatever the UI finds useful.
+	LastKind   string `json:"last_kind,omitempty"`
+	LastTask   int    `json:"last_task,omitempty"`
+	LastStatus string `json:"last_status,omitempty"`
+	OpenTasks  int    `json:"open_tasks,omitempty"`
 }
 
 // hub turns the watcher's single event stream into a broadcast to every open browser,
@@ -48,6 +59,7 @@ type hub struct {
 	mu      sync.Mutex
 	clients map[int]chan padEvent
 	next    int
+	closed  bool // set once run() stops; a late subscriber gets a closed channel
 }
 
 func newHub(st *store.Store, w *watch.Watcher) *hub {
@@ -55,9 +67,18 @@ func newHub(st *store.Store, w *watch.Watcher) *hub {
 }
 
 // subscribe registers a browser and returns its queue plus an unsubscribe function.
+//
+// After the hub has stopped it hands back an already-closed channel rather than a live
+// one: a request that arrives during shutdown must end, not wait for an event that can
+// no longer come.
 func (h *hub) subscribe() (<-chan padEvent, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.closed {
+		ch := make(chan padEvent)
+		close(ch)
+		return ch, func() {}
+	}
 	id := h.next
 	h.next++
 	ch := make(chan padEvent, clientBuffer)
@@ -72,10 +93,17 @@ func (h *hub) subscribe() (<-chan padEvent, func()) {
 	}
 }
 
-// run pumps watcher events into browser queues until ctx is cancelled.
+// run pumps watcher events into browser queues until ctx is cancelled, then closes
+// every queue on the way out.
+//
+// Closing them is what makes Ctrl-C prompt. `http.Server.Shutdown` waits for handlers
+// to return and does NOT cancel their request contexts, so an open browser tab parked
+// in /api/events would sit there until the shutdown deadline expired — which is exactly
+// how a clean stop came to print "context deadline exceeded".
 func (h *hub) run(ctx context.Context) {
 	events, unsub := h.watcher.Subscribe()
 	defer unsub()
+	defer h.close()
 	for {
 		select {
 		case <-ctx.Done():
@@ -86,6 +114,22 @@ func (h *hub) run(ctx context.Context) {
 			}
 			h.broadcast(h.enrich(ev))
 		}
+	}
+}
+
+// close ends every open stream. The handlers see their channel close and return; the
+// `closed` flag stops a racing subscribe() from being handed a channel nobody will
+// ever write to or close again.
+func (h *hub) close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	h.closed = true
+	for id, ch := range h.clients {
+		delete(h.clients, id)
+		close(ch)
 	}
 }
 
@@ -108,6 +152,15 @@ func (h *hub) enrich(ev watch.Event) padEvent {
 	out.LastTitle = lastTitle
 	out.LastTS = m.LastTS
 	out.Protected = m.Protected
+	if m.Protected {
+		return out // nothing beyond the listing level leaves here
+	}
+	out.OpenTasks = m.OpenTasks
+	if last, err := h.store.LastSection(ev.Ref); err == nil {
+		out.LastKind = string(last.Kind)
+		out.LastTask = last.Task
+		out.LastStatus = string(last.Status)
+	}
 	return out
 }
 

@@ -35,6 +35,10 @@ hands the `ref` to the other; each appends a numbered section in turn; either si
 `read` the whole exchange or `pad wait` for the next turn. The pad file itself is the only
 state — no database, no daemon required.
 
+With more than two agents, add addressing: `--to` says who a section is for and decides
+who is **woken** — everyone can still read everything — and `--task-open` tracks work as
+events the pad folds into a board. Both live on the same append-only file.
+
 <img src="docs/images/uc1-demo.png" alt="Claude Code and Codex, each in its own session, using the scratchpad CLI" />
 
 ## Install
@@ -75,6 +79,25 @@ EOF
 ```
 
 The default store `~/.scratchpad/` bootstraps itself on first use — **zero setup**.
+
+### More than two agents
+
+```sh
+# Address a section: everyone can still read it, only ios and android are woken
+scratchpad pad post <ref> --as pm --to ios,android --re 12 --title "Any blockers?" -
+
+# Wait without being interrupted by exchanges between two OTHER agents
+scratchpad pad wait <ref> --since 41 --as backend --wake-for me --unacked 15m
+
+# Track the work rather than re-reading the pad
+scratchpad pad post <ref> --as pm --task-open --to ios,android --title "Crash on resume" -
+scratchpad pad post <ref> --as ios --task 1 --status done --title "Fixed in abc123" -
+scratchpad pad tasks <ref>     # T1  wip  ios:done android:...  §2->§4  Crash on resume
+scratchpad pad who <ref>       # who has fallen behind, and what they owe
+```
+
+A task shared by two agents is `done` only when **both** are, so one finishing never
+hides the other's outstanding work.
 
 ## Run as an MCP server
 
@@ -124,6 +147,8 @@ existence; bulk cleanup by age stays in `pad purge`.
 | | |
 |---|---|
 | **Turn rule** | Nobody posts twice in a row — a clean, readable back-and-forth. |
+| **Addressing** | `--to` and `--re` route a section; `--wake-for` decides what interrupts you. Reading stays universal. |
+| **Tasks** | Work tracked as append-only events, folded into a board — per owner, so a shared task never reads as finished early. |
 | **Append-only pad** | The pad file is the single source of truth. No external state, no database. |
 | **Zero setup** | The default store bootstraps itself on first use. |
 | **CLI + MCP** | One binary: work on pad files directly, or serve them as MCP tools. |
@@ -150,14 +175,38 @@ From a solo laptop to a whole team — full detail in [USECASES.md](USECASES.md)
 ## Build
 
 ```sh
+make tools          # dev tooling (gopls) — run once
 make build-dev      # → bin/scratchpad (keeps debug symbols; for local dev)
 make build-release  # → bin/scratchpad (stripped + -trimpath; matches the released binary)
-make check          # gofmt + vet + test
+make check          # gofmt + vet + layers + test
 make vendor-ui      # refresh the vendored Web UI library (puredashboard)
 ```
 
 The Web UI's assets are embedded with `go:embed`, so **rebuild after changing anything
 under `internal/webui/assets/`** — a running binary keeps serving the old copy.
+
+`make check` includes a `layers` gate: outside `internal/pad`, nothing may walk a pad's
+section list by hand. Every derivation (turn, tasks, participants) and every selection
+goes through that package, so the CLI, the MCP tools and the Web UI cannot drift apart
+on what a pad means.
+
+### Code intelligence
+
+`make tools` installs **gopls**, and `.claude/settings.json` enables Anthropic's
+[`gopls-lsp`](https://claude.com/plugins/gopls-lsp) plugin, so a Claude Code session in
+this repo gets real jump-to-definition and find-references instead of grepping. Install
+it once with:
+
+```
+/plugin install gopls-lsp@claude-plugins-official
+```
+
+The plugin only wraps the language server — `make tools` is what supplies it, and
+`$(go env GOPATH)/bin` has to be on your PATH for the plugin to find it.
+
+On Claude Code for the web none of this is manual: `.claude/hooks/session-start.sh` warms
+the module cache and runs `make tools` when a session starts, because that container is
+built fresh each time.
 
 <br/>
 

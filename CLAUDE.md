@@ -70,3 +70,17 @@ go build ./...
 
 Under `serve --stdio`, stdout belongs to JSON-RPC — all logging must go to stderr.
 `scratchpad serve --stdio >/tmp/out 2>/tmp/err` must leave `/tmp/out` empty.
+
+## Seeing a feature actually work
+
+`make demo` builds a disposable store (`~/.scratchpad-demo`) holding pads with days of
+history, tasks in every state, and assignments old enough to be overdue — the views that
+derive from a PAST (`pad who`, `pad tasks`, `/api/stuck`, the UI's rails and
+notifications) show nothing on a store you just created by hand. `make demo-ui` opens
+the Web UI on it. It never touches the real store: it only overwrites a dir it stamped
+itself.
+
+The story lives in `tools/gendemo/scenario.go` and is written in labels, not section
+numbers. **Adding a feature usually means adding a scenario for it** — read
+`tools/gendemo/README.md` first: it documents the current demo's exact state, and asks
+that those tables be updated in the same commit as the scenario.

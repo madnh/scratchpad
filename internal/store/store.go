@@ -2,8 +2,13 @@
 // <dir>/projects/<project>/<padid>.md. BOTH the CLI and the MCP server go through this
 // package, with the same flock discipline, so an agent on the CLI and an agent on MCP
 // can safely interleave on one store — appends take an exclusive flock on the pad file,
-// reads a shared one, and turn state is derived from the file's last section (there is
+// reads a shared one, and every rule and derived view comes from internal/pad (there is
 // no state outside the pad files; a deleted file simply is a deleted pad).
+//
+// This package owns FILES and LOCKS. What a pad MEANS — the format, the turn rule, task
+// ownership, selection, the derived views — lives in internal/pad, which touches no
+// disk. Keeping the two apart is what stops each surface from growing its own copy of
+// "which sections did I want" and "is T3 done".
 package store
 
 import (
@@ -23,6 +28,22 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/madnh/scratchpad/internal/config"
+	"github.com/madnh/scratchpad/internal/pad"
+)
+
+// The pad vocabulary, re-exported so a caller that already imports store for I/O does
+// not need a second import to name what comes back.
+type (
+	Pad         = pad.Pad
+	Section     = pad.Section
+	Meta        = pad.Meta
+	Turn        = pad.Turn
+	Selector    = pad.Selector
+	Kind        = pad.Kind
+	Task        = pad.Task
+	Owed        = pad.Owed
+	Participant = pad.Participant
+	Wake        = pad.Wake
 )
 
 // projectNameRe is the full validation rule for project names: only a-z and 0-9 —
@@ -42,8 +63,9 @@ const idLength = 6
 const waitPollInterval = 750 * time.Millisecond
 
 // padSizeSlack covers the per-section framing this store writes around content — the
-// header line, the ts comment and the blank separators — plus the pad header, so the
-// ceiling below is never tighter than what an honest writer can legitimately produce.
+// header line, the metadata comment and the blank separators — plus the pad header, so
+// the ceiling below is never tighter than what an honest writer can legitimately
+// produce.
 const padSizeSlack = 1024
 
 // maxPadBytes is the largest pad file this store will read into memory. It is DERIVED
@@ -120,24 +142,6 @@ func ValidateProject(name string) error {
 	return nil
 }
 
-// validateAuthor rejects authors that would break the section-header format
-// (`# <n> - <author> - <title>` splits on " - ").
-func validateAuthor(author string) error {
-	switch {
-	case strings.TrimSpace(author) == "":
-		return coded(CodeInvalidInput, "author is required (who is posting?)")
-	case len(author) > 200:
-		return coded(CodeInvalidInput, "author is too long (max 200 bytes)")
-	case strings.ContainsAny(author, "\n\r"):
-		return coded(CodeInvalidInput, "author must be a single line")
-	case strings.Contains(author, " - "):
-		return coded(CodeInvalidInput, "author must not contain \" - \" (it separates fields in the section header)")
-	case author != strings.TrimSpace(author):
-		return coded(CodeInvalidInput, "author must not start or end with whitespace")
-	}
-	return nil
-}
-
 // validateTitle enforces the single-line title and its size limit.
 func (s *Store) validateTitle(title string) error {
 	switch {
@@ -170,7 +174,7 @@ func (s *Store) CreatePad(project, author, title, content string, protect bool) 
 	if err := ValidateProject(project); err != nil {
 		return nil, "", err
 	}
-	if err := validateAuthor(author); err != nil {
+	if err := pad.ValidateAuthor(author); err != nil {
 		return nil, "", err
 	}
 	if err := s.validateTitle(title); err != nil {
@@ -204,7 +208,8 @@ func (s *Store) CreatePad(project, author, title, content string, protect bool) 
 	}
 
 	now := time.Now()
-	body := renderHeader(now, hash) + "\n" + renderSection(1, author, title, now, content)
+	body := pad.RenderHeader(now, hash) + "\n" +
+		pad.RenderSection(1, author, title, now, pad.Meta{Kind: pad.KindMessage}, content)
 
 	for attempt := 0; attempt < 10; attempt++ {
 		id, err := newPadID()
@@ -226,63 +231,131 @@ func (s *Store) CreatePad(project, author, title, content string, protect bool) 
 			_ = os.Remove(s.padPath(project, id))
 			return nil, "", werr
 		}
-		pad, err := parsePad(project, id, []byte(body))
+		p, err := pad.Parse(project, id, []byte(body))
 		if err != nil {
 			return nil, "", err
 		}
-		return pad, password, nil
+		return p, password, nil
 	}
 	return nil, "", fmt.Errorf("could not allocate a unique pad id after 10 attempts")
 }
 
-// Post appends a new section to a pad, enforcing the turn rule under an exclusive
-// flock: parse the last section, refuse when its author is posting again, then append.
-// The lock makes check-and-append atomic against concurrent writers (CLI or server).
-func (s *Store) Post(ref, author, title, content, password string) (*Pad, error) {
-	if err := validateAuthor(author); err != nil {
+// PostRequest is one append. It is a struct rather than a parameter list because a
+// section now carries routing and task metadata, and seven positional arguments at
+// three call sites is how surfaces start disagreeing about what they mean.
+type PostRequest struct {
+	Ref      string
+	Author   string
+	Title    string
+	Content  string
+	Password string
+	Meta     Meta
+
+	// OpenTask asks the store to allocate the next task number for this pad and open a
+	// task with it. The number cannot come from the caller: allocation has to happen
+	// under the same lock as the append, or two agents opening a task at once would
+	// choose the same number.
+	OpenTask bool
+}
+
+// PostResult is what an append produced.
+type PostResult struct {
+	Pad     *Pad
+	Section int
+	Task    int // the task this post opened or moved, 0 when it touched none
+
+	// Warnings are advisory and never mean failure — today, that an addressee has been
+	// silent long enough that nobody may be listening. They are returned at the moment
+	// the sender can still act on it, which is what presence was wanted for.
+	Warnings []string
+}
+
+// Post appends a new section, enforcing the rules under an exclusive flock: parse the
+// pad's metadata, check the turn (against the last MESSAGE) and task ownership, allocate
+// the section number and any new task number, then append. The lock makes
+// check-allocate-append atomic against concurrent writers (CLI or server).
+func (s *Store) Post(req PostRequest) (*PostResult, error) {
+	if err := pad.ValidateAuthor(req.Author); err != nil {
 		return nil, err
 	}
-	if err := s.validateTitle(title); err != nil {
+	if err := s.validateTitle(req.Title); err != nil {
 		return nil, err
 	}
-	if err := s.validateContent(content); err != nil {
+	if err := s.validateContent(req.Content); err != nil {
 		return nil, err
 	}
-	project, id, err := ParseRef(ref)
+	project, id, err := ParseRef(req.Ref)
 	if err != nil {
 		return nil, err
 	}
 
-	f, err := openPad(s.padPath(project, id), ref, os.O_RDWR, unix.LOCK_EX)
+	f, err := openPad(s.padPath(project, id), req.Ref, os.O_RDWR, unix.LOCK_EX)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close() // closing the fd releases the flock
 
-	data, err := s.readPadFile(f, ref)
+	data, err := s.readPadFile(f, req.Ref)
 	if err != nil {
 		return nil, err
 	}
-	// Appending needs the turn holder, the section count and the password hash — never
-	// the bodies, so they are not materialised on the write path.
-	pad, err := parsePadMeta(project, id, data)
+	// Appending needs the turn holder, the section count, the task state and the
+	// password hash — never the bodies, so they are not materialised on the write path.
+	// That one scan answers all of it, which is why ownership checks and task-number
+	// allocation cost no extra read.
+	p, err := pad.ParseMeta(project, id, data)
 	if err != nil {
-		return nil, fmt.Errorf("pad %s is corrupt: %w", ref, err)
+		return nil, fmt.Errorf("pad %s is corrupt: %w", req.Ref, err)
 	}
-	if err := checkPassword(pad.PasswordHash, password); err != nil {
+	if err := checkPassword(p.PasswordHash, req.Password); err != nil {
 		return nil, err
-	}
-	last := pad.Last()
-	if last.Author == author {
-		return nil, coded(CodeNotYourTurn, "you (%q) posted section %d; wait for another agent to reply (use pad_wait)", author, last.N)
-	}
-	if len(pad.Sections) >= s.limits.MaxSectionsPerPad {
-		return nil, coded(CodeLimitExceeded, "pad %s already holds %d sections (the limit)", ref, len(pad.Sections))
 	}
 
-	n := last.N + 1
+	meta := req.Meta
+	if meta.Kind == "" {
+		meta.Kind = pad.KindMessage
+	}
+	if req.OpenTask {
+		meta.Kind, meta.Task, meta.Status = pad.KindTask, p.NextTaskNo(), pad.StatusOpen
+	}
+	if err := pad.ValidateMeta(meta); err != nil {
+		return nil, err
+	}
+	if meta.Re > 0 {
+		parent, ok := p.Find(meta.Re)
+		if !ok {
+			return nil, coded(CodeInvalidInput, "pad %s has no section %d to reply to", req.Ref, meta.Re)
+		}
+		// Replying to a section addresses its author without the caller repeating it.
+		if !containsStr(meta.To, parent.Author) && parent.Author != req.Author {
+			meta.To = append(meta.To, parent.Author)
+		}
+	}
+	if err := p.CheckTurn(req.Author, meta.Kind); err != nil {
+		return nil, err
+	}
+	// The two layers of a `task:` reference, checked in the order they narrow. ANY
+	// section may point at a task, and only an existing one. Being part of the task's
+	// RECORD is the stricter claim, and the only one ownership governs.
+	if meta.Task > 0 && !req.OpenTask {
+		if err := p.CheckTaskRef(meta.Task); err != nil {
+			return nil, err
+		}
+		if meta.Kind == pad.KindTask {
+			if err := p.CheckTaskOwner(meta.Task, req.Author); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(p.Sections) >= s.limits.MaxSectionsPerPad {
+		return nil, coded(CodeLimitExceeded, "pad %s already holds %d sections (the limit)", req.Ref, len(p.Sections))
+	}
+
+	warnings := p.SilenceWarnings(meta.To, time.Now())
+
+	n := p.Last().N + 1
 	now := time.Now()
-	chunk := renderSection(n, author, title, now, content)
+	chunk := pad.RenderSection(n, req.Author, req.Title, now, meta, req.Content)
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		chunk = "\n" + chunk
 	}
@@ -290,11 +363,12 @@ func (s *Store) Post(ref, author, title, content, password string) (*Pad, error)
 		return nil, err
 	}
 
-	pad.Sections = append(pad.Sections, Section{
-		N: n, Author: author, Title: title, TS: now.Unix(),
-		Content: strings.TrimRight(content, "\n") + "\n",
+	p.Sections = append(p.Sections, Section{
+		N: n, Author: req.Author, Title: req.Title, TS: now.Unix(),
+		Content: strings.TrimRight(req.Content, "\n") + "\n",
+		Meta:    meta,
 	})
-	return pad, nil
+	return &PostResult{Pad: p, Section: n, Task: meta.Task, Warnings: warnings}, nil
 }
 
 // Get reads and parses a pad (shared flock, read-only), enforcing its password.
@@ -312,39 +386,98 @@ func (s *Store) Get(ref, password string) (*Pad, error) {
 	if err != nil {
 		return nil, err
 	}
-	pad, err := parsePad(project, id, data)
+	p, err := pad.Parse(project, id, data)
 	if err != nil {
 		return nil, fmt.Errorf("pad %s is corrupt: %w", ref, err)
 	}
-	if err := checkPassword(pad.PasswordHash, password); err != nil {
+	if err := checkPassword(p.PasswordHash, password); err != nil {
 		return nil, err
 	}
-	return pad, nil
+	return p, nil
 }
 
-// Wait blocks until the pad has a section numbered above since, the timeout elapses,
-// or ctx is cancelled. It returns the freshly parsed pad and whether anything new
-// appeared — a timeout is NOT an error (changed=false), so callers can cleanly loop.
-// timeout <= 0 means wait until ctx is cancelled.
-func (s *Store) Wait(ctx context.Context, ref, password string, since int, timeout time.Duration) (*Pad, bool, error) {
+// WaitRequest describes what a waiter is waiting for. Since is always a SECTION number
+// regardless of kind — task events advance it even when they wake nobody.
+type WaitRequest struct {
+	Ref      string
+	Password string
+	Since    int
+	Author   string
+	Wake     Wake
+	Timeout  time.Duration // <=0 waits until the context is cancelled
+
+	// Unacked adds a second way to return: something this author addressed has gone
+	// unanswered that long. It is what puts a floor under a wait that would otherwise
+	// never end because the other agent was never listening.
+	Unacked time.Duration
+}
+
+// WaitResult is what a wait returned and why.
+type WaitResult struct {
+	Pad     *Pad
+	Changed bool
+	Reason  string // "match" | "unacked" | "" when it timed out
+
+	// Matched carries the sections that satisfied the selectors, with bodies. Skipped
+	// is the table of contents of everything else above Since: waking is selective,
+	// catch-up never is, because an agent that wakes with a silent gap answers from
+	// stale context — the exact failure the selectors exist to prevent.
+	Matched []Section
+	Skipped []Section
+	Unacked []Owed
+}
+
+// Wait blocks until the pad has a section above Since that matches the caller's
+// selectors, until something they addressed has gone unacknowledged too long, until the
+// timeout elapses, or until ctx is cancelled. A timeout is NOT an error (Changed=false),
+// so callers can cleanly loop.
+func (s *Store) Wait(ctx context.Context, req WaitRequest) (*WaitResult, error) {
+	if req.Wake.Empty() {
+		req.Wake = pad.DefaultWake()
+	}
+	if req.Wake.NeedsAuthor() && req.Author == "" {
+		return nil, coded(CodeInvalidInput, "the me/mine wake selectors need an author: pass --as (or the author parameter)")
+	}
 	deadline := time.Time{}
-	if timeout > 0 {
-		deadline = time.Now().Add(timeout)
+	if req.Timeout > 0 {
+		deadline = time.Now().Add(req.Timeout)
 	}
 	for {
-		pad, err := s.Get(ref, password)
+		p, err := s.Get(req.Ref, req.Password)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
-		if pad.Last().N > since {
-			return pad, true, nil
+		res := &WaitResult{Pad: p}
+		for _, sec := range p.Select(pad.Selector{Since: req.Since}).Sections {
+			if p.Wakes(sec, req.Author, req.Wake) {
+				res.Matched = append(res.Matched, sec)
+				continue
+			}
+			sec.Content = ""
+			res.Skipped = append(res.Skipped, sec)
+		}
+		if len(res.Matched) > 0 {
+			res.Changed, res.Reason = true, "match"
+			return res, nil
+		}
+		if req.Unacked > 0 && req.Author != "" {
+			cutoff := time.Now().Add(-req.Unacked)
+			for _, o := range p.AwaitedBy(req.Author) {
+				if time.Unix(o.TS, 0).Before(cutoff) {
+					res.Unacked = append(res.Unacked, o)
+				}
+			}
+			if len(res.Unacked) > 0 {
+				res.Changed, res.Reason = true, "unacked"
+				return res, nil
+			}
 		}
 		if !deadline.IsZero() && !time.Now().Before(deadline) {
-			return pad, false, nil
+			return res, nil
 		}
 		select {
 		case <-ctx.Done():
-			return pad, false, ctx.Err()
+			return res, ctx.Err()
 		case <-time.After(waitPollInterval):
 		}
 	}
@@ -367,15 +500,17 @@ type PadMeta struct {
 	LastTS       int64    `json:"last_ts"`
 	CreatedTS    int64    `json:"created_ts"`
 	Protected    bool     `json:"protected"`
+	OpenTasks    int      `json:"open_tasks,omitempty"`
+	Overdue      int      `json:"overdue,omitempty"`
 }
 
 // meta reduces a parsed pad to its listing entry.
 func meta(p *Pad) PadMeta {
 	last := p.Last()
-	return PadMeta{
+	m := PadMeta{
 		Ref:          p.Ref(),
 		Project:      p.Project,
-		Title:        p.Sections[0].Title,
+		Title:        p.Title(),
 		SectionCount: len(p.Sections),
 		Authors:      p.Authors(),
 		LastAuthor:   last.Author,
@@ -383,6 +518,12 @@ func meta(p *Pad) PadMeta {
 		CreatedTS:    p.CreatedTS,
 		Protected:    p.Protected(),
 	}
+	for _, t := range p.Tasks() {
+		if t.Open() {
+			m.OpenTasks++
+		}
+	}
+	return m
 }
 
 // List returns pad metadata for one project ("" = all projects), newest activity
@@ -412,16 +553,57 @@ func (s *Store) List(project string) (pads []PadMeta, warnings []string, err err
 				continue
 			}
 			id := strings.TrimSuffix(e.Name(), ".md")
-			pad, err := s.readNoPassword(p, id)
+			parsed, err := s.readNoPassword(p, id)
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf("%s-%s: %v", p, id, err))
 				continue
 			}
-			pads = append(pads, meta(pad))
+			pads = append(pads, meta(parsed))
 		}
 	}
 	sort.Slice(pads, func(i, j int) bool { return pads[i].LastTS > pads[j].LastTS })
 	return pads, warnings, nil
+}
+
+// StuckEntry is one overdue assignment, with the pad it lives in. It answers the
+// question a person actually opens the UI with — "what stalled overnight?" — which
+// spans pads, so answering it per-pad would mean opening every pad to find the one
+// that is stuck.
+type StuckEntry struct {
+	Ref string `json:"ref"`
+	Owed
+}
+
+// Stuck lists every assignment across the store (or one project) that has gone
+// unacknowledged for longer than olderThan, oldest first. Protected pads are skipped:
+// their routing metadata is above the level a listing publishes.
+func (s *Store) Stuck(project string, olderThan time.Duration) ([]StuckEntry, error) {
+	pads, _, err := s.List(project)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := time.Now().Add(-olderThan)
+	var out []StuckEntry
+	for _, m := range pads {
+		if m.Protected {
+			continue
+		}
+		pr, id, err := ParseRef(m.Ref)
+		if err != nil {
+			continue
+		}
+		parsed, err := s.readNoPassword(pr, id)
+		if err != nil {
+			continue
+		}
+		for _, o := range parsed.Owed() {
+			if time.Unix(o.TS, 0).Before(cutoff) {
+				out = append(out, StuckEntry{Ref: m.Ref, Owed: o})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TS < out[j].TS })
+	return out, nil
 }
 
 // Meta returns ONE pad's listing metadata, plus the title of its last section. Like
@@ -436,15 +618,30 @@ func (s *Store) Meta(ref string) (PadMeta, string, error) {
 	if err != nil {
 		return PadMeta{}, "", err
 	}
-	pad, err := s.readNoPassword(project, id)
+	p, err := s.readNoPassword(project, id)
 	if err != nil {
 		return PadMeta{}, "", err
 	}
 	lastTitle := ""
-	if !pad.Protected() {
-		lastTitle = pad.Last().Title
+	if !p.Protected() {
+		lastTitle = p.Last().Title
 	}
-	return meta(pad), lastTitle, nil
+	return meta(p), lastTitle, nil
+}
+
+// LastSection returns one pad's final section, metadata only. Change notifications need
+// its routing and task fields to say something useful ("T3 → done" rather than "the pad
+// changed"); the caller is responsible for withholding them on a protected pad.
+func (s *Store) LastSection(ref string) (Section, error) {
+	project, id, err := ParseRef(ref)
+	if err != nil {
+		return Section{}, err
+	}
+	p, err := s.readNoPassword(project, id)
+	if err != nil {
+		return Section{}, err
+	}
+	return p.Last(), nil
 }
 
 // readNoPassword parses a pad without the password gate — for metadata listings only,
@@ -462,7 +659,7 @@ func (s *Store) readNoPassword(project, id string) (*Pad, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parsePadMeta(project, id, data)
+	return pad.ParseMeta(project, id, data)
 }
 
 // ProjectInfo is one project's listing entry.
@@ -566,4 +763,14 @@ func newPadID() (string, error) {
 		out[i] = idAlphabet[n.Int64()]
 	}
 	return string(out), nil
+}
+
+// containsStr reports membership in a small slice.
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

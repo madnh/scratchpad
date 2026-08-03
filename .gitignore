@@ -1,5 +1,7 @@
 bin/
 dist/
 .tmp/
-.claude/settings.json
+# .claude/settings.json is the SHARED, checked-in config (the session hook, the plugins
+# this repo expects) — that is the whole point of it, so it is not ignored. Personal
+# overrides belong in settings.local.json, which is.
 .claude/settings.local.json

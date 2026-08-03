@@ -30,12 +30,13 @@ import { confirm } from "/vendor/puredashboard/dialog.js";
 import { menu } from "/vendor/puredashboard/menu.js";
 
 import "/components/pad-outline.js";
+import "/components/pad-tasks.js";
 
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
 import * as prefs from "/lib/prefs.js";
-import { el, pageHead, skeleton, errorView, copyButton, agentChips } from "/lib/ui.js";
+import { el, pageHead, skeleton, errorView, copyButton, setChildren } from "/lib/ui.js";
 import { relTime, absTime, clockTime, bytes, agentInitials, agentColorIndex, safeText, cutChars } from "/lib/fmt.js";
 
 // Menu icons. Inline SVG, following the library's own rule that a component carries
@@ -66,6 +67,13 @@ export default function mount(outlet, ctx) {
   let showingLatest = true; // false once the person jumps back into the history
   let pendingNew = 0;       // sections that arrived while reading further back
   let authorFilter = "";
+  // The task whose thread the transcript is narrowed to, 0 for the whole pad. It is the
+  // person's version of what pad_tasks gives an agent: read the eight sections about
+  // one piece of work instead of the six hundred around them.
+  let taskFilter = 0;
+  let tasks = [];
+  let rail = prefs.rail();   // "outline" | "tasks"
+  let tasksOpenOnly = false;
   let expandAll = false;
   // Reading direction. Newest-first is the default — opening a pad to see what just
   // happened is the common visit — but a pad read from the start is a conversation,
@@ -85,6 +93,29 @@ export default function mount(outlet, ctx) {
   // focus of whoever was typing it, every time an agent posted a section.
   const body = el("div", { class: "pad__transcript" });
   const outline = el("pad-outline");
+  // The board shares the rail with the outline rather than claiming one of its own:
+  // both are indexes of the same pad, and a second rail would take the room the
+  // transcript needs. A two-button strip switches between them.
+  const taskPanel = el("pad-tasks");
+  const railTabs = el("div", { class: "rail__tabs", role: "tablist" });
+  const railTab = (id, label) => {
+    const b = el("button", {
+      type: "button", class: "rail__tab", role: "tab", text: label,
+      onclick: () => setRail(id),
+    });
+    b.dataset.rail = id;
+    return b;
+  };
+  // Closing belongs to the rail, not to the panel inside it: what disappears is the
+  // whole column — tabs, outline and board — so the control sits in the strip that
+  // frames them and works whichever tab is showing.
+  const railClose = el("button", {
+    type: "button", class: "rail__collapse", text: "«",
+    title: "Hide the rail", "aria-label": "Hide the rail",
+    onclick: () => setOutline(false),
+  });
+  railTabs.append(railTab("outline", "Outline"), railTab("tasks", "Tasks"), railClose);
+  const railBox = el("div", { class: "pad__rail" }, railTabs, outline, taskPanel);
   // The way back. A rail that closes with a « and leaves nothing behind is a rail you
   // have to go looking for — the toolbar's toggle is across the page and reads like
   // its neighbours. This puts the opener exactly where the closer was.
@@ -93,16 +124,16 @@ export default function mount(outlet, ctx) {
     title: "Show the outline", "aria-label": "Show the outline",
     onclick: () => setOutline(true),
   });
-  const layout = el("div", { class: "pad__layout" }, outline, outlineReopen, body);
+  const layout = el("div", { class: "pad__layout" }, railBox, outlineReopen, body);
   // The toolbar's live parts, filled in by mountFrame().
   let frame = null;
   let watchSwitch = null;
-  let roster = null;        // the roster chips in the meta row, repainted when authors change
+  let peopleStrip = null;   // the participants strip, which is also the pad's roster
+  let peopleKey = "";       // what that strip was last painted from
   let authorOptions = "";   // the author list the filter was last built from
 
   outline.loadPreview = (n, opts) => api.sectionPreview(ref, n, opts);
   outline.addEventListener("pick", (e) => pickSection(e.detail));
-  outline.addEventListener("close", () => setOutline(false));
 
   // ── data ───────────────────────────────────────────────────────────────────
 
@@ -122,6 +153,7 @@ export default function mount(outlet, ctx) {
     // goes into history and session restore — so a protected pad the person never
     // unlocked must not leave its title there.
     setDocTitle();
+    loadTasks();
     await loadLatest();
   }
 
@@ -338,7 +370,13 @@ export default function mount(outlet, ctx) {
   }
 
   function renderTranscript() {
-    const visible = authorFilter ? loaded.filter((s) => s.author === authorFilter) : loaded;
+    // Two independent narrowings: by who is speaking, and by which piece of work is
+    // being spoken about. The task one is matched against the TOC, because a section
+    // belongs to a task whether or not its body happens to be loaded.
+    const inTask = new Set(taskFilter ? pad.sections.filter((s) => s.task === taskFilter).map((s) => s.n) : []);
+    let visible = loaded;
+    if (authorFilter) visible = visible.filter((s) => s.author === authorFilter);
+    if (taskFilter) visible = visible.filter((s) => inTask.has(s.n));
     const newestFirst = order === "newest";
 
     body.replaceChildren();
@@ -381,9 +419,10 @@ export default function mount(outlet, ctx) {
   function mountFrame() {
     const sentinel = el("div", { class: "pad__sticky-sentinel" });
     frame = { sentinel, ...buildToolbar() };
-    outlet.replaceChildren(
+    setChildren(outlet,
       pageHead(pad.title || ref, null, copyButton(ref), padMenuButton()),
       metaRow(),
+      peopleRow(),
       sentinel,
       frame.toolbar,
       layout,
@@ -401,7 +440,50 @@ export default function mount(outlet, ctx) {
     outline.order = order;
     outline.filter = authorFilter;
     outline.range = loaded.length ? { from: loaded[0].n, to: loaded.at(-1).n } : null;
+    taskPanel.tasks = tasks;
+    taskPanel.active = taskFilter;
+    taskPanel.openOnly = tasksOpenOnly;
+    applyRail();
     applyOutline();
+  }
+
+  // Which half of the rail is showing. It is a property of the reader, not of the pad,
+  // so it survives navigating to another pad.
+  function applyRail() {
+    railBox.dataset.rail = rail;
+    for (const b of railTabs.children) b.setAttribute("aria-selected", String(b.dataset.rail === rail));
+  }
+
+  function setRail(which) {
+    rail = which;
+    prefs.setRail(which);
+    applyRail();
+  }
+
+  taskPanel.addEventListener("pick", (e) => {
+    taskFilter = Number(e.detail) || 0;
+    taskPanel.active = taskFilter;
+    render();
+  });
+  taskPanel.addEventListener("open-only", (e) => {
+    tasksOpenOnly = !!e.detail;
+    taskPanel.openOnly = tasksOpenOnly;
+  });
+
+  // The board is fetched beside the pad view rather than inside it, and refreshed on
+  // every change event: a status event arrives on any agent post, and a board that
+  // lags the transcript beside it is worse than no board.
+  async function loadTasks() {
+    try {
+      const res = await api.tasks(ref);
+      if (disposed) return;
+      tasks = res?.tasks || [];
+      taskPanel.tasks = tasks;
+    } catch {
+      // A protected pad that is still locked, or a transient failure: the outline and
+      // the transcript are unaffected, so this stays silent rather than taking the
+      // page down with it.
+    }
   }
 
   // Below the breakpoint there is no room for a rail beside the transcript, so the
@@ -436,7 +518,10 @@ export default function mount(outlet, ctx) {
       if (e.key === "Escape") setOutline(false);
       return;
     }
-    if (outline.contains(e.target) || outlineReopen.contains(e.target)) return;
+    // The whole rail, not just the outline: the tab strip and its close button are
+    // part of the overlay, and dismissing on a click there would fight the control
+    // the click was aimed at.
+    if (railBox.contains(e.target) || outlineReopen.contains(e.target)) return;
     setOutline(false);
   }
   document.addEventListener("pointerdown", dismissOverlay, true);
@@ -538,6 +623,66 @@ export default function mount(outlet, ctx) {
   const sizeWatch = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleActive) : null;
   sizeWatch?.observe(body);
 
+  // The participants strip: per agent, when they were last heard from and what is
+  // waiting on them. It is the first thing worth looking at in a pad with five agents
+  // — a person opens the UI to find out where coordination has broken, not to read.
+  //
+  // It deliberately shows LAST ACTIVITY, not presence. Presence cannot be derived from
+  // an append-only transcript, and it would lie in both directions: an agent busy
+  // working is not inside a wait, and an agent parked in a wait with the wrong
+  // selectors is not listening for you.
+  // It is also the pad's ROSTER, and the only one: a second row listing the same agents
+  // — one with faces, one with their standing — asks the reader to look twice to learn
+  // less. So the faces live here, on the row that also says when each was last heard
+  // from, and an agent who was addressed and never answered appears too. That last part
+  // is why this is the row that survived: it is the only one that can show them.
+  function peopleRow() {
+    peopleStrip = el("div", { class: "pad__people" });
+    paintPeople();
+    return peopleStrip;
+  }
+
+  // Repainted from a key rather than on every call: syncToolbar runs on scrolls and
+  // filter changes too, and rebuilding this strip under a hovering cursor for a scroll
+  // event would be work nobody asked for.
+  //
+  // The key is what is ON SCREEN, not the data behind it. Every age here is relative,
+  // so the two things that change it are an agent moving (new data) and time passing
+  // (same data, different words) — and a key over the raw participants would catch only
+  // the first, which is how a strip that says "2 minutes ago" comes to say it an hour
+  // later. Keying on the rendered strings covers both, and still skips the rebuild in
+  // the common case where a minute has ticked and no wording actually changed.
+  function paintPeople() {
+    const view = (pad.participants || []).map((p) => ({
+      author: p.author,
+      last: p.last_section ? `#${p.last_section} · ${relTime(p.last_ts)}` : "never posted",
+      lastTitle: p.last_ts ? absTime(p.last_ts) : "has never posted in this pad",
+      owes: (p.owes || []).map((o) => `${o.what} ${relTime(o.ts)}`).join(" · "),
+      owesTitle: (p.owes || []).map((o) => `${o.what}: ${o.title || ""}`).join("\n"),
+    }));
+    const key = JSON.stringify(view);
+    if (key === peopleKey) return;
+    peopleKey = key;
+
+    const cells = view.map((v) => {
+      const face = el("span", {
+        class: "person__avatar", text: agentInitials(v.author), "aria-hidden": "true",
+      });
+      face.style.setProperty("--avatar-bg", `var(--avatar-c${agentColorIndex(v.author)})`);
+      const cell = el("div", { class: "person", dataset: { owing: String(!!v.owes) } },
+        face,
+        el("span", { class: "person__name", text: v.author }),
+        el("span", { class: "person__last", title: v.lastTitle, text: v.last }),
+      );
+      if (v.owes) {
+        cell.append(el("span", { class: "person__owes", title: v.owesTitle, text: v.owes }));
+      }
+      return cell;
+    });
+    peopleStrip.replaceChildren(...cells);
+    peopleStrip.hidden = !cells.length;
+  }
+
   function metaRow() {
     const row = el("div", { class: "pad__meta" },
       el("span", { class: "ref", text: ref }),
@@ -554,12 +699,10 @@ export default function mount(outlet, ctx) {
       toast(e.target.checked ? `Watching ${ref}` : `Stopped watching ${ref}`, { type: "info" });
     });
     row.append(watchSwitch);
-
-    // The roster gets the row to itself (it is the one part that grows with the pad),
-    // and it is shown WHOLE here: this page is where you come to find out who is on a
-    // conversation, so a "+2" would be hiding the answer.
-    roster = el("div", { class: "pad__agents" }, agentChips(pad.authors || [], { avatar: true }));
-    row.append(roster);
+    // No roster here: the participants strip below IS this pad's roster, and it is shown
+    // whole — this page is where you come to find out exactly who is on a conversation,
+    // so a "+2" would be hiding the answer. The pads TABLE still caps its own list,
+    // because a row there has one line's worth of room.
     return row;
   }
 
@@ -639,15 +782,18 @@ export default function mount(outlet, ctx) {
     // so it is written only when it actually changed. The roster comes from the server
     // (`authors` on the pad response) rather than being re-derived here, so the filter,
     // the pads table and the CLI all agree on who is on a pad.
+    //
+    // U+001F joins the comparison key because an author name cannot contain it — a
+    // plain separator would let two different lists compare equal — and unlike a NUL it
+    // leaves this file text, which is what keeps grep, rg and diff viewers reading it.
     const authors = pad.authors || [];
-    if (authors.join(" ") !== authorOptions) {
-      authorOptions = authors.join(" ");
+    if (authors.join("\u001f") !== authorOptions) {
+      authorOptions = authors.join("\u001f");
       f.filter.options = authors.map((a) => ({ value: a, label: a }));
-      // The header's roster is the same list, so it is repainted on the same condition
-      // — an agent joining a pad shows up without a reload, and nothing moves until one
-      // does.
-      roster?.replaceChildren(agentChips(authors, { avatar: true }));
     }
+    // The strip has its own key, because it moves on more than the roster does: an agent
+    // falling behind changes it while the list of names stays exactly the same.
+    paintPeople();
     if (f.filter.value !== authorFilter) f.filter.value = authorFilter;
 
     f.orderBtn.textContent = order === "newest" ? "Oldest first" : "Newest first";
@@ -810,6 +956,7 @@ export default function mount(outlet, ctx) {
           el("span", { class: "msg__n", text: `#${sec.n}` }),
           el("span", { class: "msg__time", title: absTime(sec.ts), text: clockTime(sec.ts) }),
           el("span", { text: bytes(sec.content.length) }),
+          ...routingChips(sec),
         ),
         bubble,
       ),
@@ -820,6 +967,50 @@ export default function mount(outlet, ctx) {
     // render and remembers that afterwards.
     node.style.setProperty("--msg-est", `${(estimateRem(sec.content.length, clamped) + 4.5).toFixed(1)}rem`);
     return node;
+  }
+
+  // Routing, shown where the section is. This is what turns a transcript into a
+  // conversation you can follow: who a section was for, what it answers, and whether it
+  // is a task event (which behaves differently — it does not take the turn).
+  //
+  // All of it is free: /api/pads/{ref} already returns the pad's ENTIRE table of
+  // contents, so the reply links and the reply count come from data the page holds, with
+  // no extra request.
+  //
+  // A broadcast draws no chip. Absent `to` already means everyone, and a chip on every
+  // section written before addressing existed would be noise, not information.
+  function routingChips(sec) {
+    const meta = pad.sections.find((s) => s.n === sec.n) || sec;
+    const out = [];
+    if (meta.task) {
+      const chip = el("button", {
+        type: "button", class: "chip chip--task", dataset: { status: meta.status || "" },
+        title: `Show only what concerns T${meta.task}`,
+        text: meta.status ? `T${meta.task} ${meta.status}` : `T${meta.task}`,
+        onclick: () => { taskFilter = taskFilter === meta.task ? 0 : meta.task; syncOutline(); render(); },
+      });
+      out.push(chip);
+    }
+    for (const target of meta.to || []) {
+      out.push(el("span", { class: "chip chip--to", text: `→ ${target}` }));
+    }
+    if (meta.re) {
+      out.push(el("button", {
+        type: "button", class: "chip chip--re", text: `↩ #${meta.re}`,
+        title: `Go to the section this answers`,
+        onclick: () => pickSection(meta.re),
+      }));
+    }
+    const replies = pad.sections.filter((s) => s.re === sec.n);
+    if (replies.length) {
+      out.push(el("button", {
+        type: "button", class: "chip chip--replies",
+        text: `${replies.length} ${replies.length === 1 ? "reply" : "replies"}`,
+        title: replies.map((r) => `#${r.n} ${r.author}: ${r.title}`).join("\n"),
+        onclick: () => pickSection(replies[0].n),
+      }));
+    }
+    return out;
   }
 
   // The pad's page is the ONLY place a pad can be deleted. A destructive action
@@ -911,6 +1102,7 @@ export default function mount(outlet, ctx) {
       pad = await api.pad(ref);
     } catch { return; }
     if (disposed) return;
+    loadTasks();
 
     const added = pad.section_count - previous;
     if (added <= 0) { render(); return; }
@@ -961,8 +1153,16 @@ export default function mount(outlet, ctx) {
 
   loadPad();
 
+  // Nothing arrives on a quiet pad, and "last heard from 2 minutes ago" is exactly the
+  // reading a person acts on — left ticking at whatever it said when the tab opened, it
+  // reports a team that is all present. The sidebar already keeps its own ages honest
+  // this way; a minute is close enough here too, and the display key means a tick that
+  // changes no wording costs one comparison.
+  const ageTick = setInterval(() => { if (!disposed && peopleStrip) paintPeople(); }, 60_000);
+
   return () => {
     disposed = true;
+    clearInterval(ageTick);
     off();
     offPrefs();
     // The lazy elements disconnect their own observers as they leave the DOM.

@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/madnh/scratchpad/internal/config"
+	"github.com/madnh/scratchpad/internal/pad"
 	"github.com/madnh/scratchpad/internal/store"
 )
 
@@ -31,7 +32,8 @@ func newPadCmd() *cobra.Command {
 			"MCP agents on one store is safe.",
 	}
 	cmd.AddCommand(newPadCreateCmd(), newPadPostCmd(), newPadGetCmd(), newPadReadCmd(),
-		newPadWaitCmd(), newPadListCmd(), newPadDeleteCmd(), newPadPurgeCmd())
+		newPadWaitCmd(), newPadTasksCmd(), newPadWhoCmd(), newPadListCmd(),
+		newPadDeleteCmd(), newPadPurgeCmd())
 	return cmd
 }
 
@@ -102,15 +104,60 @@ func readContent(args []string) (string, error) {
 }
 
 // printSections writes sections to stdout in the pad file's own on-disk format
-// (header line, ts comment, blank line, content) — stable, documented, pipeable.
+// (header line, metadata comment, blank line, content) — stable, documented, pipeable.
+// Rendering goes through the shared renderer so the printed form can never drift from
+// what is actually stored.
 func printSections(w io.Writer, sections []store.Section) {
 	for i, sec := range sections {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		fmt.Fprintf(w, "# %d - %s - %s\n", sec.N, sec.Author, sec.Title)
-		fmt.Fprintf(w, "<!-- ts: %s -->\n\n", time.Unix(sec.TS, 0).UTC().Format(time.RFC3339))
-		fmt.Fprint(w, sec.Content)
+		fmt.Fprint(w, strings.TrimPrefix(
+			pad.RenderSection(sec.N, sec.Author, sec.Title, time.Unix(sec.TS, 0), sec.Meta, sec.Content), "\n"))
+	}
+}
+
+// printTOC writes a table of contents with the routing columns that make a long pad
+// navigable: who a section was for, what it answers, and which task it belongs to.
+func printTOC(w io.Writer, sections []store.Section) {
+	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "N\tAUTHOR\tTS\tTO\tRE\tTASK\tTITLE")
+	for _, sec := range sections {
+		re, task := "", ""
+		if sec.Re > 0 {
+			re = "§" + strconv.Itoa(sec.Re)
+		}
+		if sec.Task > 0 {
+			task = "T" + strconv.Itoa(sec.Task)
+			if sec.Status != "" {
+				task += " " + string(sec.Status)
+			}
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", sec.N, sec.Author,
+			time.Unix(sec.TS, 0).UTC().Format(time.RFC3339),
+			strings.Join(sec.To, ","), re, task, sec.Title)
+	}
+	_ = tw.Flush()
+}
+
+// printOwed writes outstanding acknowledgements, oldest first — the ones most likely to
+// need a human.
+func printOwed(w io.Writer, owed []store.Owed, now time.Time) {
+	for _, o := range owed {
+		fmt.Fprintf(w, "  %s  %s -> %s  (%s ago)  %s\n", o.What, o.From, o.To,
+			humanAge(now.Sub(time.Unix(o.TS, 0))), o.Title)
+	}
+}
+
+// humanAge renders a duration the way a person reads one.
+func humanAge(d time.Duration) string {
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 }
 
@@ -142,12 +189,12 @@ func newPadCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pad, pw, err := st.CreatePad(config.ResolveProject(cfg, project), a, title, content, protect)
+			created, pw, err := st.CreatePad(config.ResolveProject(cfg, project), a, title, content, protect)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "ref: %s\n", pad.Ref())
+			fmt.Fprintf(out, "ref: %s\n", created.Ref())
 			fmt.Fprintf(out, "section: 1\nnext: 2\n")
 			if pw != "" {
 				fmt.Fprintf(out, "password: %s\n", pw)
@@ -172,12 +219,24 @@ func newPadPostCmd() *cobra.Command {
 		author   string
 		title    string
 		password string
+		to       []string
+		re       int
+		taskOpen bool
+		task     int
+		status   string
 	)
 	cmd := &cobra.Command{
 		Use:   "post <ref> [content|-]",
 		Short: "Post the next section to a pad (turn-based)",
-		Long: "Append a section. The author of the pad's last section may not post again — a\n" +
-			"not_your_turn error means wait for the other agent (`pad wait`).",
+		Long: "Append a section. The author of the pad's last MESSAGE may not post again — a\n" +
+			"not_your_turn error means wait for another agent (`pad wait`). Task events are\n" +
+			"exempt, so a coordinator can open several tasks in a row.\n\n" +
+			"--to addresses the section: everyone can still READ it, but only those named are\n" +
+			"woken by `pad wait --wake-for me`. --re anchors it to the section it answers, and\n" +
+			"also addresses that section's author.\n\n" +
+			"--task-open opens a task (requires --to: a task must have an owner) and prints the\n" +
+			"number it was given. --task with --status moves an existing one; only its owners\n" +
+			"(their own slice) or its opener (reassign, drop, force-close) may do that.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, _, err := dir.open()
@@ -192,14 +251,39 @@ func newPadPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pad, err := st.Post(args[0], a, title, content, password)
+			if taskOpen && task > 0 {
+				return fmt.Errorf("pass either --task-open (a new task) or --task <n> (an existing one), not both")
+			}
+			meta := pad.Meta{To: to, Re: re, Task: task, Status: pad.Status(status)}
+			// Opening a task or reporting a status puts the section in the task's
+			// RECORD. `--task N` on its own is the other layer — a message that merely
+			// cross-references the work — so it keeps the turn rule and does not stand
+			// in for the owner's answer.
+			if taskOpen || status != "" {
+				meta.Kind = pad.KindTask
+			}
+			res, err := st.Post(store.PostRequest{
+				Ref: args[0], Author: a, Title: title, Content: content,
+				Password: password, Meta: meta, OpenTask: taskOpen,
+			})
 			if err != nil {
 				return err
 			}
-			n := pad.Last().N
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "ref: %s\n", pad.Ref())
-			fmt.Fprintf(out, "section: %d\nnext: %d\n", n, n+1)
+			fmt.Fprintf(out, "ref: %s\n", res.Pad.Ref())
+			fmt.Fprintf(out, "section: %d\nnext: %d\n", res.Section, res.Section+1)
+			if res.Task > 0 {
+				verb := "task"
+				if taskOpen {
+					verb = "opened"
+				}
+				fmt.Fprintf(out, "%s: T%d\n", verb, res.Task)
+			}
+			// Warnings go to stderr: the post SUCCEEDED, and stdout must stay clean for
+			// whatever is parsing it.
+			for _, w := range res.Warnings {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
+			}
 			return nil
 		},
 	}
@@ -208,6 +292,13 @@ func newPadPostCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&title, "title", "", "one-line title of this section (required)")
 	f.StringVar(&password, "password", "", "the pad's password (when protected)")
+	f.StringSliceVar(&to, "to", nil, "authors this section is addressed to (comma-separated); omit to broadcast")
+	f.IntVar(&re, "re", 0, "the section number this one answers")
+	f.BoolVar(&taskOpen, "task-open", false, "open a new task (needs --to) and print its number")
+	f.IntVar(&task, "task", 0,
+		"the number of an existing task this section concerns; on its own it merely references the task and stays an ordinary message")
+	f.StringVar(&status, "status", "",
+		"move the task: open, wip, blocked, done or dropped — this is what makes the section a task event")
 	_ = cmd.MarkFlagRequired("title")
 	return cmd
 }
@@ -216,40 +307,61 @@ func newPadGetCmd() *cobra.Command {
 	var (
 		dir      dirFlags
 		password string
+		author   string
+		kind     string
 	)
 	cmd := &cobra.Command{
 		Use:   "get <ref>",
 		Short: "Compact pad status: table of contents + whose turn (no content)",
-		Args:  cobra.ExactArgs(1),
+		Long: "Print the pad's table of contents with its routing columns (to, re, task) and the\n" +
+			"turn state, without any section bodies. With --as, also print your inbox: what\n" +
+			"was addressed to you since your own last post — the cheap way back into a long\n" +
+			"pad after being away.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, _, err := dir.open()
 			if err != nil {
 				return err
 			}
-			pad, err := st.Get(args[0], password)
+			p, err := st.Get(args[0], password)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			last := pad.Last()
-			fmt.Fprintf(out, "ref: %s\n", pad.Ref())
-			fmt.Fprintf(out, "project: %s\n", pad.Project)
-			fmt.Fprintf(out, "created: %s\n", time.Unix(pad.CreatedTS, 0).UTC().Format(time.RFC3339))
-			fmt.Fprintf(out, "sections: %d\n", len(pad.Sections))
-			fmt.Fprintf(out, "authors: %s\n", strings.Join(pad.Authors(), ", "))
-			fmt.Fprintf(out, "protected: %t\n", pad.Protected())
-			fmt.Fprintf(out, "turn: %s (last: %s)\n\n", pad.TurnState().WaitingFor, last.Author)
-			w := tabwriter.NewWriter(out, 2, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "N\tAUTHOR\tTS\tTITLE")
-			for _, sec := range pad.Sections {
-				fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", sec.N, sec.Author,
-					time.Unix(sec.TS, 0).UTC().Format(time.RFC3339), sec.Title)
+			last := p.Last()
+			fmt.Fprintf(out, "ref: %s\n", p.Ref())
+			fmt.Fprintf(out, "project: %s\n", p.Project)
+			fmt.Fprintf(out, "created: %s\n", time.Unix(p.CreatedTS, 0).UTC().Format(time.RFC3339))
+			fmt.Fprintf(out, "sections: %d\n", len(p.Sections))
+			fmt.Fprintf(out, "authors: %s\n", strings.Join(p.Authors(), ", "))
+			fmt.Fprintf(out, "protected: %t\n", p.Protected())
+			fmt.Fprintf(out, "turn: %s (last: %s)\n", p.TurnState().WaitingFor, last.Author)
+			if a := strings.TrimSpace(author); a != "" {
+				in := p.Inbox(a)
+				fmt.Fprintf(out, "\ninbox for %s (your last post: §%d)\n", a, in.Since)
+				if len(in.Unread) == 0 {
+					fmt.Fprintln(out, "  nothing addressed to you since then")
+				}
+				printTOC(out, in.Unread)
+				if len(in.Owes) > 0 {
+					fmt.Fprintln(out, "you owe:")
+					printOwed(out, in.Owes, time.Now())
+				}
+				if len(in.Awaiting) > 0 {
+					fmt.Fprintln(out, "waiting on others:")
+					printOwed(out, in.Awaiting, time.Now())
+				}
 			}
-			return w.Flush()
+			fmt.Fprintln(out)
+			printTOC(out, p.Select(store.Selector{Kind: pad.Kind(kind)}).Sections)
+			return nil
 		},
 	}
 	dir.bind(cmd)
-	cmd.Flags().StringVar(&password, "password", "", "the pad's password (when protected)")
+	authorFlag(cmd, &author)
+	f := cmd.Flags()
+	f.StringVar(&password, "password", "", "the pad's password (when protected)")
+	f.StringVar(&kind, "kind", "", "limit the table of contents to one stream: message or task")
 	return cmd
 }
 
@@ -258,11 +370,13 @@ func newPadReadCmd() *cobra.Command {
 		dir      dirFlags
 		section  int
 		since    int
+		kind     string
+		task     int
 		password string
 	)
 	cmd := &cobra.Command{
 		Use:   "read <ref>",
-		Short: "Print section contents (one, newer-than, or the whole pad)",
+		Short: "Print section contents (one, newer-than, a task's thread, or the whole pad)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if section != 0 && since != 0 {
@@ -272,32 +386,17 @@ func newPadReadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pad, err := st.Get(args[0], password)
+			p, err := st.Get(args[0], password)
 			if err != nil {
 				return err
 			}
-			sections := pad.Sections
-			switch {
-			case section != 0:
-				sections = nil
-				for _, sec := range pad.Sections {
-					if sec.N == section {
-						sections = []store.Section{sec}
-						break
-					}
-				}
-				if sections == nil {
-					return fmt.Errorf("pad %s has no section %d (last is %d)", pad.Ref(), section, pad.Last().N)
-				}
-			case since != 0:
-				sections = nil
-				for _, sec := range pad.Sections {
-					if sec.N > since {
-						sections = append(sections, sec)
-					}
-				}
+			res := p.Select(store.Selector{
+				Section: section, Since: since, Kind: pad.Kind(kind), Task: task,
+			})
+			if section != 0 && len(res.Sections) == 0 {
+				return fmt.Errorf("pad %s has no section %d (last is %d)", p.Ref(), section, p.Last().N)
 			}
-			printSections(cmd.OutOrStdout(), sections)
+			printSections(cmd.OutOrStdout(), res.Sections)
 			return nil
 		},
 	}
@@ -305,6 +404,8 @@ func newPadReadCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.IntVar(&section, "section", 0, "print exactly this section number")
 	f.IntVar(&since, "since", 0, "print every section numbered above this")
+	f.StringVar(&kind, "kind", "", "limit to one stream: message or task")
+	f.IntVar(&task, "task", 0, "print one task's thread (its opening section and everything referencing it)")
 	f.StringVar(&password, "password", "", "the pad's password (when protected)")
 	return cmd
 }
@@ -315,22 +416,45 @@ func newPadWaitCmd() *cobra.Command {
 		since    int
 		timeout  string
 		password string
+		author   string
+		wakeFor  []string
+		unacked  string
 	)
 	cmd := &cobra.Command{
 		Use:   "wait <ref> --since <n>",
-		Short: "Block until the pad has a section newer than --since",
+		Short: "Block until a section matching your selectors arrives",
 		Long: "Wait for a new section, print it, and exit 0 — designed to run in the background\n" +
 			"and wake an agent when the reply arrives. With --timeout it exits 3 when nothing\n" +
 			"arrived in time (1 is reserved for real errors). No --timeout waits until\n" +
-			"interrupted. Unlike the MCP pad_wait tool this command has no server-side cap.",
+			"interrupted. Unlike the MCP pad_wait tool this command has no server-side cap.\n\n" +
+			"By default ANY new section wakes you. In a pad with several agents, pass --as and\n" +
+			"--wake-for me so exchanges between two OTHER agents stop interrupting you. You can\n" +
+			"still read everything — the selectors only decide what is worth waking for, and\n" +
+			"whatever wakes you, the sections you missed are still listed (on stderr) so\n" +
+			"filtering never leaves a silent gap.\n\n" +
+			"--unacked also returns when something YOU addressed has gone unanswered that long,\n" +
+			"so an agent that was never listening cannot hang this wait forever.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var d time.Duration
+			var d, un time.Duration
+			var err error
 			if timeout != "" {
-				var err error
 				if d, err = parseDuration(timeout); err != nil {
 					return err
 				}
+			}
+			if unacked != "" {
+				if un, err = parseDuration(unacked); err != nil {
+					return err
+				}
+			}
+			wake, err := pad.ParseWake(wakeFor)
+			if err != nil {
+				return err
+			}
+			a := strings.TrimSpace(author)
+			if a == "" {
+				a = strings.TrimSpace(os.Getenv(config.EnvAuthor))
 			}
 			st, _, err := dir.open()
 			if err != nil {
@@ -338,29 +462,159 @@ func newPadWaitCmd() *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			pad, changed, err := st.Wait(ctx, args[0], password, since, d)
+			res, err := st.Wait(ctx, store.WaitRequest{
+				Ref: args[0], Password: password, Since: since, Author: a,
+				Wake: wake, Timeout: d, Unacked: un,
+			})
 			if err != nil {
 				return err
 			}
-			if !changed {
+			if !res.Changed {
 				return errWaitTimeout
 			}
-			var fresh []store.Section
-			for _, sec := range pad.Sections {
-				if sec.N > since {
-					fresh = append(fresh, sec)
-				}
+			errOut := cmd.ErrOrStderr()
+			if res.Reason == "unacked" {
+				fmt.Fprintln(errOut, "unanswered — nobody may be listening:")
+				printOwed(errOut, res.Unacked, time.Now())
+				return nil
 			}
-			printSections(cmd.OutOrStdout(), fresh)
+			// The catch-up list goes to stderr so stdout stays exactly what it has always
+			// been: the sections themselves, pipeable.
+			if len(res.Skipped) > 0 {
+				fmt.Fprintf(errOut, "also missed %d section(s) that did not match your selectors:\n", len(res.Skipped))
+				printTOC(errOut, res.Skipped)
+			}
+			printSections(cmd.OutOrStdout(), res.Matched)
 			return nil
 		},
 	}
 	dir.bind(cmd)
+	authorFlag(cmd, &author)
 	f := cmd.Flags()
 	f.IntVar(&since, "since", 0, "the last section number you have seen (required)")
 	f.StringVar(&timeout, "timeout", "", "give up after this long, e.g. 90s, 10m, 2h (empty = wait until interrupted)")
+	f.StringSliceVar(&wakeFor, "wake-for", nil,
+		"what should WAKE you: any (default), me, mine, tasks, task:<n> — comma-separated, they union")
+	f.StringVar(&unacked, "unacked", "", "also return when something you addressed has gone unanswered this long, e.g. 15m")
 	f.StringVar(&password, "password", "", "the pad's password (when protected)")
 	_ = cmd.MarkFlagRequired("since")
+	return cmd
+}
+
+func newPadTasksCmd() *cobra.Command {
+	var (
+		dir      dirFlags
+		task     int
+		openOnly bool
+		password string
+	)
+	cmd := &cobra.Command{
+		Use:   "tasks <ref>",
+		Short: "The pad's task board (derived, read-only)",
+		Long: "Show where the work stands without reading the pad. A task's status is folded from\n" +
+			"the events that moved it, PER OWNER: a task shared by two agents is done only when\n" +
+			"both are, so one agent finishing cannot make the other's work disappear.\n\n" +
+			"Read-only by design — tasks are opened, moved and closed with `pad post`.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, _, err := dir.open()
+			if err != nil {
+				return err
+			}
+			p, err := st.Get(args[0], password)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if task > 0 {
+				t, ok := p.Task(task)
+				if !ok {
+					return fmt.Errorf("pad %s has no task T%d", p.Ref(), task)
+				}
+				fmt.Fprintf(out, "T%d  %s  %s\n", t.Task, t.Status, t.Title)
+				fmt.Fprintf(out, "opened by %s in §%d\n", t.Opener, t.OpenedSection)
+				for _, o := range t.Owners {
+					fmt.Fprintf(out, "  %-16s %s\n", o.Author, o.Status)
+				}
+				fmt.Fprintln(out)
+				printSections(out, p.Thread(task))
+				return nil
+			}
+			w := tabwriter.NewWriter(out, 2, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "TASK\tSTATUS\tOWNERS\tSECTIONS\tTITLE")
+			for _, t := range p.Tasks() {
+				if openOnly && !t.Open() {
+					continue
+				}
+				owners := make([]string, 0, len(t.Owners))
+				for _, o := range t.Owners {
+					mark := "..."
+					if o.Status == pad.StatusDone {
+						mark = "done"
+					}
+					owners = append(owners, o.Author+":"+mark)
+				}
+				span := fmt.Sprintf("§%d->§%d", t.OpenedSection, t.LastSection)
+				fmt.Fprintf(w, "T%d\t%s\t%s\t%s\t%s\n", t.Task, t.Status,
+					strings.Join(owners, " "), span, t.Title)
+			}
+			return w.Flush()
+		},
+	}
+	dir.bind(cmd)
+	f := cmd.Flags()
+	f.IntVar(&task, "task", 0, "show one task and its whole thread")
+	f.BoolVar(&openOnly, "open", false, "list only tasks that still need attention")
+	f.StringVar(&password, "password", "", "the pad's password (when protected)")
+	return cmd
+}
+
+func newPadWhoCmd() *cobra.Command {
+	var (
+		dir      dirFlags
+		password string
+	)
+	cmd := &cobra.Command{
+		Use:   "who <ref>",
+		Short: "Per-author last activity, and what each one owes",
+		Long: "Who has fallen behind. This deliberately reports LAST ACTIVITY and outstanding\n" +
+			"acknowledgements rather than \"who is currently waiting\": presence cannot be\n" +
+			"derived from an append-only transcript, and it would lie in both directions —\n" +
+			"an agent busy working is not inside a wait, and an agent parked in a wait with\n" +
+			"the wrong selectors is not listening for you.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, _, err := dir.open()
+			if err != nil {
+				return err
+			}
+			p, err := st.Get(args[0], password)
+			if err != nil {
+				return err
+			}
+			now := time.Now()
+			out := cmd.OutOrStdout()
+			w := tabwriter.NewWriter(out, 2, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "AUTHOR\tLAST\tAGE\tOWES")
+			for _, part := range p.Participants() {
+				owes := make([]string, 0, len(part.Owes))
+				for _, o := range part.Owes {
+					owes = append(owes, fmt.Sprintf("%s (%s)", o.What, humanAge(now.Sub(time.Unix(o.TS, 0)))))
+				}
+				// An author who has only ever been ADDRESSED has no last section, and an
+				// age counted from the epoch would print "20668d" — the exact row this
+				// command exists to make legible, rendered as noise. Say "never".
+				last, age := fmt.Sprintf("§%d", part.LastSection), humanAge(now.Sub(time.Unix(part.LastTS, 0)))
+				if part.LastSection == 0 {
+					last, age = "—", "never"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", part.Author, last, age, strings.Join(owes, " · "))
+			}
+			return w.Flush()
+		},
+	}
+	dir.bind(cmd)
+	cmd.Flags().StringVar(&password, "password", "", "the pad's password (when protected)")
 	return cmd
 }
 

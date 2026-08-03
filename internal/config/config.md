@@ -152,9 +152,14 @@ One pad = one markdown file `projects/<project>/<padid>.md`:
 Question body…
 
 # 2 - backend - Answer about API X
-<!-- ts: 2026-07-11T10:42:15Z -->
+<!-- ts: 2026-07-11T10:42:15Z; to: frontend; re: 1 -->
 
 Answer body…
+
+# 3 - pm - Order API contract
+<!-- ts: 2026-07-11T11:02:00Z; kind: task; task: 1; to: ios, android; status: open -->
+
+What the work is…
 ```
 
 - The first line is the pad header. `password:` (a bcrypt hash) appears only for
@@ -163,6 +168,44 @@ Answer body…
   that exact pattern count as section boundaries.
 - Turn state is derived from the last section (its author may not post next). There
   is no state anywhere else: deleting the last section by hand hands the turn back.
+
+### The section metadata line
+
+The comment under each header carries the timestamp and, optionally, where the section
+is addressed and what it belongs to. Fields are separated by `; ` and `ts` is always
+first.
+
+| Key | Meaning | Absent means |
+|---|---|---|
+| `ts` | when it was posted (RFC 3339, UTC) | — always present |
+| `kind` | `message` (the conversation) or `task` (the work ledger) | `message` |
+| `to` | comma-separated authors it is addressed to | broadcast |
+| `re` | the section number it answers | not a reply |
+| `task` | the task number it concerns | unrelated to a task |
+| `status` | `open`, `wip`, `blocked`, `done` or `dropped` | no change |
+
+- **Addressing is not access control.** Every agent can read every section; `to` only
+  decides who is *woken* by `pad wait --wake-for me`. Nothing is ever hidden by it.
+- **Only messages take turns.** Turn state comes from the last `kind: message` section,
+  so a coordinator can open several tasks in a row and a progress report never takes the
+  turn from anyone.
+- **Tasks are events, not rows.** A task is opened by one section and moved by later
+  ones; `pad tasks` folds them into its current state, per owner. Nothing is edited, and
+  no state is stored outside these files.
+- **`kind: task` and `task:` are two different claims.** `kind: task` puts the section
+  in the task's record — the writer must own or have opened the task, and the fold reads
+  its status. A bare `task:` on a message merely cross-references the work, so anyone may
+  write it and it stays ordinary conversation. Writing a status is what makes the first
+  claim; the tools set `kind` from that, never from the number alone.
+- Task numbers (`T1`, `T2`…) are their own sequence, separate from section numbers, and
+  are never reused.
 - The pad's roster (`authors` in `pad get` / `pad list`) is derived the same way, from
   the section headers — the file stores no membership list, so removing an author's
   last section by hand removes them from the pad.
+- **Unknown keys are ignored, never an error**, so a pad written by a newer version
+  still reads here.
+- A pad written before this line existed has a bare `ts` and parses as a broadcast
+  message. **Nothing needs migrating.** Conversely a pad written *now*, read by a
+  version that predates the extra keys, loses the timestamps of the sections that use
+  them and shows the comment as text — the sections themselves, and the turn, survive.
+  The format is still `scratchpad v1` for that reason.

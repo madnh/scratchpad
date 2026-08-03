@@ -26,6 +26,11 @@ import (
 	"github.com/madnh/scratchpad/internal/store"
 )
 
+// shutdownGrace is how long a stop waits for work already in flight. With the streams
+// closed under it afterwards, this is the budget for finishing a tool call — not the
+// time a clean shutdown takes.
+const shutdownGrace = 5 * time.Second
+
 // BuildMCPServer assembles the MCP server (the full tool surface) bound to the store.
 // It is transport-agnostic.
 func BuildMCPServer(st *store.Store, cfg config.Config) *mcp.Server {
@@ -103,12 +108,24 @@ func ServeHTTP(ctx context.Context, ms *mcp.Server, socketPath string, tcp *TCPO
 
 	select {
 	case <-ctx.Done():
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Graceful, then firm. An MCP client parked on a long-lived stream is an ACTIVE
+		// request, and Shutdown waits for those without cancelling them — so a plain
+		// `return httpSrv.Shutdown(...)` turns Ctrl-C with a client attached into
+		// "context deadline exceeded" and a non-zero exit. The grace lets an in-flight
+		// tool call finish; anything still there afterwards is closed under it, and a
+		// stop the operator asked for is reported as success either way.
+		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
 		if tcpSrv != nil {
-			_ = tcpSrv.Shutdown(shutCtx)
+			if err := tcpSrv.Shutdown(shutCtx); err != nil {
+				_ = tcpSrv.Close()
+			}
 		}
-		return httpSrv.Shutdown(shutCtx)
+		if err := httpSrv.Shutdown(shutCtx); err != nil {
+			log.Printf("a connection did not close within %s; closing it", shutdownGrace)
+			_ = httpSrv.Close()
+		}
+		return nil
 	case err := <-errCh:
 		if err == http.ErrServerClosed {
 			return nil
