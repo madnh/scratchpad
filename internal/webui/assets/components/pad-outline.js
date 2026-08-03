@@ -119,7 +119,7 @@ class PadOutline extends Reactive {
               aria-current=${s.n === this.active ? "true" : null}>
         <span class="outline__dot" aria-hidden="true"
               style="--avatar-bg: var(--avatar-c${agentColorIndex(s.author)})"></span>
-        <span class="outline__n">#${s.n}</span>
+        <span class="outline__n">§${s.n}</span>
         <span class="outline__title">${cutChars(title, TITLE_CHARS)}</span>
       </button>`;
   }
@@ -214,7 +214,7 @@ class PadOutline extends Reactive {
         <span class="outline-pop__avatar" aria-hidden="true"
               style="--avatar-bg: var(--avatar-c${agentColorIndex(sec.author)})">${agentInitials(sec.author)}</span>
         <span class="outline-pop__author">${safeText(sec.author)}</span>
-        <span class="outline-pop__n">#${sec.n}</span>
+        <span class="outline-pop__n">§${sec.n}</span>
         <span class="outline-pop__time" title=${absTime(sec.ts)}>${clockTime(sec.ts)}</span>
         <span class="outline-pop__bytes">${bytes(sec.bytes)}</span>
       </div>

@@ -706,9 +706,15 @@ export default function mount(outlet, ctx) {
   function paintPeople() {
     const view = (pad.participants || []).map((p) => ({
       author: p.author,
-      last: p.last_section ? `#${p.last_section} · ${relTime(p.last_ts)}` : "never posted",
+      last: p.last_section ? `§${p.last_section} · ${relTime(p.last_ts)}` : "never posted",
       lastTitle: p.last_ts ? absTime(p.last_ts) : "has never posted in this pad",
-      owes: (p.owes || []).map((o) => `${o.what} ${relTime(o.ts)}`).join(" · "),
+      // Said as a debt, not as a second timestamp. Both halves of a person's entry are
+      // "a section and a time", and unlabelled they read as the same fact written twice
+      // — the more so when the two times agree, which they do exactly when someone has
+      // just been asked something.
+      owes: (p.owes || []).length
+        ? `owes ${(p.owes || []).map((o) => `${o.what} (${relTime(o.ts)})`).join(", ")}`
+        : "",
       owesTitle: (p.owes || []).map((o) => `${o.what}: ${o.title || ""}`).join("\n"),
     }));
     const key = JSON.stringify(view);
@@ -766,7 +772,7 @@ export default function mount(outlet, ctx) {
     const filter = el("puredashboard-select", { placeholder: "All authors" });
     filter.addEventListener("change", (e) => { authorFilter = e.target.value; render(); });
 
-    const jump = el("puredashboard-input", { type: "number", placeholder: "Jump to #" });
+    const jump = el("puredashboard-input", { type: "number", placeholder: "Jump to §" });
     jump.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
       const n = Number(jump.value);
@@ -832,7 +838,7 @@ export default function mount(outlet, ctx) {
     f.range.textContent = taskFilter
       ? `T${taskFilter} only · ${countInTask(taskFilter)} of ${pad.section_count} sections`
       : loaded.length
-        ? `showing #${loaded[0].n}–#${loaded.at(-1).n} of ${pad.section_count}`
+        ? `showing §${loaded[0].n}–§${loaded.at(-1).n} of ${pad.section_count}`
         : `${pad.section_count} sections`;
 
     // Authors only ever grow, and re-assigning the list would close an open dropdown,
@@ -1010,7 +1016,7 @@ export default function mount(outlet, ctx) {
       el("div", { class: "msg__col" },
         el("div", { class: "msg__head" },
           el("span", { class: "msg__author", text: sec.author }),
-          el("span", { class: "msg__n", text: `#${sec.n}` }),
+          el("span", { class: "msg__n", text: `§${sec.n}` }),
           el("span", { class: "msg__time", title: absTime(sec.ts), text: clockTime(sec.ts) }),
           el("span", { text: bytes(sec.content.length) }),
           ...routingChips(sec),
@@ -1053,7 +1059,7 @@ export default function mount(outlet, ctx) {
     }
     if (meta.re) {
       out.push(el("button", {
-        type: "button", class: "chip chip--re", text: `↩ #${meta.re}`,
+        type: "button", class: "chip chip--re", text: `↩ §${meta.re}`,
         title: `Go to the section this answers`,
         onclick: () => pickSection(meta.re),
       }));
@@ -1063,7 +1069,7 @@ export default function mount(outlet, ctx) {
       out.push(el("button", {
         type: "button", class: "chip chip--replies",
         text: `${replies.length} ${replies.length === 1 ? "reply" : "replies"}`,
-        title: replies.map((r) => `#${r.n} ${r.author}: ${r.title}`).join("\n"),
+        title: replies.map((r) => `§${r.n} ${r.author}: ${r.title}`).join("\n"),
         onclick: () => pickSection(replies[0].n),
       }));
     }
