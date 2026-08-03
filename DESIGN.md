@@ -771,7 +771,7 @@ The outline is the one part of the page built on puredashboard's `Reactive` base
 a keyed `repeat()`: it changes on every arriving section, every order flip and every
 scroll, and rebuilding it would throw away its own scroll position each time. For the
 same reason the rest of the page is mounted ONCE and updated in place — the transcript
-is the only subtree that is rebuilt, so a half-typed "Jump to #" survives an agent
+is the only subtree that is rebuilt, so a half-typed "Jump to §" survives an agent
 posting mid-sentence.
 
 Three additions carry the multi-agent case, in the order a person needs them.
