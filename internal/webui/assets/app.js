@@ -73,21 +73,103 @@ api.status()
 connect();
 initSidebar();
 
+// The filter is the person's `wake_for`: scope decides which pads may speak, and this
+// decides what is worth interrupting them about. "overdue" never matches an event —
+// being overdue is the absence of one — so it is handled by the sweep below and every
+// arriving section is silent while it is selected.
+//
+// A protected pad publishes nothing beyond the listing level, so it carries no kind and
+// no task number: the task filters cannot match it, and it stays quiet rather than
+// leaking that a task moved. That is the event stream's boundary, not a special case
+// here.
+function passesFilter(ev) {
+  switch (wl.notifyFilter()) {
+    case "tasks": return ev.last_kind === "task";
+    case "task": return ev.last_kind === "task" && ev.last_task === wl.notifyTask();
+    case "overdue": return false;
+    default: return true;
+  }
+}
+
+function announces(ref) {
+  // Reading the pad right now is its own notification.
+  if (location.hash === `#/pads/${ref}`) return false;
+  const scope = wl.notifyScope();
+  if (scope === "off") return false;
+  if (scope === "watched" && !wl.isWatched(ref)) return false;
+  return true;
+}
+
 onPad((ev) => {
   if (ev.type === "removed") return;
-  const watching = wl.isWatched(ev.ref);
-  const scope = wl.notifyScope();
-  const onPadPage = location.hash === `#/pads/${ev.ref}`;
-
-  // Reading the pad right now is its own notification.
-  if (onPadPage) return;
-  if (scope === "off") return;
-  if (scope === "watched" && !watching) return;
+  if (!announces(ev.ref) || !passesFilter(ev)) return;
 
   const who = ev.last_author || "someone";
-  toast(`${ev.ref}: ${who} posted section ${ev.section_count}`, { type: "info" });
+  const what = ev.last_kind === "task" && ev.last_task
+    ? `${who} moved T${ev.last_task}${ev.last_status ? ` → ${ev.last_status}` : ""}`
+    : `${who} posted section ${ev.section_count}`;
+  toast(`${ev.ref}: ${what}`, { type: "info" });
   notify.notify(ev);
 });
+
+// ── Overdue sweep ────────────────────────────────────────────────────────────
+// "Only when something is overdue" is the one filter that cannot ride on pad events:
+// what makes an assignment overdue is that NOTHING arrived, so gating the event stream
+// would produce a setting that never fires. It polls /api/stuck instead — the same
+// derivation the overview shows — and announces an assignment the first time it
+// crosses the threshold.
+//
+// The first sweep only records: whatever was already stuck when this tab opened is a
+// backlog, not news, and announcing it would train the person to dismiss the one
+// notification that means something.
+const STUCK_POLL_MS = 60_000;
+let stuckTimer = null;
+let stuckSeen = null;
+
+const stuckKey = (s) => `${s.ref}${s.what}${s.to}${s.section}`;
+
+async function sweepStuck() {
+  let stuck;
+  try {
+    ({ stuck = [] } = await api.stuck());
+  } catch {
+    return; // offline or asleep: the next tick retries, and nothing is marked as seen
+  }
+  const keys = new Set(stuck.map(stuckKey));
+  if (stuckSeen === null) {
+    stuckSeen = keys;
+    return;
+  }
+  for (const s of stuck) {
+    if (stuckSeen.has(stuckKey(s)) || !announces(s.ref)) continue;
+    // Longer than the default four seconds, because this is announced exactly ONCE:
+    // a post that slips by is repeated by the next post, and an assignment nobody
+    // answers has nothing to repeat it. Still self-clearing, so a morning's worth of
+    // them cannot bury the page the way sticky toasts would.
+    toast(`${s.ref}: ${s.what} unanswered by ${s.to}`, { type: "warn", duration: 20000 });
+    notify.notifyStuck(s);
+  }
+  stuckSeen = keys;
+}
+
+// Started and stopped by the preference itself, so a person who is not using the
+// filter pays for no polling at all. onChange fires on every watch-list write too,
+// hence the comparison: this must be idempotent, not a timer reset per keystroke.
+function syncStuckSweep() {
+  const wanted = wl.notifyFilter() === "overdue" && wl.notifyScope() !== "off";
+  if (wanted === (stuckTimer !== null)) return;
+  if (wanted) {
+    stuckSeen = null;
+    sweepStuck();
+    stuckTimer = setInterval(sweepStuck, STUCK_POLL_MS);
+  } else {
+    clearInterval(stuckTimer);
+    stuckTimer = null;
+    stuckSeen = null;
+  }
+}
+syncStuckSweep();
+wl.onChange(syncStuckSweep);
 
 // ── Router ───────────────────────────────────────────────────────────────────
 // Hash mode: the UI is served from a binary at "/", so there is no server-side

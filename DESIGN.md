@@ -797,6 +797,18 @@ filter of *everything* / *tasks only* / *one task* / *only when something is ove
 mirroring `wake_for` and `--unacked`, stored in the existing preferences. One concept
 across both surfaces, not a second model invented for the browser.
 
+Three of the four are a predicate over the arriving event; the fourth cannot be, and
+that is the whole point of it. What makes an assignment overdue is that **nothing
+arrived**, so a filter riding the event stream would be a setting that never fires. It
+polls `/api/stuck` instead — the same derivation the overview renders — and announces an
+assignment the first time it crosses the line. The first sweep after a tab opens only
+records: whatever was already overdue is a backlog, not news, and announcing it on every
+page load would train the person to dismiss the one notification that means something.
+The poll costs nothing while the option is unselected, because the option is what starts
+it. Task numbers are per pad, which Settings says plainly rather than leaving to be
+discovered: *one task* means T`n` in every pad the scope allows, so following a single
+task means narrowing the scope to that pad.
+
 The Notification API needs a secure context and `http://127.0.0.1` qualifies, so this
 works with no certificate. The honest limit, stated in Settings rather than discovered:
 notifications fire only while a tab is open (backgrounded is fine, closed is not) — for
