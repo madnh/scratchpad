@@ -43,6 +43,21 @@ The MCP surface is **append-only by design**: no delete/update tools. Deletion/p
 exist only in the CLI, and so is writing the store/project `_rules.md` (rewriting a file
 is not an append) — a PAD's rules are set through `pad_post`, because that is one.
 
+**Rules are the one thing here that is EDITED, so changing them is gated twice.** WHO is
+the marker's `rules` policy (`config.RulesPolicy`): by default the two file levels are
+the operator's — the Web UI or an editor, never an agent, so the CLI path above is off
+unless a deployment turns it on — and a pad's belong to the agent that opened it. ON TOP
+OF WHAT is a per-level version (`pad.LevelDigest`), quoted on every write; it is NOT the
+combined digest `--ack-rules` uses, because a pad-rules edit must not fail over a change
+to the store's. Both live in `internal/store`, never in a surface: a policy enforced in
+one command is a policy the next surface forgets.
+
+**A privilege is a FIELD the calling code sets, never a string an agent can send.**
+`PostRequest.SystemPost` and `store.RulesWriter` exist in that shape for one reason:
+`SetPadRules` used to infer the person's exemption from the author string while the CLI
+defaulted that same string, so an agent claimed it by not naming itself. Never reintroduce
+`if author == SystemAuthor` as an authorisation test.
+
 ## Surfaces — who each one is for
 
 - **CLI** (`internal/store` directly) — the primary path; an agent with a shell needs
@@ -55,6 +70,8 @@ is not an append) — a PAD's rules are set through `pad_post`, because that is 
   stay an agent surface. **Rules are the sole exception** and only because they fail
   neither test: a rules section takes no turn, and it is authored by the reserved
   `pad.SystemAuthor` ("scratchpad"), which agents may not claim. Do not widen this.
+  The UI is also the surface the rules POLICY points at — it is exempt from who-may-write
+  and NOT from the version check, since two tabs lose an edit exactly as two agents do.
 
 `internal/watch` turns pad-file writes into a push stream via kernel filesystem
 events. It watches the STORE, never the writers: any writer — CLI, MCP, or a person

@@ -706,7 +706,7 @@ would be one more thing to explain in `config.md` for no gain.
 ```
 scratchpad
 ├── init                 # initialize a CUSTOM dir (flag/env); the default dir self-bootstraps, so init is not required
-├── rules   [--set <text|->] [--replace]   # the store-wide rules
+├── rules   [--set <text|-> --if-digest <d>] [--replace]   # the store-wide rules (operator's by default)
 ├── serve                # MCP server: UDS by default; --stdio; --tcp opt-in
 ├── ui                   # Web UI for a human: browse, read, watch (loopback only) — see the Web UI section
 ├── doctor               # diagnostics, strictly read-only (see the Doctor section)
@@ -714,7 +714,7 @@ scratchpad
 ├── version
 ├── project
 │   ├── list
-│   └── rules   <project> [--set <text|->] [--replace]   # the project's rules
+│   └── rules   <project> [--set <text|-> --if-digest <d>] [--replace]   # the project's rules (operator's by default)
 └── pad
     ├── create   --project <p> --as <author> --title <t> [--protect] [--ack-rules <digest>] [content | -]
     ├── post     <ref> --as <author> --title <t> [--password] [content | -]
@@ -755,9 +755,16 @@ Notes:
   bullet list, so the text nearly always begins with `-`, and a positional argument
   starting with `-` is a flag to any getopt-style parser. As a flag *value* it is simply
   the value.
-  `pad rules --set` defaults its author to `scratchpad`: at a terminal it is a person
-  deciding how the pad works, and making them invent an agent name for that would put a
-  fictional teammate in the transcript. An agent passes its own `--as`.
+  `pad rules --set` **requires `--as`**. It used to default to `scratchpad` — at a
+  terminal that reads as a person deciding how the pad works — but the identity carries a
+  person's exemptions with it, so the default handed any agent those exemptions for the
+  price of omitting a flag. A person uses the Web UI, which is the surface that genuinely
+  has no name to give.
+  Writing at any level also requires `--if-digest`, the version of THAT level being
+  replaced (`none` when it has none). It is a plain flag rather than a cobra-required one
+  so the refusal comes from the store, worded identically on every surface and carrying
+  the current rules with it. Reads print the levels' versions on their own line, because a
+  level nobody has written yet has no heading to tuck its version into.
 - `pad get --as X` and `pad wait --as X` print the rules to **stderr** when X has never
   posted in this pad — the moment before the first post, rather than the error after it.
 - **`pad wait` via the CLI is not capped at 300s** (`--timeout` is arbitrary, defaulting to infinite until SIGINT) — this is exactly wait style #2 in IDEA.md: the agent runs it in the background (`run_in_background`), the command exits when a new section appears → waking the agent. Exit codes: 0 = a new section exists (printed to stdout), 3 = timed out. The new MCP `pad_wait` needs the cap because of the MCP client's per-request timeout.
@@ -1226,8 +1233,12 @@ Positioning: **the CLI is the primary path, self-sufficient for local use** — 
 | Tasks: open / move / close | ✅ `pad post --task-open/--task` | ✅ `pad_post` with task metadata |
 | Tasks: the derived board | ✅ `pad tasks`, `pad who` | ✅ `pad_tasks` (read-only) |
 | Rules: read | ✅ `rules`, `project rules`, `pad rules` | ✅ `pad_rules` |
-| Rules: write a PAD's | ✅ `pad rules --set` | ✅ `pad_post(set_rules)` — it is an append |
-| Rules: write a store's / project's | ✅ `rules --set`, `project rules --set` | ❌ — rewriting a file is not an append |
+| Rules: write a PAD's | ✅ `pad rules --as X --set --if-digest D` | ✅ `pad_post(set_rules, rules_digest)` — it is an append |
+| Rules: write a store's / project's | ⚠️ `rules --set`, `project rules --set` — refused unless the deployment sets `rules.store`/`rules.project` to `agent` | ❌ — rewriting a file is not an append |
+
+Both rules-writing rows carry the policy and the version check on top of the surface's own
+shape: by default a pad's rules are its opener's, and the file levels are the operator's on
+BOTH surfaces — the CLI's ✅ above is the command existing, not the permission.
 | Delete / cleanup (`delete`, `purge`) | ✅ (confirm with a human, `--yes` for automation) | ❌ — the agent surface is append-only |
 | Operations (`init`, `serve`, `ui`, `doctor`, `skills`, `version`) | ✅ | ❌ |
 | Identity | `--as` / env `SCRATCHPAD_AUTHOR` | param `author` (self-declared, mandatory) |
