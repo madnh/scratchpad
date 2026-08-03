@@ -369,6 +369,12 @@ export default function mount(outlet, ctx) {
     updateActive();
   }
 
+  // How many sections the pad has about one task — counted over the TOC, so it is the
+  // whole thread and not merely the part currently paged in.
+  function countInTask(n) {
+    return pad.sections.filter((s) => s.task === n).length;
+  }
+
   function renderTranscript() {
     // Two independent narrowings: by who is speaking, and by which piece of work is
     // being spoken about. The task one is matched against the TOC, because a section
@@ -454,17 +460,49 @@ export default function mount(outlet, ctx) {
     for (const b of railTabs.children) b.setAttribute("aria-selected", String(b.dataset.rail === rail));
   }
 
+  // Switching indexes drops the task filter with it. The rail's two halves are two ways
+  // of indexing the same pad, and the task filter belongs to one of them: leaving the
+  // board with the transcript still narrowed to T3 left the outline listing every
+  // section beside a transcript showing five, with nothing on screen to say why — and
+  // clicking an outline row then appeared to do nothing at all.
   function setRail(which) {
     rail = which;
     prefs.setRail(which);
+    if (which !== "tasks" && taskFilter) void selectTask(0);
     applyRail();
   }
 
-  taskPanel.addEventListener("pick", (e) => {
-    taskFilter = Number(e.detail) || 0;
-    taskPanel.active = taskFilter;
-    render();
-  });
+  // Selecting a task FETCHES its thread rather than filtering the page that happens to
+  // be loaded. The point of the filter is to read the eight sections about one piece of
+  // work instead of the six hundred around them — and a task opened last week has none
+  // of its sections in the newest page, so filtering locally showed an empty transcript
+  // and a "Load older" button, which is the opposite of the promise.
+  //
+  // The thread comes back whole and with bodies, so it also ends paging while it is on:
+  // there is no older page of a thread to fetch.
+  async function selectTask(n) {
+    taskFilter = n;
+    taskPanel.active = n;
+    if (!n) {
+      await loadLatest();
+      return;
+    }
+    try {
+      const res = await api.tasks(ref, { task: n });
+      if (disposed || taskFilter !== n) return; // the person moved on while it loaded
+      loaded = res?.thread || [];
+      hasOlder = false;
+      showingLatest = false; // a thread is not the tail of the pad
+      render();
+    } catch (err) {
+      taskFilter = 0;
+      taskPanel.active = 0;
+      toast(`Could not load T${n}: ${err.message}`, { type: "error" });
+      render();
+    }
+  }
+
+  taskPanel.addEventListener("pick", (e) => { void selectTask(Number(e.detail) || 0); });
   taskPanel.addEventListener("open-only", (e) => {
     tasksOpenOnly = !!e.detail;
     taskPanel.openOnly = tasksOpenOnly;
@@ -540,6 +578,19 @@ export default function mount(outlet, ctx) {
     outline.active = n;
     // As an overlay it is covering the very thing it just jumped to.
     if (narrow.matches) setOutline(false);
+
+    // Asking for a section by number is unambiguous, so it beats a filter that would
+    // hide it. Without this the jump fetched the right page, the filter dropped it on
+    // the way to the screen, and the click did nothing and said nothing — the outline
+    // looked broken while the transcript was merely narrowed. The outline is not task
+    // filtered, so it can offer rows the transcript is currently hiding.
+    if (taskFilter && !pad.sections.some((s) => s.n === n && s.task === taskFilter)) {
+      taskFilter = 0;
+      taskPanel.active = 0;
+      // `loaded` is that task's thread, so the section being asked for is not in it:
+      // jumpTo below fetches the page it lives on and re-renders. No interim paint.
+    }
+
     const target = body.querySelector(`[data-section="${n}"]`);
     if (target) {
       target.scrollIntoView({ block: "start" });
@@ -774,9 +825,15 @@ export default function mount(outlet, ctx) {
   // here is a string, a flag or a value — never a new node.
   function syncToolbar() {
     const f = frame;
-    f.range.textContent = loaded.length
-      ? `showing #${loaded[0].n}–#${loaded.at(-1).n} of ${pad.section_count}`
-      : `${pad.section_count} sections`;
+    // A filter must never be invisible. The range describes the PAGE, so while the
+    // transcript is narrowed to one task it was describing sections it was not showing
+    // — "showing #27–#46 of 46" over three messages — which is how a filter left on by
+    // accident reads as a broken page rather than as a filter.
+    f.range.textContent = taskFilter
+      ? `T${taskFilter} only · ${countInTask(taskFilter)} of ${pad.section_count} sections`
+      : loaded.length
+        ? `showing #${loaded[0].n}–#${loaded.at(-1).n} of ${pad.section_count}`
+        : `${pad.section_count} sections`;
 
     // Authors only ever grow, and re-assigning the list would close an open dropdown,
     // so it is written only when it actually changed. The roster comes from the server
@@ -987,7 +1044,7 @@ export default function mount(outlet, ctx) {
         type: "button", class: "chip chip--task", dataset: { status: meta.status || "" },
         title: `Show only what concerns T${meta.task}`,
         text: meta.status ? `T${meta.task} ${meta.status}` : `T${meta.task}`,
-        onclick: () => { taskFilter = taskFilter === meta.task ? 0 : meta.task; syncOutline(); render(); },
+        onclick: () => { void selectTask(taskFilter === meta.task ? 0 : meta.task); },
       });
       out.push(chip);
     }
