@@ -13,6 +13,7 @@ import (
 
 	"github.com/madnh/scratchpad/internal/buildinfo"
 	"github.com/madnh/scratchpad/internal/config"
+	"github.com/madnh/scratchpad/internal/pad"
 	"github.com/madnh/scratchpad/internal/store"
 
 	"golang.org/x/sys/unix"
@@ -282,11 +283,6 @@ func statStore(cfg config.Config) *doctorStore {
 	// healthy?" probe without touching every file.
 	if pads, warns, err := st.List(""); err == nil {
 		ds.ListWarnings = len(warns)
-		for _, p := range pads {
-			if p.Unreadable != "" && strings.Contains(p.Unreadable, store.CodeContentTooLarge) {
-				ds.OversizedPads++
-			}
-		}
 		if len(pads) > 0 {
 			ds.LastPad = pads[0].Ref
 			ds.LastPadParse = "ok"
@@ -295,6 +291,14 @@ func statStore(cfg config.Config) *doctorStore {
 			ds.LastPadParse = warns[0]
 		}
 	}
+	// Oversized pads are counted by SIZE, not by trying to read them.
+	//
+	// They used to surface as read failures during List, but listings stream now and never
+	// hit the ceiling — so nothing on that path can report the one condition a person most
+	// needs explained: the pad lists fine and refuses to open. doctor is the surface whose
+	// job is noticing, so it asks the question directly: one stat per pad, no reads.
+	ds.OversizedPads = countOversized(cfg.ProjectsDir, st.MaxPadBytes())
+
 	if text, _, err := st.StoreRules(); err == nil {
 		ds.StoreRules = strings.TrimSpace(text) != ""
 	}
@@ -360,16 +364,15 @@ func (r *doctorReport) verdict() []string {
 	case !r.Store.Writable:
 		return []string{"the store exists but is not writable by this user",
 			"next: check ownership/permissions of " + r.ProjectsDir}
-	case r.Store.OversizedPads > 0 && r.Store.OversizedPads == r.Store.ListWarnings:
-		return []string{fmt.Sprintf("the store works but %d pad file(s) are past this deployment's read ceiling (see store group)", r.Store.OversizedPads),
-			"next: they are not corrupt and were never parsed — inspect their size, or raise limits to read them"}
+	// The two are independent now: a listing streams, so an oversized pad lists FINE and
+	// only refuses when opened. Reporting them together would have hidden exactly the case
+	// a person cannot otherwise explain — the pad is in the table and will not open.
 	case r.Store.ListWarnings > 0:
-		unreadable := ""
-		if r.Store.OversizedPads > 0 {
-			unreadable = fmt.Sprintf(" (%d of them past the read ceiling, not corrupt)", r.Store.OversizedPads)
-		}
-		return []string{fmt.Sprintf("the store works but %d pad file(s) could not be read%s (see store group)", r.Store.ListWarnings, unreadable),
+		return []string{fmt.Sprintf("the store works but %d pad file(s) could not be read (see store group)", r.Store.ListWarnings),
 			"next: inspect the reported pads; they are plain markdown"}
+	case r.Store.OversizedPads > 0:
+		return []string{fmt.Sprintf("the store works but %d pad file(s) are past this deployment's read ceiling (see store group)", r.Store.OversizedPads),
+			"next: they list normally and refuse to OPEN — they are not corrupt, so inspect their size or raise limits"}
 	default:
 		return []string{fmt.Sprintf("everything checks out: %d project(s), %d pad(s)", r.Store.ProjectCount, r.Store.PadCount)}
 	}
@@ -425,7 +428,7 @@ func (r *doctorReport) writeText(w io.Writer) {
 			fmt.Fprintf(w, "  warnings      %d pad file(s) could not be read\n", r.Store.ListWarnings)
 		}
 		if r.Store.OversizedPads > 0 {
-			fmt.Fprintf(w, "  oversized     %d past this deployment's read ceiling (intact, never parsed)\n", r.Store.OversizedPads)
+			fmt.Fprintf(w, "  oversized     %d past this deployment's read ceiling — they list, but will not open\n", r.Store.OversizedPads)
 		}
 
 		fmt.Fprintln(w, "\n▸ Rules")
@@ -501,4 +504,33 @@ func sameFile(a, b string) bool {
 		return false
 	}
 	return os.SameFile(fa, fb)
+}
+
+// countOversized reports how many pad files exceed what this deployment will read. It
+// stats rather than opens: the question is about the file's size, and a pad big enough to
+// matter is exactly the one not worth reading to find out.
+func countOversized(projectsDir string, ceiling int64) int {
+	projects, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, proj := range projects {
+		if !proj.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(projectsDir, proj.Name()))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !pad.IsPadFileName(e.Name()) {
+				continue
+			}
+			if info, err := e.Info(); err == nil && info.Size() > ceiling {
+				n++
+			}
+		}
+	}
+	return n
 }

@@ -102,6 +102,15 @@ func (s *Store) maxPadBytes(lim config.Limits) int64 {
 	return max(derived, maxReadablePadBytes)
 }
 
+// MaxPadBytes is the current read ceiling, for a caller that wants to ask about a pad
+// WITHOUT reading it — today that is `doctor`, comparing file sizes so it can say which
+// pads this deployment will refuse to open.
+//
+// It is exported because the listing no longer discovers this. Listings stream, so they
+// never meet the ceiling, and nothing on that path can report it; a diagnosis that used to
+// fall out of reading has to be asked for deliberately now.
+func (s *Store) MaxPadBytes() int64 { return s.maxPadBytes(s.limits()) }
+
 // readPadFile reads a pad file with that ceiling enforced, so an oversized file fails
 // with a clear error instead of an OOM. The size is checked twice: once from the
 // file's own metadata (cheap, catches the normal case) and once by reading one byte
