@@ -223,6 +223,7 @@ the pad file's header — removing the file removes every trace of it).
 | `SCRATCHPAD_AUTHOR` | default author for the CLI `--as` flag | — |
 | `SCRATCHPAD_NONINTERACTIVE` | truthy = never prompt (automation) | — |
 | `SCRATCHPAD_UI_PORT` | loopback port for the Web UI (`ui`) | `6711` |
+| `SCRATCHPAD_SKILLS_DIR` | where `skills install` writes the agent skill document | — (no default) |
 
 Every variable has a matching flag; on conflict **flag > env > marker file > default**.
 

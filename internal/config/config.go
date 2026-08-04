@@ -51,6 +51,10 @@ const (
 	EnvNonInteractive = "SCRATCHPAD_NONINTERACTIVE"
 	// EnvUIPort is the loopback port the Web UI listens on, mirroring --port.
 	EnvUIPort = "SCRATCHPAD_UI_PORT"
+	// EnvSkillsDir is where `skills install` writes the agent skill document, mirroring
+	// --into. It has no default: where an agent host keeps its skills belongs to that
+	// host, and this tool names no host.
+	EnvSkillsDir = "SCRATCHPAD_SKILLS_DIR"
 )
 
 // Neutral defaults for the marker's identity fields.

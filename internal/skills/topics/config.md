@@ -36,6 +36,7 @@ There is no working-directory inference at all.
 | `SCRATCHPAD_AUTHOR` | default author for the CLI `--as` |
 | `SCRATCHPAD_NONINTERACTIVE` | truthy = never prompt |
 | `SCRATCHPAD_UI_PORT` | loopback port for the Web UI (`ui`), default 6711 |
+| `SCRATCHPAD_SKILLS_DIR` | where `skills install` writes SKILL.md; no default, you name it |
 
 Every env var has a matching flag; conflicts resolve flag > env > marker > default.
 

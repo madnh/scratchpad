@@ -114,6 +114,15 @@ a dir's `config.md` whenever it differs from the binary's (`ensureDoc`) — best
 silent, because a read-only store must not fail `pad post` over a doc. That file belongs to
 the tool; the operator's choices live in `scratchpad.config.json`, and the guide says so.
 
+**Three documentation surfaces, one contract.** `internal/skills/SKILL.md` is the AGENT's
+entry point — the short document a host loads to decide when to reach for this tool — and
+it is the one that changes behaviour in practice, because an agent acts on it without ever
+running `skills docs`. The topics are the reference it can consult; `config.md` is the
+operator's. A change to a rule an agent must obey belongs in SKILL.md FIRST, then in
+whichever topic covers it. `skills install --into <dir>` publishes SKILL.md; the
+destination is always the operator's to name (flag or `SCRATCHPAD_SKILLS_DIR`), never a
+default — this repo names no host, and a conventional path is a host's property.
+
 ## Build / test
 
 ```

@@ -15,6 +15,24 @@ import (
 //go:embed topics/*.md
 var topicFS embed.FS
 
+// skillMarkdown is the agent-facing skill file: the short document a host loads to know
+// WHEN to reach for this tool and how the core loops go, as opposed to the topics, which
+// are the reference an agent reads once it is already here.
+//
+// It lives in this repo, beside the code whose behaviour it describes, because the copy
+// that matters is the one installed into a host — and a copy that lives only there drifts
+// the first time a rule changes, silently, with nothing to compare against. `skills
+// install` writes it out; nothing here knows or cares which host is on the other end.
+//
+//go:embed SKILL.md
+var skillMarkdown []byte
+
+// SkillFilename is the conventional name for an agent skill document.
+const SkillFilename = "SKILL.md"
+
+// Skill returns the embedded agent skill document.
+func Skill() []byte { return skillMarkdown }
+
 // Topic is one help document.
 type Topic struct {
 	ID          string `json:"id"`
