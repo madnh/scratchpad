@@ -35,7 +35,20 @@ func (p *Pad) LastMessage() (Section, bool) {
 // waiting for. So task events neither take the turn nor hand it on — and the rule stays
 // purely derived, because the filter happens before taking the last element, not by
 // remembering anything.
+// A pad that has been CONTINUED holds no turn at all. It accepts nothing from anyone, so
+// naming one blocked author would say the opposite of what is true — "waiting for any
+// author other than pm" reads as an invitation to pm's counterpart, who would write a
+// reply and only then be told the pad is closed. Everyone is blocked, and the answer says
+// where the conversation went.
 func (p *Pad) TurnState() Turn {
+	if next := p.Header.ContinuedBy; next != "" {
+		last, _ := p.LastMessage()
+		return Turn{
+			LastAuthor: last.Author,
+			Blocked:    p.Authors(),
+			WaitingFor: "nobody — this pad is full and was continued in " + next,
+		}
+	}
 	last, ok := p.LastMessage()
 	if !ok {
 		return Turn{WaitingFor: "any author"}

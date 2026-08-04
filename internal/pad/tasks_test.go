@@ -1,6 +1,7 @@
 package pad
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -243,5 +244,29 @@ func TestParticipantsIncludeTheAgentThatNeverShowedUp(t *testing.T) {
 	}
 	if found.LastSection != 0 || len(found.Owes) != 1 {
 		t.Fatalf("want no activity and one debt, got %#v", *found)
+	}
+}
+
+// TestAContinuedPadHoldsNoTurn: the pad accepts nothing from anyone, so the ordinary
+// answer — "waiting for any author other than X" — invites X's counterpart to write a
+// reply that will be refused. The write path already knew this; the read path did not.
+func TestAContinuedPadHoldsNoTurn(t *testing.T) {
+	p := build(sec{"pm", "opening", Meta{}}, sec{"ios", "answer", Meta{}})
+	if live := p.TurnState(); live.WaitingFor != `any author other than "ios"` {
+		t.Fatalf("an open pad's turn changed: %+v", live)
+	}
+
+	p.Header.ContinuedBy = "default-ab3k9x"
+	got := p.TurnState()
+	if !strings.Contains(got.WaitingFor, "default-ab3k9x") {
+		t.Errorf("a continued pad must say where the conversation went: %q", got.WaitingFor)
+	}
+	if strings.Contains(got.WaitingFor, "other than") {
+		t.Errorf("a continued pad still invites somebody to post: %q", got.WaitingFor)
+	}
+	// Nobody may post, so nobody is left out of Blocked — a surface greying out the
+	// blocked authors must grey out all of them.
+	if len(got.Blocked) != 2 {
+		t.Errorf("blocked = %v, want every author on the pad", got.Blocked)
 	}
 }
