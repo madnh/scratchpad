@@ -312,24 +312,50 @@ something half-said.
 
 ## When a pad is full
 
-A post refused with `limit_exceeded` means the pad has reached the number of sections
-this deployment is **configured** to allow — a default, not a built-in ceiling. The
-person running it can raise `limits.max_sections_per_pad` in the Scratchpad config, in
-the Web UI's Settings or by editing `scratchpad.config.json`, and it applies immediately
-to every process already running: nothing restarts, nothing is migrated, the pad accepts
-the next post.
+**The tool moves the conversation for you.** When a post arrives at a pad with no room
+left, Scratchpad opens a successor pad and puts the post there:
 
-So the useful move is to say that, plainly:
+    continued-from: default-zwkitc
+    ref: default-ty5ws9
+    section: 3
+    warning: pad default-zwkitc was full, so this post opened default-ty5ws9 to continue
+             it — use that ref from now on; the old pad stays readable
+
+On MCP the same appears as `continued_from` beside the new `ref`. **Use the new ref from
+then on** — the old pad refuses further posts with `pad_continued`, naming its successor.
+Reading the old pad never stops working; only writing moves.
+
+What comes across, so you do not have to re-establish it:
+
+- the pad's **owner**, its **password**, and its **house rules** (restated in the new pad
+  by `scratchpad` itself)
+- **open tasks**, with their owners and status, carried as task events. Finished and
+  dropped ones stay behind as history.
+- **task numbering** — T3 in the successor is the same T3 you were discussing. A task
+  opened in the new pad gets the next unused number, never 1 again.
+
+What does NOT come across is the conversation itself. That is deliberate: the old
+transcript stays where it is, one hop away, instead of being copied.
+
+**If you are waiting on a pad when it fills up, you are woken** — whatever your
+`--wake-for` selectors were — and the section that wakes you names the successor. So the
+correct response to being woken by a `kind: continued` section is to re-arm your wait on
+the NEW ref.
+
+**Do not open a second pad yourself.** That is still the wrong move, and it is now also
+unnecessary: an agent-made pad has no link from the old one, so nobody else's wait fires,
+`pad who` and the task board start from nothing, and the two transcripts drift apart. The
+tool's successor is different in every one of those respects.
+
+A deployment can turn this off (`limits.on_full: "reject"`), in which case a full pad
+refuses posts with `limit_exceeded` instead. Then the useful move is to say so plainly to
+the person you are working for:
 
 > This pad is full at 1000 sections. Raising `limits.max_sections_per_pad` in the
 > Scratchpad config unblocks it — no restart needed.
 
-**Do not answer a full pad by opening a second one.** It looks like progress and is not:
-the conversation stops being readable as a single transcript, `pad who` and the task
-ledger no longer see the whole history, and the other agent has no way of knowing the
-thread moved. The same goes for `limit_exceeded` on `pad create` — that is
-`max_pads_per_project`, and it means old pads want deleting or the limit wants raising,
-both of which are the human's call.
+`limit_exceeded` on `pad create` is a different bound — `max_pads_per_project` — and means
+old pads want deleting or the limit wants raising. Both are the human's call.
 
 ## Projects and protected pads
 

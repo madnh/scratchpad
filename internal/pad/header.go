@@ -58,6 +58,21 @@ type Header struct {
 	// Continues is the ref of the pad this one took over from, empty on an original pad.
 	// It is what makes a continuation visible instead of two unrelated transcripts.
 	Continues string
+
+	// TasksFrom is the highest task number already used by the pads this one continues,
+	// so task numbering carries on instead of restarting.
+	//
+	// Task numbers are how agents refer to work in prose — "T3 is blocked" is written in
+	// section bodies that no longer live in this file. Restarting at 1 would make a second
+	// T3 that means something else, and every earlier sentence about T3 silently wrong.
+	// It is a header field rather than a derived value for the plain reason that the
+	// evidence is in another file: nothing in THIS pad records a number it never used.
+	TasksFrom int
+
+	// ContinuedBy is the ref of the pad that took over from this one, empty while this pad
+	// is still the live one. It is written when the pad fills up, at the same moment the
+	// closing section is appended.
+	ContinuedBy string
 }
 
 // ParseHeader reads a pad header line.
@@ -103,6 +118,17 @@ func ParseHeader(line []byte) (Header, error) {
 			h.Opener = strings.TrimSpace(value)
 		case "continues":
 			h.Continues = strings.TrimSpace(value)
+		case "continued_by":
+			h.ContinuedBy = strings.TrimSpace(value)
+		case "tasks_from":
+			// A number this build cannot read is worse than absent: absent restarts task
+			// numbering, which is wrong but visible, while a silent zero is the same thing
+			// pretending to be deliberate.
+			n, convErr := strconv.Atoi(strings.TrimSpace(value))
+			if convErr != nil || n < 0 {
+				return Header{}, fmt.Errorf("bad tasks_from in pad header: %q", value)
+			}
+			h.TasksFrom = n
 		}
 	}
 	if h.Created.IsZero() {
@@ -123,11 +149,16 @@ func RenderHeader(h Header) string {
 	b.WriteString(h.Created.UTC().Format(time.RFC3339))
 	// Order is fixed so an upgrade produces a predictable line, and so a diff of two pads
 	// written by different builds compares field for field.
-	for _, f := range []struct{ key, value string }{
+	fields := []struct{ key, value string }{
 		{"opener", h.Opener},
 		{"password", h.PasswordHash},
 		{"continues", h.Continues},
-	} {
+		{"continued_by", h.ContinuedBy},
+	}
+	if h.TasksFrom > 0 {
+		fields = append(fields, struct{ key, value string }{"tasks_from", strconv.Itoa(h.TasksFrom)})
+	}
+	for _, f := range fields {
 		if f.value != "" {
 			b.WriteString(headerSep)
 			b.WriteString(f.key)

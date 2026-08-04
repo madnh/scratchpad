@@ -245,6 +245,12 @@ func checkLimits(l Limits) error {
 			return pad.Coded(pad.CodeInvalidInput, "limits.%s is at most %d (got %d)", f.name, f.max, f.v)
 		}
 	}
+	switch l.OnFull {
+	case "", OnFullContinue, OnFullReject:
+	default:
+		return pad.Coded(pad.CodeInvalidInput,
+			"limits.on_full is %q or %q (got %q)", OnFullContinue, OnFullReject, l.OnFull)
+	}
 	// A percentage outside 1..100 is refused rather than clamped: the loader would drop it
 	// silently, and an operator who typed 800 meaning 80 deserves to be told, not to
 	// discover months later that the warning never fired.

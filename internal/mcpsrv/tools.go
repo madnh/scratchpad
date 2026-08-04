@@ -79,7 +79,15 @@ type postInput struct {
 }
 
 type postOutput struct {
-	Ref      string     `json:"ref"`
+	// Ref is the pad this post landed in. It differs from the ref that was CALLED when
+	// that pad was full: the conversation moved, and continued_from names where from. A
+	// caller that stores one ref should store this one.
+	Ref string `json:"ref"`
+
+	// ContinuedFrom is set only on that move, so an agent can say what happened rather
+	// than silently start talking about a different pad.
+	ContinuedFrom string `json:"continued_from,omitempty"`
+
 	Section  int        `json:"section"`
 	Next     int        `json:"next"`
 	Task     int        `json:"task,omitempty"`
@@ -108,7 +116,8 @@ func (s *Server) padPost(_ context.Context, _ *mcp.CallToolRequest, in postInput
 		return nil, postOutput{}, err
 	}
 	return nil, postOutput{
-		Ref: res.Pad.Ref(), Section: res.Section, Next: res.Section + 1,
+		Ref: res.Pad.Ref(), ContinuedFrom: res.ContinuedFrom,
+		Section: res.Section, Next: res.Section + 1,
 		Task: res.Task, Turn: res.Pad.TurnState(), Warnings: res.Warnings,
 	}, nil
 }

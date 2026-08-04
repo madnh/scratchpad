@@ -25,6 +25,16 @@ const (
 	// write. Like a task event it is bookkeeping and does NOT take the turn — stating
 	// the rules is not a move in the conversation.
 	KindRules Kind = "rules"
+
+	// KindContinued marks the last section of a pad that filled up: it names the pad the
+	// conversation moved to. Written by the tool, never by an agent.
+	//
+	// It takes no turn — the pad it is written into accepts nothing further, so handing
+	// anyone the turn there would be a lie. It is the one kind that wakes every waiter
+	// regardless of their selectors: an agent parked on a pad that has just stopped
+	// accepting posts is unreachable until it learns where the conversation went, which
+	// is precisely the failure that selective waking must not cause.
+	KindContinued Kind = "continued"
 )
 
 // SystemAuthor is the reserved identity for something a PERSON did through a surface

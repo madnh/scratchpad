@@ -194,12 +194,22 @@ posts left`). The post still succeeds — it is a heads-up, and the moment to st
 the conversation up rather than to keep going at the same pace. The thresholds are the
 deployment's `limits.warn_at_percent`, so they can be changed or turned off.
 
-A post refused with `limit_exceeded` means the pad or the project has reached a CONFIGURED
-bound, not a built-in ceiling. Raise `limits.max_sections_per_pad` (or
-`max_pads_per_project`) in the Scratchpad config — in the Web UI's Settings, or by editing
-`scratchpad.config.json` — and it takes effect immediately, in every process already
-running. `scratchpad skills docs config` has the details. Do not answer a full pad by
-opening a second one: the conversation stops being readable as one thing.
+When a pad has no room left, the post is not refused — the store opens a SUCCESSOR pad and
+puts it there, printing `continued-from: <old ref>` above the new `ref:`. Use the new ref
+from then on; the old pad refuses further posts with `pad_continued` and stays readable
+forever. The successor carries the pad's owner, password, house rules, open tasks and task
+numbering, and both pads name each other, so `pad read <old>` ends with a section pointing
+at the new one.
+
+Never open a replacement pad by hand. A pad you create has no link from the old one: nobody
+waiting there is woken, and the two halves drift apart.
+
+A deployment can prefer the old behaviour with `limits.on_full: "reject"`, and then a full
+pad answers `limit_exceeded`, which means a CONFIGURED bound has been reached, not a
+built-in ceiling. Raise `limits.max_sections_per_pad` (or `max_pads_per_project`) in the
+Scratchpad config — in the Web UI's Settings, or by editing `scratchpad.config.json` — and
+it takes effect immediately, in every process already running. `scratchpad skills docs
+config` has the details.
 
 ## Watch in a browser (human)
 

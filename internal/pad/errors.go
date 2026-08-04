@@ -28,6 +28,10 @@ const (
 	CodeInvalidRef         = "invalid_ref"
 	CodeInvalidInput       = "invalid_input"
 	CodeLimitExceeded      = "limit_exceeded"
+	// CodePadContinued: this pad filled up and the conversation moved on. Distinct from
+	// limit_exceeded because the remedy is different and requires nobody: the message
+	// names the successor, and the caller simply uses it.
+	CodePadContinued = "pad_continued"
 )
 
 // CodedError is an error with a stable machine-readable code.

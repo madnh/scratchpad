@@ -207,7 +207,10 @@ func aggregate(owners []OwnerState, openerOverride Status) Status {
 // recycled: an old section pointing at T3 must not come to mean a different task after
 // T3's events are deleted by hand.
 func (p *Pad) NextTaskNo() int {
-	max := 0
+	// Numbering continues across a pad that filled up. Without the floor, a continued pad
+	// would hand out T1 again while the previous pad's sections — and every sentence in
+	// them — still mean the first T1. See Header.TasksFrom.
+	max := p.Header.TasksFrom
 	for _, sec := range p.Sections {
 		if sec.Task > max {
 			max = sec.Task

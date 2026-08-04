@@ -85,6 +85,13 @@ func (p *Pad) Wakes(sec Section, author string, w Wake) bool {
 	if author != "" && sec.Author == author {
 		return false
 	}
+	// A pad that has been continued wakes everyone, whatever they asked to be woken for.
+	// Selective waking exists to spare an agent traffic it has no part in; it must never
+	// leave an agent waiting on a pad that can no longer receive the answer it is waiting
+	// for. This is checked before the selectors precisely so no selector can opt out of it.
+	if sec.Meta.Kind == KindContinued {
+		return true
+	}
 	if w.Any {
 		return true
 	}

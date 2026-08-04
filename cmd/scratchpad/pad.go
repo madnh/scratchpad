@@ -283,6 +283,13 @@ func newPadPostCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
+			// When a full pad continued, `ref:` is the SUCCESSOR — the pad this post
+			// actually landed in. Saying so on its own line keeps the machine-readable
+			// shape ("ref:" is still where you posted) while making the move impossible to
+			// miss for a person reading the same output.
+			if res.ContinuedFrom != "" {
+				fmt.Fprintf(out, "continued-from: %s\n", res.ContinuedFrom)
+			}
 			fmt.Fprintf(out, "ref: %s\n", res.Pad.Ref())
 			fmt.Fprintf(out, "section: %d\nnext: %d\n", res.Section, res.Section+1)
 			if res.Task > 0 {

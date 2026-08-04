@@ -94,7 +94,23 @@ type Limits struct {
 	// Nil is shared by every reader of a config snapshot — never sort or append to it in
 	// place (see Live).
 	WarnAtPercent []int `json:"warn_at_percent,omitempty"`
+
+	// OnFull decides what happens to a post that arrives at a pad with no room left:
+	// OnFullContinue (the default) moves the conversation to a fresh pad, OnFullReject
+	// refuses it the way this tool always used to.
+	OnFull string `json:"on_full,omitempty"`
 }
+
+const (
+	// OnFullContinue opens a successor pad and puts the post there. It is the default
+	// because the alternative has no way out that does not need a person: an agent cannot
+	// raise a limit, and the pads that fill up are the ones with the most history to lose.
+	OnFullContinue = "continue"
+
+	// OnFullReject refuses the post, leaving the conversation stopped until somebody
+	// raises the limit. For a deployment that would rather stall than split a transcript.
+	OnFullReject = "reject"
+)
 
 // DefaultLimits are the built-in bounds used when the marker sets none.
 var DefaultLimits = Limits{
@@ -106,6 +122,7 @@ var DefaultLimits = Limits{
 	// threads; 99 is the last few posts, and its wording says so. Three steps rather than
 	// one because a single threshold is either too early to act on or too late to act on.
 	WarnAtPercent: []int{80, 90, 99},
+	OnFull:        OnFullContinue,
 }
 
 // SameLimits reports whether two limit sets are equal. Limits stopped being comparable
@@ -116,6 +133,7 @@ func SameLimits(a, b Limits) bool {
 		a.MaxContentKB == b.MaxContentKB &&
 		a.MaxSectionsPerPad == b.MaxSectionsPerPad &&
 		a.MaxPadsPerProject == b.MaxPadsPerProject &&
+		a.OnFull == b.OnFull &&
 		slices.Equal(a.WarnAtPercent, b.WarnAtPercent)
 }
 
@@ -340,6 +358,9 @@ func (c *Config) applyDefaults() {
 		c.Limits.MaxPadsPerProject = DefaultLimits.MaxPadsPerProject
 	}
 	c.Limits.WarnAtPercent = normalisePercents(c.Limits.WarnAtPercent)
+	if strings.TrimSpace(c.Limits.OnFull) == "" {
+		c.Limits.OnFull = DefaultLimits.OnFull
+	}
 	if c.Wait.DefaultS <= 0 {
 		c.Wait.DefaultS = DefaultWait.DefaultS
 	}

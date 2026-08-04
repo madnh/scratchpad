@@ -66,9 +66,11 @@ func TestPostWarnsAsThePadFills(t *testing.T) {
 }
 
 // TestTheWarningArrivesBeforeTheRefusal is the point of the whole feature: an agent must
-// have been told before the post that fails.
+// have been told before the pad stops accepting posts. Run against a REJECTING store,
+// where "stops accepting" is a refusal; under the default the same last warning is what
+// precedes the move to a successor.
 func TestTheWarningArrivesBeforeTheRefusal(t *testing.T) {
-	s := testStore(t)
+	s := testRejectingStore(t)
 	p, _, err := create(s, "default", "a", "opening", "content", false)
 	if err != nil {
 		t.Fatal(err)

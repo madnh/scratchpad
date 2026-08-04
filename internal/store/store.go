@@ -398,6 +398,11 @@ type PostResult struct {
 	Section int
 	Task    int // the task this post opened or moved, 0 when it touched none
 
+	// ContinuedFrom is set when the pad named in the request was full and this post landed
+	// in its successor instead. It is the ref the caller ASKED for, so a surface can say
+	// "you posted to X, it is now Y" rather than silently answering about a different pad.
+	ContinuedFrom string
+
 	// Warnings are advisory and never mean failure — today, that an addressee has been
 	// silent long enough that nobody may be listening. They are returned at the moment
 	// the sender can still act on it, which is what presence was wanted for.
@@ -465,6 +470,19 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if err := checkPassword(p.PasswordHash(), req.Password); err != nil {
 		return nil, err
 	}
+	// A pad that has already been continued accepts nothing further, whatever the limits
+	// say now — its successor holds the conversation, and a second live end would mean two
+	// agents talking in two files that both look current.
+	//
+	// Checked HERE, before the turn rule and the rules gate, because on a closed pad those
+	// answers are all misleading. "It is not your turn" invites a wait for a turn that will
+	// never come; the truthful answer is that this pad is finished and names where to go.
+	// Only the password comes first: what a pad says, including where it continued, is not
+	// something an unauthorised caller gets to learn.
+	if next := p.Header.ContinuedBy; next != "" {
+		return nil, coded(CodePadContinued,
+			"pad %s is full and was continued in %s — post there", req.Ref, next)
+	}
 
 	meta := req.Meta
 	if meta.Kind == "" {
@@ -530,11 +548,42 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 			}
 		}
 	}
+	// Computed before the pad's capacity is considered, because a post that MOVES to a
+	// successor carries the same advice about its addressees as one that stays.
+	warningsSoFar := p.SilenceWarnings(meta.To, time.Now())
+
 	if len(p.Sections) >= lim.MaxSectionsPerPad {
-		return nil, coded(CodeLimitExceeded, "pad %s already holds %d sections (the limit)", req.Ref, len(p.Sections))
+		if lim.OnFull == config.OnFullReject {
+			return nil, coded(CodeLimitExceeded,
+				"pad %s already holds %d sections (the limit); raise limits.max_sections_per_pad,"+
+					" or set limits.on_full to %q to let full pads continue in a new one",
+				req.Ref, len(p.Sections), config.OnFullContinue)
+		}
+		// Continuing needs the section BODIES: the pad's house rules are a section body,
+		// and they carry over. This is the one path where the append route pays for a full
+		// parse, and it happens once in a pad's life.
+		fp, err := fullPad()
+		if err != nil {
+			return nil, err
+		}
+		cont, err := s.continuePad(project, id, p, fp, f, data, req, meta, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		moved, err := s.Get(cont.Ref, req.Password)
+		if err != nil {
+			return nil, err
+		}
+		return &PostResult{
+			Pad: moved, Section: cont.Section, Task: cont.Task,
+			ContinuedFrom: req.Ref,
+			Warnings: append(warningsSoFar,
+				fmt.Sprintf("pad %s was full, so this post opened %s to continue it — "+
+					"use that ref from now on; the old pad stays readable", req.Ref, cont.Ref)),
+		}, nil
 	}
 
-	warnings := p.SilenceWarnings(meta.To, time.Now())
+	warnings := warningsSoFar
 	// Counted AFTER this post, because that is the number the author just caused and the
 	// one it can act on. The limit is read from the snapshot this call took at the top, so
 	// a marker edited mid-post cannot make the warning and the refusal disagree.

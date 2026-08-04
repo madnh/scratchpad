@@ -29,6 +29,22 @@ func testStore(t *testing.T) *Store {
 
 // testStorePolicy is testStore with the rules policy spelled out, for the tests that are
 // about the policy itself.
+// testRejectingStore is testStore with limits.on_full set back to "reject". The tests that
+// predate continuation are about the LIMIT — that it binds, and that raising it unblocks a
+// pad — so they keep testing that rather than being rewritten around the new default.
+func testRejectingStore(t *testing.T) *Store {
+	t.Helper()
+	limits := config.DefaultLimits
+	limits.MaxSectionsPerPad = 5
+	limits.MaxPadsPerProject = 3
+	limits.OnFull = config.OnFullReject
+	return testStorePolicy(t, limits, config.RulesPolicy{
+		Store:   config.RulesWriteAgent,
+		Project: config.RulesWriteAgent,
+		Pad:     config.RulesWriteAny,
+	})
+}
+
 func testStorePolicy(t *testing.T, limits config.Limits, rules config.RulesPolicy) *Store {
 	t.Helper()
 	dir := t.TempDir()
@@ -179,7 +195,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestLimits(t *testing.T) {
-	s := testStore(t) // 5 sections/pad, 3 pads/project
+	s := testRejectingStore(t) // 5 sections/pad, 3 pads/project
 	pad, _, err := create(s, "p1", "a", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +226,7 @@ func TestLimits(t *testing.T) {
 // point of reading the limits from config.Live instead of copying them in at startup: a
 // pad that has hit its ceiling is unblocked by editing the marker, not by a restart.
 func TestLimitsFollowTheLiveConfig(t *testing.T) {
-	s := testStore(t) // 5 sections/pad
+	s := testRejectingStore(t) // 5 sections/pad
 	p, _, err := create(s, "p1", "a", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)

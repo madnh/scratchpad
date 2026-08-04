@@ -21,6 +21,7 @@ const (
 	CodeInvalidRef         = pad.CodeInvalidRef
 	CodeInvalidInput       = pad.CodeInvalidInput
 	CodeLimitExceeded      = pad.CodeLimitExceeded
+	CodePadContinued       = pad.CodePadContinued
 )
 
 // CodedError is an error with a stable machine-readable code.

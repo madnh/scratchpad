@@ -679,6 +679,51 @@ The author is always **self-declared, from a single source**: the `author` param
 - `unauthorized` — the pad has a password that is missing or wrong (a single unified message, not distinguishing the two cases).
 - `content_too_large`, `invalid_project_name`, `invalid_ref` — validation, with a message that states the rule clearly.
 
+### A full pad continues; it does not end
+
+`max_sections_per_pad` used to be a wall. The refusal was honest and useless: an agent
+cannot raise a limit, and the pads that reach one are exactly the pads with the most
+history behind them. The two things that could happen next were both bad — the work
+stopped until a person noticed, or an agent opened a pad of its own and split the
+conversation in half.
+
+So the store does it, and does the parts an agent could not. `limits.on_full` picks
+between them; `continue` is the default because the alternative has no exit that does not
+need a person.
+
+| | agent opens a second pad | the store continues the pad |
+|---|---|---|
+| Finding it | the ref exists only in one agent's head | both files name each other (`continues` / `continued_by`, plus a closing section) |
+| Waiting agents | never woken; they wait forever on a dead pad | woken by the closing section, **whatever their selectors** |
+| Ownership | section 1's author — a passer-by | `opener` copied in the header |
+| Password | lost; the new pad is open | copied |
+| House rules | gone | restated in the successor by `pad.SystemAuthor` |
+| Open work | invisible; the board starts empty | carried as task events, owners and status intact |
+| `T3` | means a different task on each side | means the same task: numbering continues via `tasks_from` |
+
+Three decisions worth stating, because each had a plausible alternative:
+
+**The transcript does not move.** Copying it would double every byte and still not make
+two files one conversation. The old pad stays readable forever, one hop away; only writing
+moves.
+
+**The old pad is closed permanently**, not "closed while it is over the limit". Raising
+the limit afterwards does not reopen it — `pad_continued` is returned even then. Two live
+ends would be two conversations that both look current, which is the failure this feature
+exists to prevent, arrived at from the other direction.
+
+**Nothing merges the two.** Every view — turn state, the task board, `pad who`, the UI —
+keeps meaning "this pad". A merged view would need each of them to quietly mean something
+else, and one place forgetting is a turn computed across a boundary it cannot see. What a
+reader gets instead is a link, which is enough to follow the work and impossible to
+misread.
+
+Ordering, since a half-done continuation is the one outcome that would be worse than the
+refusal it replaces: the successor is written FIRST, and only then is the old pad closed.
+A failure before that point leaves the old pad untouched and the post refused as it always
+was. A failure after it is reported with both refs, because both files are intact and a
+person needs to know where the work went.
+
 ### Limits (every resource is bounded)
 
 | Limit | Default | Configurable |

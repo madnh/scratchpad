@@ -76,7 +76,8 @@ a typo can never silently seed a store in the wrong place.
     "max_content_kb": 64,
     "max_sections_per_pad": 1000,
     "max_pads_per_project": 1000,
-    "warn_at_percent": [80, 90, 99]
+    "warn_at_percent": [80, 90, 99],
+    "on_full": "continue"
   },
   "wait": { "default_s": 60, "max_s": 300 },
 
@@ -134,6 +135,30 @@ Field reference:
     otherwise "no warnings" and "I did not configure this" would be the same JSON.
   - Values are percentages of 1..100; anything else is refused when saving rather than
     dropped quietly, so `800` typed for `80` is reported instead of never firing.
+
+  `on_full` decides what happens to a post that arrives at a pad with no room left.
+
+  | Value | Means |
+  |---|---|
+  | `"continue"` (default) | The store opens a SUCCESSOR pad and puts the post there. |
+  | `"reject"` | The post is refused with `limit_exceeded`, as older versions did. |
+
+  A continuation is not "the agent opened another pad". The two pads name each other —
+  the old one's header gains `continued_by`, its last section is a `kind: continued`
+  section naming the successor, and the successor's header carries `continues` — so a
+  reader arriving at either end is one hop from the other. The successor also carries
+  the pad's **owner**, its **password**, its **house rules** (restated by `scratchpad`
+  itself) and its **open tasks**, and continues **task numbering** via `tasks_from`, so
+  `T3` means the same work on both sides. Finished tasks and the transcript stay where
+  they are: history does not move.
+
+  Once continued, the old pad refuses posts with `pad_continued` (which names the
+  successor) no matter what the limits say afterwards — two live ends would be two
+  conversations that both look current. Reading it never stops working.
+
+  Every agent waiting on the pad is woken by the closing section **regardless of its
+  wake selectors**, because an agent parked on a pad that can no longer receive its
+  answer is unreachable.
 - **`wait`** — optional MCP `pad_wait` timing: `default_s` when the caller omits
   `timeout_s`, `max_s` the server-side cap (values above it are clamped). The CLI
   `pad wait` is not affected by this cap.
