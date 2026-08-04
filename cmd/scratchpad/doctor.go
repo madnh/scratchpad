@@ -101,6 +101,11 @@ type doctorStore struct {
 	LastPad      string `json:"last_pad,omitempty"` // most recently modified pad file
 	LastPadParse string `json:"last_pad_parse,omitempty"`
 	ListWarnings int    `json:"list_warnings,omitempty"`
+	// OversizedPads counts the pads refused at this deployment's READ CEILING rather than
+	// failing to parse. They are a different problem with a different fix — the file is
+	// intact and was never parsed — and reporting them as parse failures sent operators
+	// looking for corruption that was not there.
+	OversizedPads int `json:"oversized_pads,omitempty"`
 
 	// Rules is which levels exist and the digest a pad in the default project would be
 	// asked to acknowledge. "The agents ignore the rules" starts here, and the first
@@ -277,6 +282,11 @@ func statStore(cfg config.Config) *doctorStore {
 	// healthy?" probe without touching every file.
 	if pads, warns, err := st.List(""); err == nil {
 		ds.ListWarnings = len(warns)
+		for _, p := range pads {
+			if p.Unreadable != "" && strings.Contains(p.Unreadable, store.CodeContentTooLarge) {
+				ds.OversizedPads++
+			}
+		}
 		if len(pads) > 0 {
 			ds.LastPad = pads[0].Ref
 			ds.LastPadParse = "ok"
@@ -350,8 +360,15 @@ func (r *doctorReport) verdict() []string {
 	case !r.Store.Writable:
 		return []string{"the store exists but is not writable by this user",
 			"next: check ownership/permissions of " + r.ProjectsDir}
+	case r.Store.OversizedPads > 0 && r.Store.OversizedPads == r.Store.ListWarnings:
+		return []string{fmt.Sprintf("the store works but %d pad file(s) are past this deployment's read ceiling (see store group)", r.Store.OversizedPads),
+			"next: they are not corrupt and were never parsed — inspect their size, or raise limits to read them"}
 	case r.Store.ListWarnings > 0:
-		return []string{fmt.Sprintf("the store works but %d pad file(s) fail to parse (see store group)", r.Store.ListWarnings),
+		unreadable := ""
+		if r.Store.OversizedPads > 0 {
+			unreadable = fmt.Sprintf(" (%d of them past the read ceiling, not corrupt)", r.Store.OversizedPads)
+		}
+		return []string{fmt.Sprintf("the store works but %d pad file(s) could not be read%s (see store group)", r.Store.ListWarnings, unreadable),
 			"next: inspect the reported pads; they are plain markdown"}
 	default:
 		return []string{fmt.Sprintf("everything checks out: %d project(s), %d pad(s)", r.Store.ProjectCount, r.Store.PadCount)}
@@ -405,7 +422,10 @@ func (r *doctorReport) writeText(w io.Writer) {
 			fmt.Fprintf(w, "  last pad      %s  (parse: %s)\n", r.Store.LastPad, r.Store.LastPadParse)
 		}
 		if r.Store.ListWarnings > 0 {
-			fmt.Fprintf(w, "  warnings      %d pad file(s) fail to parse\n", r.Store.ListWarnings)
+			fmt.Fprintf(w, "  warnings      %d pad file(s) could not be read\n", r.Store.ListWarnings)
+		}
+		if r.Store.OversizedPads > 0 {
+			fmt.Fprintf(w, "  oversized     %d past this deployment's read ceiling (intact, never parsed)\n", r.Store.OversizedPads)
 		}
 
 		fmt.Fprintln(w, "\n▸ Rules")

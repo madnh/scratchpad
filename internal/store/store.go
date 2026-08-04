@@ -72,17 +72,34 @@ const waitPollInterval = 750 * time.Millisecond
 // produce.
 const padSizeSlack = 1024
 
-// maxPadBytes is the largest pad file this store will read into memory. It is DERIVED
-// from the deployment's own limits rather than configured: a pad that exceeds
-// (title + content + framing) x MaxSectionsPerPad cannot have been produced through
-// Post, so it was hand-written or corrupted, and reading it is all cost and no value.
+// maxReadablePadBytes is the floor under the read ceiling, and it does NOT move with
+// policy. 256 MiB of markdown is on the order of forty million words: past that a file
+// has stopped being a transcript and is corruption, or something written by hand.
 //
-// Without this, a pad file is an unbounded allocation triggered by anyone who can
-// append — and a single oversized pad would take down every listing that walks the
-// store, not just its own page.
+// It is a named constant rather than a multiple of DefaultLimits ON PURPOSE. Deriving it
+// from policy — even from the DEFAULT policy — reintroduces the bug it exists to fix:
+// this tool's own documentation tells an agent to ask for a raised limit when it hits a
+// bound, so "raise, grow, lower again" is a path we recommend, and any ceiling computed
+// from the current defaults collapses back onto pads written while the limit was higher.
+//
+// Whoever changes DefaultLimits: leave this alone. Moving it retroactively withdraws read
+// access to pads that were valid when they were written, which is the one thing an
+// append-only store must never do.
+const maxReadablePadBytes = 256 << 20
+
+// maxPadBytes is the largest pad file this store will read into memory.
+//
+// It bounds an allocation triggered by anyone who can append: without it, one oversized
+// pad takes down every listing that walks the store, not just its own page.
+//
+// The bound is the LARGER of what current policy could have produced and the fixed floor
+// above. Policy raises it — a deployment configured for huge pads reads huge pads — but
+// lowering policy no longer lowers it. Limits govern WRITES; a pad that was valid when it
+// was written stays readable, whatever the operator changes afterwards.
 func (s *Store) maxPadBytes(lim config.Limits) int64 {
 	perSection := int64(lim.MaxContentKB+lim.MaxTitleKB)*1024 + padSizeSlack
-	return perSection*int64(lim.MaxSectionsPerPad) + padSizeSlack
+	derived := perSection*int64(lim.MaxSectionsPerPad) + padSizeSlack
+	return max(derived, maxReadablePadBytes)
 }
 
 // readPadFile reads a pad file with that ceiling enforced, so an oversized file fails
@@ -92,18 +109,32 @@ func (s *Store) maxPadBytes(lim config.Limits) int64 {
 func (s *Store) readPadFile(lim config.Limits, f *os.File, ref string) ([]byte, error) {
 	limit := s.maxPadBytes(lim)
 	if st, err := f.Stat(); err == nil && st.Size() > limit {
-		return nil, coded(CodeContentTooLarge,
-			"pad %s is %d bytes; this deployment reads at most %d (raise limits, or split the pad)", ref, st.Size(), limit)
+		return nil, tooLarge(ref, st.Size(), limit)
 	}
 	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return nil, coded(CodeContentTooLarge,
-			"pad %s exceeds the %d byte read limit for this deployment", ref, limit)
+		return nil, tooLarge(ref, int64(len(data)), limit)
 	}
 	return data, nil
+}
+
+// tooLarge words the refusal for what it now actually means.
+//
+// The ceiling never drops below maxReadablePadBytes, so anything refused here is a file
+// past a quarter of a gigabyte — which no honest sequence of Posts produces. "Raise the
+// limits" was the right advice while the ceiling followed policy; it is misleading now,
+// because the operator most likely did nothing wrong and the file most likely is not a
+// transcript any more. Raising limits is still mentioned, second, because a deployment
+// configured above the floor genuinely does read such a pad.
+func tooLarge(ref string, size, limit int64) error {
+	return coded(CodeContentTooLarge,
+		"pad %s is %d bytes, past the %d byte read ceiling: a file this size is damaged or was"+
+			" written by hand, not appended through this tool. Inspect it — it is plain markdown."+
+			" If it is genuinely this large, raising limits raises the ceiling with them.",
+		ref, size, limit)
 }
 
 // Store reads and writes pads under a projects directory, enforcing the deployment's
@@ -621,6 +652,15 @@ type PadMeta struct {
 	Protected  bool   `json:"protected"`
 	OpenTasks  int    `json:"open_tasks,omitempty"`
 	Overdue    int    `json:"overdue,omitempty"`
+
+	// Unreadable carries why this pad could not be opened, and is empty for every pad
+	// that could. A row with it set has nothing else filled in but Ref and Project.
+	//
+	// It exists because dropping the row was worse than an incomplete one: a pad that
+	// vanishes from `pad list` reads as deleted, and the operator goes looking for data
+	// loss instead of at the one line explaining it. The pad is still there; only this
+	// process cannot read it.
+	Unreadable string `json:"unreadable,omitempty"`
 }
 
 // meta reduces a parsed pad to its listing entry.
@@ -648,7 +688,11 @@ func meta(p *Pad) PadMeta {
 
 // List returns pad metadata for one project ("" = all projects), newest activity
 // first. Password-protected pads are listed too — the password gates content, not
-// existence. Unparseable files are skipped and reported as warnings, never fatal.
+// existence.
+//
+// A pad that cannot be read is still LISTED, with PadMeta.Unreadable carrying the reason,
+// and warned about. It used to be skipped, which meant a pad the store still holds simply
+// disappeared from the table — indistinguishable from one that had been deleted.
 func (s *Store) List(project string) (pads []PadMeta, warnings []string, err error) {
 	if project != "" {
 		if err := ValidateProject(project); err != nil {
@@ -678,7 +722,12 @@ func (s *Store) List(project string) (pads []PadMeta, warnings []string, err err
 			id := strings.TrimSuffix(e.Name(), ".md")
 			parsed, err := s.readNoPassword(p, id)
 			if err != nil {
+				// Both: the warning is what a person scanning stderr sees, the row is what
+				// stops the pad looking deleted to anyone reading the table or the API.
 				warnings = append(warnings, fmt.Sprintf("%s-%s: %v", p, id, err))
+				pads = append(pads, PadMeta{
+					Ref: p + "-" + id, Project: p, Unreadable: err.Error(),
+				})
 				continue
 			}
 			pads = append(pads, meta(parsed))

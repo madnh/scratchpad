@@ -64,6 +64,11 @@ func httpStatusFor(err error) (int, string) {
 		return http.StatusBadRequest, store.CodeInvalidProjectName
 	case store.HasCode(err, store.CodeInvalidInput):
 		return http.StatusBadRequest, store.CodeInvalidInput
+	// A pad past this deployment's read ceiling. Deterministic and explained by the
+	// message, so reporting it as 500/internal told a browser the server had broken when
+	// nothing had: 413 says the entity is too large, which is exactly the case.
+	case store.HasCode(err, store.CodeContentTooLarge):
+		return http.StatusRequestEntityTooLarge, store.CodeContentTooLarge
 	// A lost race on the rules, which is the one error here that is neither the caller's
 	// fault nor the server's: what was sent was fine, the world moved. 409 is the status
 	// that says retry after re-reading, and the dialog branches on the code to do exactly

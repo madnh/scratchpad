@@ -279,3 +279,34 @@ func putRaw(t *testing.T, client *http.Client, url, body string) rawResult {
 	_ = json.NewDecoder(resp.Body).Decode(&payload)
 	return rawResult{status: resp.StatusCode, code: payload.Code}
 }
+
+// Lowering the limits below an existing pad must not take that pad away from the UI.
+// Before the read ceiling was decoupled from policy, this save made every pad in the
+// store answer 500, and the list page showed nothing at all.
+func TestLoweringLimitsThroughTheUIKeepsPadsReadable(t *testing.T) {
+	srv, ts, client, _ := newConfigServer(t)
+	p, _, err := createPad(srv.store, "demo", "alice", "hello", strings.Repeat("x", 20000), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cur configResponse
+	getJSON(t, client, ts.URL+"/api/config", &cur)
+	body := `{"config":{"display_name":"Test","limits":{"max_title_kb":1,"max_content_kb":1,` +
+		`"max_sections_per_pad":1},"wait":{}},"if_digest":"` + cur.Digest + `"}`
+	if code := putJSON(t, client, ts.URL+"/api/config", body, nil); code != http.StatusOK {
+		t.Fatalf("PUT = %d", code)
+	}
+
+	var view map[string]any
+	if code := getJSON(t, client, ts.URL+"/api/pads", &view); code != http.StatusOK {
+		t.Fatalf("GET /api/pads = %d", code)
+	}
+	pads, _ := view["pads"].([]any)
+	if len(pads) != 1 {
+		t.Fatalf("the pad disappeared from the listing after lowering limits: %v", view)
+	}
+	if code := getJSON(t, client, ts.URL+"/api/pads/"+p.Ref(), nil); code != http.StatusOK {
+		t.Fatalf("GET the pad itself = %d, want 200", code)
+	}
+}
