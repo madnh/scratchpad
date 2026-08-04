@@ -17,13 +17,15 @@ import (
 // stdio, or the opt-in TCP listener.
 type Server struct {
 	store *store.Store
-	cfg   config.Config
+	live  *config.Live
 }
 
-// New builds a Server over the shared storage layer. cfg supplies the default
-// project, the wait bounds, and the limits already applied by the store.
-func New(st *store.Store, cfg config.Config) *Server {
-	return &Server{store: st, cfg: cfg}
+// New builds a Server over the shared storage layer. live supplies the default
+// project, the wait bounds, and the limits already applied by the store — read per call
+// rather than copied, so an operator editing the marker under a running server is obeyed
+// instead of ignored until the next restart.
+func New(st *store.Store, live *config.Live) *Server {
+	return &Server{store: st, live: live}
 }
 
 // AddTools registers the full tool surface: pad_create, pad_post, pad_get, pad_rules,

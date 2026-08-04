@@ -50,6 +50,9 @@ func (s *Server) api(fn apiFunc) http.HandlerFunc {
 // httpStatusFor maps a store error code onto an HTTP status, keeping the store's
 // stable code in the body so the UI branches on the code, not on prose.
 func httpStatusFor(err error) (int, string) {
+	if status, code, ok := configStatusFor(err); ok {
+		return status, code
+	}
 	switch {
 	case store.HasCode(err, store.CodePadNotFound):
 		return http.StatusNotFound, store.CodePadNotFound
@@ -89,11 +92,17 @@ type statusResponse struct {
 	ProjectsDir string `json:"projects_dir"`
 	Version     string `json:"version"`
 	Watcher     string `json:"watcher"` // "push" | "rescan"
+	// ConfigWatcher is the same question for the marker file. It is worth its own field
+	// because the failure it explains is different: on "rescan", a setting saved here
+	// still takes effect, just up to the rescan interval later — and a person who saved a
+	// limit and watched nothing change deserves to see that here rather than guess.
+	ConfigWatcher string `json:"config_watcher"` // "push" | "rescan"
 
 	// ReadOnly is about the CONVERSATION: this surface never posts a message and never
 	// moves a task, because both need an agent identity and obey the turn rule. It stays
-	// true now that rules can be edited here — rules are neither, and saying otherwise
-	// would advertise a posting UI that does not exist.
+	// true even though rules and the deployment's settings can be edited here — neither is
+	// a turn or an authored act, and saying otherwise would advertise a posting UI that
+	// does not exist.
 	ReadOnly bool `json:"read_only"`
 }
 
@@ -102,13 +111,19 @@ func (s *Server) handleStatus(_ *http.Request, _ *session) (any, error) {
 	if s.watcher.Degraded() {
 		mode = "rescan"
 	}
+	cfgMode := "push"
+	if s.marker.Degraded() {
+		cfgMode = "rescan"
+	}
+	cfg := s.live.Get()
 	return statusResponse{
-		DisplayName: s.cfg.DisplayName,
-		Instance:    s.cfg.Instance,
-		ProjectsDir: s.cfg.ProjectsDir,
-		Version:     buildinfo.Get().Version,
-		Watcher:     mode,
-		ReadOnly:    true,
+		DisplayName:   cfg.DisplayName,
+		Instance:      cfg.Instance,
+		ProjectsDir:   cfg.ProjectsDir,
+		Version:       buildinfo.Get().Version,
+		Watcher:       mode,
+		ConfigWatcher: cfgMode,
+		ReadOnly:      true,
 	}, nil
 }
 
@@ -526,7 +541,7 @@ type rulesBody struct {
 // the same ceiling the CLI and MCP write through.
 func (s *Server) decodeRulesBody(r *http.Request) (rulesBody, error) {
 	var body rulesBody
-	limit := int64(s.cfg.Limits.MaxContentKB)*1024 + 1024
+	limit := int64(s.live.Get().Limits.MaxContentKB)*1024 + 1024
 	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit)).Decode(&body); err != nil {
 		return rulesBody{}, badInput("expected a JSON body with a text field")
 	}

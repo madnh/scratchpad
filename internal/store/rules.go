@@ -49,14 +49,15 @@ func (s *Store) readRulesFile(path string) (text string, replace bool, err error
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_SH); err != nil {
 		return "", false, err
 	}
-	limit := int64(s.limits.MaxContentKB) * 1024
+	maxKB := s.limits().MaxContentKB
+	limit := int64(maxKB) * 1024
 	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return "", false, err
 	}
 	if int64(len(data)) > limit {
 		return "", false, coded(CodeContentTooLarge,
-			"%s is larger than %d KB; rules are meant to be read by an agent on every join", path, s.limits.MaxContentKB)
+			"%s is larger than %d KB; rules are meant to be read by an agent on every join", path, maxKB)
 	}
 	text, replace = pad.ParseRulesFile(data)
 	return text, replace, nil
@@ -73,9 +74,9 @@ func (s *Store) writeRulesFile(path, text string, replace bool) error {
 		}
 		return nil
 	}
-	if len(body) > s.limits.MaxContentKB*1024 {
+	if maxKB := s.limits().MaxContentKB; len(body) > maxKB*1024 {
 		return coded(CodeContentTooLarge,
-			"rules are %d bytes; the limit is %d KB", len(body), s.limits.MaxContentKB)
+			"rules are %d bytes; the limit is %d KB", len(body), maxKB)
 	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -173,9 +174,10 @@ func (s *Store) checkRulesPolicy(level pad.RuleLevel, by RulesWriter) error {
 	if by == ByUI {
 		return nil
 	}
-	policy, where := s.rules.Store, s.storeRulesPath()
+	rules := s.rulesPolicy()
+	policy, where := rules.Store, s.storeRulesPath()
 	if level == pad.LevelProject {
-		policy = s.rules.Project
+		policy = rules.Project
 		where = filepath.Join(s.projectsDir, "<project>", pad.RulesFileName)
 	}
 	if policy == config.RulesWriteAgent {
@@ -332,13 +334,20 @@ func (s *Store) SetPadRules(req PadRulesRequest) (*PostResult, error) {
 // The UI is exempt from the OWNER question and not from the version one. A person editing
 // through the UI is not an agent overstepping; two browser tabs, or a tab left open while
 // an agent posted new rules, is the same lost edit as anywhere else.
+// The owner check is skipped ONLY for the one value that means "anybody may". Every other
+// value takes the check — including a blank one, which is what a partially-populated
+// config would arrive as. Written this way round because the opposite form
+// (`== RulesWriteOpener`) fails OPEN: any value the loader had not filled in would skip
+// the check and silently hand every pad's rules to any agent on it. Same reason turn state
+// filters on `== KindMessage` and never on `!= KindTask`.
 func (s *Store) checkPadRulesWrite(p *Pad, req PostRequest) error {
-	if !req.SystemPost && s.rules.Pad == config.RulesWriteOpener {
+	padPolicy := s.rulesPolicy().Pad
+	if !req.SystemPost && padPolicy != config.RulesWriteAny {
 		if opener := p.Opener(); req.Author != opener {
 			return coded(CodeNotRulesOwner,
 				"the rules of pad %s belong to the agent that opened it (%s), and you are %q"+
 					" (rules.pad = %q). Ask %s to write them, or edit them in the Web UI.",
-				p.Ref(), opener, req.Author, s.rules.Pad, opener)
+				p.Ref(), opener, req.Author, padPolicy, opener)
 		}
 	}
 	cur, _, ok := p.RulesSection()

@@ -39,7 +39,7 @@ type createOutput struct {
 }
 
 func (s *Server) padCreate(_ context.Context, _ *mcp.CallToolRequest, in createInput) (*mcp.CallToolResult, createOutput, error) {
-	project := config.ResolveProject(s.cfg, in.Project)
+	project := config.ResolveProject(s.live.Get(), in.Project)
 	p, password, err := s.store.CreatePad(store.CreateRequest{
 		Project: project, Author: in.Author, Title: in.Title,
 		Content: in.Content, Protect: in.Protect, AckRules: in.AckRules,
@@ -204,7 +204,7 @@ func (s *Server) padRules(_ context.Context, _ *mcp.CallToolRequest, in rulesInp
 	}
 	project := ""
 	if in.Project != "" {
-		project = config.ResolveProject(s.cfg, in.Project)
+		project = config.ResolveProject(s.live.Get(), in.Project)
 	}
 	rules, err := s.store.ProjectRuleSet(project)
 	if err != nil {
@@ -293,11 +293,12 @@ type waitOutput struct {
 }
 
 func (s *Server) padWait(ctx context.Context, _ *mcp.CallToolRequest, in waitInput) (*mcp.CallToolResult, waitOutput, error) {
+	wait := s.live.Get().Wait
 	timeout := time.Duration(in.TimeoutS) * time.Second
 	if in.TimeoutS <= 0 {
-		timeout = time.Duration(s.cfg.Wait.DefaultS) * time.Second
+		timeout = time.Duration(wait.DefaultS) * time.Second
 	}
-	if max := time.Duration(s.cfg.Wait.MaxS) * time.Second; timeout > max {
+	if max := time.Duration(wait.MaxS) * time.Second; timeout > max {
 		timeout = max // clamp, never error: the cap is a server property, not caller misuse
 	}
 	wake, err := pad.ParseWake(in.WakeFor)

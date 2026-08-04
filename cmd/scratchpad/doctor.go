@@ -207,7 +207,7 @@ func runDoctor(dir *dirFlags, wantContent, wantVerdict bool) *doctorReport {
 
 	rep.Store = statStore(cfg)
 	if wantContent {
-		st := store.New(cfg)
+		st := store.New(config.NewLive(cfg))
 		if pads, _, err := st.List(""); err == nil {
 			for _, p := range pads {
 				rep.Content = append(rep.Content, doctorPadInfo{
@@ -266,7 +266,7 @@ func statStore(cfg config.Config) *doctorStore {
 	ds.Exists = true
 	ds.Writable = unix.Access(cfg.ProjectsDir, unix.W_OK) == nil
 
-	st := store.New(cfg)
+	st := store.New(config.NewLive(cfg))
 	if projects, err := st.Projects(); err == nil {
 		ds.ProjectCount = len(projects)
 		for _, p := range projects {

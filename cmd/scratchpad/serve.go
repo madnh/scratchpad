@@ -47,8 +47,10 @@ func newServeCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			st := store.New(cfg)
-			ms := server.BuildMCPServer(st, cfg)
+			live := config.NewLive(cfg)
+			watchConfig(ctx, live, cfgDir)
+			st := store.New(live)
+			ms := server.BuildMCPServer(st, live)
 
 			if stdio {
 				return server.ServeStdio(ctx, ms)

@@ -36,7 +36,9 @@ func testStorePolicy(t *testing.T, limits config.Limits, rules config.RulesPolic
 	if err := os.MkdirAll(projects, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return New(config.Config{RootDir: dir, ProjectsDir: projects, Limits: limits, Rules: rules})
+	return New(config.NewLive(config.Config{
+		RootDir: dir, ProjectsDir: projects, Limits: limits, Rules: rules,
+	}))
 }
 
 // create is the old positional CreatePad, kept for the tests that predate rules and do
@@ -204,6 +206,48 @@ func TestLimits(t *testing.T) {
 	}
 }
 
+// A limit raised under a running store applies to the very next post. This is the whole
+// point of reading the limits from config.Live instead of copying them in at startup: a
+// pad that has hit its ceiling is unblocked by editing the marker, not by a restart.
+func TestLimitsFollowTheLiveConfig(t *testing.T) {
+	s := testStore(t) // 5 sections/pad
+	p, _, err := create(s, "p1", "a", "t", "c", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authors := []string{"b", "a", "b", "a", "b"}
+	var lastErr error
+	for _, who := range authors {
+		_, lastErr = s.Post(PostRequest{Ref: p.Ref(), Author: who, Title: "t", Content: "c"})
+		if lastErr != nil {
+			break
+		}
+	}
+	if !HasCode(lastErr, CodeLimitExceeded) {
+		t.Fatalf("want the pad full first, got %v", lastErr)
+	}
+
+	raised := s.live.Get()
+	raised.Limits.MaxSectionsPerPad = 50
+	s.live.Set(raised)
+
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "b", Title: "t", Content: "c"}); err != nil {
+		t.Fatalf("post after raising the limit: %v", err)
+	}
+
+	// And the other direction: lowering it below what the pad already holds closes it to
+	// new posts rather than doing anything to what is already written.
+	lowered := s.live.Get()
+	lowered.Limits.MaxSectionsPerPad = 2
+	s.live.Set(lowered)
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "a", Title: "t", Content: "c"}); !HasCode(err, CodeLimitExceeded) {
+		t.Fatalf("want limit_exceeded after lowering the limit, got %v", err)
+	}
+	if got, err := s.Get(p.Ref(), ""); err != nil || len(got.Sections) != 6 {
+		t.Fatalf("the transcript changed under a lowered limit: %v (err %v)", got, err)
+	}
+}
+
 func TestContentWithHashLines(t *testing.T) {
 	s := testStore(t)
 	content := "intro\n\n# heading inside content\nmore\n# 5 - fake - but no trailing pattern match?\n"
@@ -264,8 +308,11 @@ func TestWait(t *testing.T) {
 
 func TestConcurrentPosts(t *testing.T) {
 	s := testStore(t)
-	limits := config.DefaultLimits
-	s.limits = limits // plenty of room
+	// Plenty of room — and raised the way a running deployment raises it, through the
+	// live config rather than by reaching into the store.
+	roomy := s.live.Get()
+	roomy.Limits = config.DefaultLimits
+	s.live.Set(roomy)
 	pad, _, err := create(s, "default", "seed", "t", "c", false)
 	if err != nil {
 		t.Fatal(err)

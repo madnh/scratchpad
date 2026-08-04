@@ -367,6 +367,53 @@ func TestPadRulesBelongToTheOpener(t *testing.T) {
 	}
 }
 
+// The pad policy decides which way an UNRECOGNISED value falls, and it must fall closed.
+//
+// This is not hypothetical bookkeeping: the policy is now read from a live config that a
+// filesystem watcher can replace while the process runs, so "the loader always fills it in"
+// became one more thing that has to keep being true. Testing the blank case pins the
+// behaviour to the store rather than to the loader's good manners — the check must be
+// written so that only the ONE value meaning "anybody" relaxes it.
+func TestAnUnrecognisedPadPolicyFailsClosed(t *testing.T) {
+	for _, policy := range []string{"", "opener", "something-a-future-binary-writes"} {
+		t.Run("policy="+policy, func(t *testing.T) {
+			s := testStorePolicy(t, config.DefaultLimits, config.RulesPolicy{
+				Store: config.RulesWriteAgent, Project: config.RulesWriteAgent, Pad: policy,
+			})
+			p, _, err := create(s, "proj", "pm", "kickoff", "starting", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "ios", Title: "hi", Content: "hello"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.SetPadRules(PadRulesRequest{
+				Ref: p.Ref(), Author: "ios", Text: "- mine now", IfDigest: pad.NoRules, By: ByAgent,
+			}); !HasCode(err, CodeNotRulesOwner) {
+				t.Fatalf("policy %q let a non-opener write the pad's rules: %v", policy, err)
+			}
+		})
+	}
+
+	// …and the one value that DOES mean "anybody" still does, so the check above is not
+	// simply refusing everyone.
+	s := testStorePolicy(t, config.DefaultLimits, config.RulesPolicy{
+		Store: config.RulesWriteAgent, Project: config.RulesWriteAgent, Pad: config.RulesWriteAny,
+	})
+	p, _, err := create(s, "proj", "pm", "kickoff", "starting", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "ios", Title: "hi", Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetPadRules(PadRulesRequest{
+		Ref: p.Ref(), Author: "ios", Text: "- anything goes", IfDigest: pad.NoRules, By: ByAgent,
+	}); err != nil {
+		t.Fatalf("rules.pad = any must let any agent on the pad write them: %v", err)
+	}
+}
+
 // The way round the opener policy that existed before it did: the reserved identity used
 // to be INFERRED from the author string (`SystemPost: author == SystemAuthor`), and the
 // CLI defaulted that exact string when --as was omitted — so an agent got a person's

@@ -38,10 +38,11 @@ func setup(t *testing.T) (*mcp.ClientSession, *store.Store) {
 		RootDir:     dir,
 		ProjectsDir: projects,
 	}
-	st := store.New(cfg)
+	live := config.NewLive(cfg)
+	st := store.New(live)
 
 	ms := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
-	New(st, cfg).AddTools(ms)
+	New(st, live).AddTools(ms)
 
 	serverT, clientT := mcp.NewInMemoryTransports()
 	if _, err := ms.Connect(ctx, serverT, nil); err != nil {
