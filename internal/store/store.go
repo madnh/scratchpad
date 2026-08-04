@@ -115,6 +115,23 @@ func (s *Store) MaxPadBytes() int64 { return s.maxPadBytes(s.limits()) }
 // with a clear error instead of an OOM. The size is checked twice: once from the
 // file's own metadata (cheap, catches the normal case) and once by reading one byte
 // past the limit (authoritative, and immune to the file growing between the two).
+//
+// io.ReadAll grows by doubling and copying, so this holds roughly two copies of the file
+// at its peak — 605 MB measured on a 244 MiB pad. Two obvious fixes have been tried and
+// rejected, both measured; if you are about to try one, read this first:
+//
+//   - bytes.Buffer.Grow(size+1) + ReadFrom(LimitReader) is WORSE, not better. Once the
+//     buffer is full ReadFrom must read again to learn the reader is done, finds no room,
+//     and doubles: one run measured 1302 MB. The probe past the limit is not incidental —
+//     it is how the second size check works — so the buffer can never be sized exactly.
+//   - make([]byte, size) + io.ReadFull does measure smaller (272 MB), and drops the
+//     property in the paragraph above: a file that grew after the stat is silently
+//     truncated instead of caught. Keeping both means allocating size+1, filling the
+//     first size bytes, then probing for one more.
+//
+// Neither was judged worth it: the metadata path — the one that ran on every listing —
+// no longer comes through here at all (it streams), and what is left is reading a pad
+// large enough that opening it is already unusual. Measure before deciding otherwise.
 func (s *Store) readPadFile(lim config.Limits, f *os.File, ref string) ([]byte, error) {
 	limit := s.maxPadBytes(lim)
 	if st, err := f.Stat(); err == nil && st.Size() > limit {
