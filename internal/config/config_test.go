@@ -1,11 +1,13 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBootstrapAndLoad(t *testing.T) {
@@ -168,5 +170,110 @@ func TestRulesPolicy(t *testing.T) {
 		if _, err := LoadDir(dir); err == nil || !strings.Contains(err.Error(), "rules.") {
 			t.Fatalf("an unknown policy value must refuse to load (%s): %v", body, err)
 		}
+	}
+}
+
+// A store initialized by an older build must not keep handing out that build's guide.
+// init refuses an existing dir, so before this there was no way to refresh it at all.
+func TestResolveRefreshesAStaleGuide(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "store")
+	if err := Bootstrap(dir); err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(dir, DocFilename)
+	if err := os.WriteFile(docPath, []byte("# an older build wrote this\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(EnvDir, dir)
+	if _, _, _, err := Resolve(""); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, DocMarkdown()) {
+		t.Fatalf("the stale guide was not refreshed:\n%s", got)
+	}
+}
+
+// A guide that is already current must not be rewritten — an untouched file keeps its
+// mtime, which is what stops every command from looking like it changed the store.
+func TestResolveLeavesACurrentGuideAlone(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "store")
+	if err := Bootstrap(dir); err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(dir, DocFilename)
+	before, err := os.Stat(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Backdate it so a rewrite is unmistakable rather than a same-instant coincidence.
+	old := before.ModTime().Add(-time.Hour)
+	if err := os.Chtimes(docPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(EnvDir, dir)
+	if _, _, _, err := Resolve(""); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.Stat(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(old) {
+		t.Fatal("a guide that was already current got rewritten anyway")
+	}
+}
+
+// A missing guide is restored: it belongs to the tool, and a store without it is a store
+// nobody can read their way into.
+func TestResolveRestoresADeletedGuide(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "store")
+	if err := Bootstrap(dir); err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(dir, DocFilename)
+	if err := os.Remove(docPath); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(EnvDir, dir)
+	if _, _, _, err := Resolve(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(docPath); err != nil {
+		t.Fatalf("the guide was not restored: %v", err)
+	}
+}
+
+// Refreshing the guide is a convenience, never a precondition: a store on a read-only
+// filesystem must still be usable. Failing `pad post` because a doc could not be rewritten
+// would be the tool putting its own paperwork above the work.
+func TestResolveSurvivesAnUnwritableDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the write bit")
+	}
+	dir := filepath.Join(t.TempDir(), "store")
+	if err := Bootstrap(dir); err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(dir, DocFilename)
+	if err := os.WriteFile(docPath, []byte("# stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil { // r-x: cannot replace a file inside
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	t.Setenv(EnvDir, dir)
+	if _, _, _, err := Resolve(""); err != nil {
+		t.Fatalf("an unwritable guide broke the command: %v", err)
 	}
 }

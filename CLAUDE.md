@@ -108,6 +108,12 @@ in the same change**, and bump `config.ConfigVersion` when the marker format cha
 incompatibly. The skills topics (`internal/skills/topics/`) document the same
 contracts — check them too.
 
+Keeping the EMBEDDED copy current is not enough on its own: every existing dir holds its
+own copy, and `init` refuses a dir that already exists. `config.Resolve` therefore rewrites
+a dir's `config.md` whenever it differs from the binary's (`ensureDoc`) — best-effort and
+silent, because a read-only store must not fail `pad post` over a doc. That file belongs to
+the tool; the operator's choices live in `scratchpad.config.json`, and the guide says so.
+
 ## Build / test
 
 ```

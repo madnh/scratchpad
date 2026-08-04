@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"os"
@@ -49,7 +50,17 @@ func DefaultDir() (string, error) {
 // An explicit dir (1–3) that is not initialized is a hard error pointing at `init`:
 // a typo in a flag or env var must never silently seed a stray store. Only the fixed
 // default path may be created implicitly.
+// It also keeps the dir's copy of the configuration guide current — see ensureDoc.
 func Resolve(flagDir string) (cfg Config, dir, source string, err error) {
+	cfg, dir, source, err = resolve(flagDir)
+	if err == nil {
+		ensureDoc(dir)
+	}
+	return cfg, dir, source, err
+}
+
+// resolve is Resolve without the doc refresh, so the precedence rules stay one function.
+func resolve(flagDir string) (cfg Config, dir, source string, err error) {
 	if s := strings.TrimSpace(flagDir); s != "" {
 		return loadExplicit(s, "flag --dir")
 	}
@@ -118,6 +129,26 @@ func Bootstrap(dir string) error {
 		return err
 	}
 	return os.MkdirAll(filepath.Join(dir, "projects"), 0o700)
+}
+
+// ensureDoc rewrites the dir's config.md when it differs from this binary's copy, so a
+// store initialized by an older build does not keep handing out a guide that describes
+// settings this binary no longer has — or, worse, omits the ones it grew.
+//
+// It runs on every Resolve rather than only on init, because init REFUSES an existing dir:
+// without this there was no way at all to refresh the guide short of deleting the store.
+// The file is the tool's, not the operator's (`scratchpad.config.json` is where their
+// choices live), so overwriting it is the honest thing to do — the guide says so itself.
+//
+// Deliberately best-effort and silent. A read-only store, a dir owned by another user, a
+// full disk: none of those are reasons to fail `pad post`. The cost when nothing changed
+// is one small read.
+func ensureDoc(dir string) {
+	path := filepath.Join(dir, DocFilename)
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, docMarkdown) {
+		return
+	}
+	_ = os.WriteFile(path, docMarkdown, 0o644)
 }
 
 // WriteDoc writes the embedded configuration guide into dir as config.md. It overwrites
