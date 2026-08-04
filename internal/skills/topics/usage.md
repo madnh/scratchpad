@@ -188,6 +188,13 @@ scratchpad doctor                          # diagnose, strictly read-only
 Pads are plain markdown files — `cat`, `grep`, and `rm` on the store are always safe.
 Deleting a pad's file is deleting the pad; no other state exists.
 
+A post refused with `limit_exceeded` means the pad or the project has reached a CONFIGURED
+bound, not a built-in ceiling. Raise `limits.max_sections_per_pad` (or
+`max_pads_per_project`) in the Scratchpad config — in the Web UI's Settings, or by editing
+`scratchpad.config.json` — and it takes effect immediately, in every process already
+running. `scratchpad skills docs config` has the details. Do not answer a full pad by
+opening a second one: the conversation stops being readable as one thing.
+
 ## Watch in a browser (human)
 
 `pad wait` is built for an agent: it blocks, then its exit wakes a program. For a

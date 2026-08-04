@@ -72,11 +72,28 @@ defaulted that same string, so an agent claimed it by not naming itself. Never r
   `pad.SystemAuthor` ("scratchpad"), which agents may not claim. Do not widen this.
   The UI is also the surface the rules POLICY points at — it is exempt from who-may-write
   and NOT from the version check, since two tabs lose an edit exactly as two agents do.
+  It also edits the deployment's own settings (`PUT /api/config`), which is not a widening
+  of the above: config is the OPERATOR's, takes no turn and carries no author. What it may
+  write is `display_name`, `default_project`, `limits`, `wait` — and nothing else, ever.
+  `tcp`, `ui` and `rules` decide who may reach this deployment and who may rewrite the
+  operator's instructions; a browser session must not be how those are granted.
 
 `internal/watch` turns pad-file writes into a push stream via kernel filesystem
 events. It watches the STORE, never the writers: any writer — CLI, MCP, or a person
 with `rm` — is noticed identically, and `internal/store` stays ignorant of listeners.
 Do not add a writer-side notification hook; it would miss every uncooperative writer.
+The same package watches the MARKER (`watch.Marker`, `watch.ReloadConfig`) — the file,
+not the writers, for the same reason.
+
+**Config is read continuously, never frozen at startup.** Every surface takes a
+`*config.Live` and reads a snapshot per operation; `store.New`/`mcpsrv.New`/`webui.New`
+take nothing else, so no call site can be handed a stale copy. Only the HOT groups reload
+(`config.MergeHot`: display_name, default_project, limits, wait, rules) — `instance`,
+`dir`, `tcp` and `ui` name things the process has already bound, so they are reported and
+applied on restart. A marker that fails to load leaves the running config ALONE: falling
+back to defaults would silently reset the `rules` policy. Writing the marker goes through
+`config.UpdateMarker` (quote-the-version + atomic rename), never `WriteMarker` — that one
+belongs to `init` and refuses to overwrite.
 
 The UI's assets are `go:embed`-ed, so **rebuild the binary after editing anything under
 `internal/webui/assets/`** — a running server keeps serving the old copy. The vendored
@@ -90,6 +107,21 @@ resolution order, env vars, the pad file format), **update `internal/config/conf
 in the same change**, and bump `config.ConfigVersion` when the marker format changes
 incompatibly. The skills topics (`internal/skills/topics/`) document the same
 contracts — check them too.
+
+Keeping the EMBEDDED copy current is not enough on its own: every existing dir holds its
+own copy, and `init` refuses a dir that already exists. `config.Resolve` therefore rewrites
+a dir's `config.md` whenever it differs from the binary's (`ensureDoc`) — best-effort and
+silent, because a read-only store must not fail `pad post` over a doc. That file belongs to
+the tool; the operator's choices live in `scratchpad.config.json`, and the guide says so.
+
+**Three documentation surfaces, one contract.** `internal/skills/SKILL.md` is the AGENT's
+entry point — the short document a host loads to decide when to reach for this tool — and
+it is the one that changes behaviour in practice, because an agent acts on it without ever
+running `skills docs`. The topics are the reference it can consult; `config.md` is the
+operator's. A change to a rule an agent must obey belongs in SKILL.md FIRST, then in
+whichever topic covers it. `skills install --into <dir>` publishes SKILL.md; the
+destination is always the operator's to name (flag or `SCRATCHPAD_SKILLS_DIR`), never a
+default — this repo names no host, and a conventional path is a host's property.
 
 ## Build / test
 

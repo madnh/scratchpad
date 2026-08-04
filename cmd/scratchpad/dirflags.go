@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 
 	"github.com/spf13/cobra"
 
 	"github.com/madnh/scratchpad/internal/config"
 	"github.com/madnh/scratchpad/internal/store"
+	"github.com/madnh/scratchpad/internal/watch"
 )
 
 // dirFlags binds the shared --dir flag and resolves it to a loaded config + store,
@@ -30,10 +33,28 @@ func (d *dirFlags) resolve() (cfg config.Config, dir, source string, err error) 
 }
 
 // open resolves the dir and builds the store over its projects/ root.
-func (d *dirFlags) open() (*store.Store, config.Config, error) {
+//
+// It hands back a *config.Live even though a CLI command exits before the marker could
+// possibly change: every surface takes the same type, so nothing has to remember which
+// ones are long-lived. The long-lived ones additionally call watchConfig.
+func (d *dirFlags) open() (*store.Store, *config.Live, error) {
 	cfg, _, _, err := d.resolve()
 	if err != nil {
-		return nil, config.Config{}, err
+		return nil, nil, err
 	}
-	return store.New(cfg), cfg, nil
+	live := config.NewLive(cfg)
+	return store.New(live), live, nil
+}
+
+// watchConfig keeps live in step with the marker on disk for as long as ctx runs, so an
+// operator editing the config is obeyed by the process already running rather than only
+// by the next one to start. `serve` calls it; the Web UI runs the same watcher inside
+// its own server, alongside the one it already keeps on the pads.
+func watchConfig(ctx context.Context, live *config.Live, dir string) {
+	m := watch.ReloadConfig(dir, live)
+	go func() {
+		if err := m.Run(ctx); err != nil {
+			log.Printf("config: watcher stopped: %v", err)
+		}
+	}()
 }

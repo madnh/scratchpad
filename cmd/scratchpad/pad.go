@@ -191,7 +191,7 @@ func newPadCreateCmd() *cobra.Command {
 				return err
 			}
 			created, pw, err := st.CreatePad(store.CreateRequest{
-				Project: config.ResolveProject(cfg, project), Author: a,
+				Project: config.ResolveProject(cfg.Get(), project), Author: a,
 				Title: title, Content: content, Protect: protect, AckRules: ackRules,
 			})
 			if err != nil {

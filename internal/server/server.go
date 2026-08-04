@@ -33,12 +33,14 @@ const shutdownGrace = 5 * time.Second
 
 // BuildMCPServer assembles the MCP server (the full tool surface) bound to the store.
 // It is transport-agnostic.
-func BuildMCPServer(st *store.Store, cfg config.Config) *mcp.Server {
+func BuildMCPServer(st *store.Store, live *config.Live) *mcp.Server {
 	ms := mcp.NewServer(&mcp.Implementation{
-		Name:    cfg.Instance,
+		// The server's own name is fixed for the life of the process: it is announced
+		// once at initialize, so `instance` is one of the marker's COLD groups.
+		Name:    live.Get().Instance,
 		Version: buildinfo.Get().Version,
 	}, nil)
-	mcpsrv.New(st, cfg).AddTools(ms)
+	mcpsrv.New(st, live).AddTools(ms)
 	return ms
 }
 

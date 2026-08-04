@@ -36,6 +36,7 @@ export default function mount(outlet) {
       pageHead("Settings"),
       readingCard(),
       notificationsCard(),
+      deploymentCard(),
       storeRulesCard(),
       watchListCard(),
       diagnosticsCard(status),
@@ -250,6 +251,192 @@ function watchListCard() {
   return card;
 }
 
+// deploymentCard edits the marker file — the settings that belong to the STORE rather
+// than to this browser. Everything above it is a preference that lives in localStorage
+// and follows the person; everything in here follows the deployment, and every agent
+// working against it feels the change.
+//
+// The two halves are separated on purpose. What is editable takes effect on every process
+// using this store within a moment, because they all watch the file. What is not either
+// names something a running process has already bound (a port, a socket) or decides who
+// may rewrite the rules — a browser session must not be the thing that grants that.
+function deploymentCard() {
+  const card = el("puredashboard-card", { title: "Deployment settings" });
+  const body = el("div");
+  let digest = "";
+  // What a save will send, refreshed by paint(). The Save button is built ONCE and
+  // appended as a direct child of the card, because that is what the card projects into
+  // its header — nested inside `body` it is not projected, and lands at the top of the
+  // form instead, above the fields it applies to.
+  let fields = null;
+
+  // An empty field means "use the built-in default", exactly as a missing line in the
+  // marker does — so the default shows as a placeholder rather than being filled in.
+  // Filling it in would turn a default into an explicit setting on the first save, and
+  // this deployment would stop following the built-in one if it ever changed.
+  const numField = (label, value, def, hint) => {
+    const input = el("input", {
+      type: "number", min: "0", step: "1",
+      value: value ? String(value) : "",
+      placeholder: String(def),
+    });
+    const row = el("label", { class: "setting-row" },
+      el("span", { class: "muted", text: label }),
+      input,
+    );
+    return { input, node: hint ? el("div", {}, row, el("p", { class: "muted", text: hint })) : row };
+  };
+
+  const textField = (label, value, def, hint) => {
+    const input = el("input", { type: "text", value: value || "", placeholder: def });
+    const row = el("label", { class: "setting-row" },
+      el("span", { class: "muted", text: label }),
+      input,
+    );
+    return { input, node: hint ? el("div", {}, row, el("p", { class: "muted", text: hint })) : row };
+  };
+
+  // Reads a number field back. A blank is 0 — "the default". Anything that is not a
+  // whole number ≥ 0 is refused by name instead of being coerced: silently saving 0 for
+  // what somebody typed would set the limit to the default and call it success.
+  const readNum = (field, label) => {
+    const v = field.input.value.trim();
+    if (v === "") return 0;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 0) throw new Error(`${label} must be a whole number, or empty for the default`);
+    return n;
+  };
+
+  const save = el("button", {
+    type: "button", text: "Save settings", disabled: true,
+    "data-card-extra": "", // the card projects this into its header
+    onclick: async () => {
+      if (!fields) return;
+      const f = fields;
+      let payload;
+      try {
+        payload = {
+          display_name: f.name.input.value.trim(),
+          default_project: f.project.input.value.trim(),
+          limits: {
+            max_title_kb: readNum(f.titleKB, "Title, KB"),
+            max_content_kb: readNum(f.contentKB, "Content per section, KB"),
+            max_sections_per_pad: readNum(f.sections, "Sections per pad"),
+            max_pads_per_project: readNum(f.padsPer, "Pads per project"),
+          },
+          wait: {
+            default_s: readNum(f.waitDefault, "Default wait, seconds"),
+            max_s: readNum(f.waitMax, "Longest wait, seconds"),
+          },
+        };
+      } catch (err) {
+        toast(err.message, { type: "warn" });
+        return;
+      }
+      save.disabled = true;
+      try {
+        const next = await api.setConfig(payload, digest);
+        paint(next);
+        toast("Settings saved — every process using this store picks them up within a moment",
+          { type: "success" });
+      } catch (err) {
+        save.disabled = false;
+        if (err.code === "config_stale") {
+          // Somebody else saved in between. Re-read rather than overwrite them, and
+          // say so — the same remedy the rules dialog offers on its own conflict.
+          toast("Someone else changed these settings; reloading the current values", { type: "warn" });
+          api.config().then(paint).catch(() => {});
+          return;
+        }
+        toast(err.message, { type: "error" });
+      }
+    },
+  });
+  card.append(save, body);
+
+  const paint = (data) => {
+    digest = data.digest;
+    const c = data.config, d = data.defaults;
+
+    const name = textField("Deployment name", c.display_name, d.display_name,
+      "Shown in this UI's header and by scratchpad doctor.");
+    const project = textField("Default project", c.default_project, d.default_project,
+      "Used when a command or an MCP tool call omits the project.");
+
+    const titleKB = numField("Title, KB", c.limits.max_title_kb, d.limits.max_title_kb);
+    const contentKB = numField("Content per section, KB", c.limits.max_content_kb, d.limits.max_content_kb);
+    const sections = numField("Sections per pad", c.limits.max_sections_per_pad, d.limits.max_sections_per_pad);
+    const padsPer = numField("Pads per project", c.limits.max_pads_per_project, d.limits.max_pads_per_project);
+
+    const waitDefault = numField("Default wait, seconds", c.wait.default_s, d.wait.default_s);
+    const waitMax = numField("Longest wait, seconds", c.wait.max_s, d.wait.max_s);
+
+    fields = { name, project, titleKB, contentKB, sections, padsPer, waitDefault, waitMax };
+    save.disabled = false;
+
+    setChildren(body,
+      name.node,
+      project.node,
+      el("p", { class: "muted", text: "How much one section may carry, and how much a pad or a project may hold:" }),
+      titleKB.node,
+      contentKB.node,
+      sections.node,
+      padsPer.node,
+      el("p", {
+        class: "muted",
+        text: "A pad that has reached its section limit refuses the next post — raise this rather " +
+          "than losing the transcript. Leave a field empty to follow the built-in default shown in it.",
+      }),
+      el("p", { class: "muted", text: "How long an agent's pad_wait may block before it must return:" }),
+      waitDefault.node,
+      waitMax.node,
+      el("p", {
+        class: "muted",
+        text: "The cap exists because an MCP call has to answer inside the host's own timeout. " +
+          "The CLI's pad wait is not bounded by it.",
+      }),
+      coldBlock(data.cold),
+    );
+  };
+
+  api.config()
+    .then(paint)
+    .catch((err) => setChildren(body,
+      el("p", { class: "muted", text: `Could not read the deployment settings: ${err.message}` })));
+
+  return card;
+}
+
+// coldBlock shows the settings this page will not write, and says why in one line each.
+// Hiding them would leave "where do I change the port?" unanswerable from the UI; showing
+// them without the reason would read as a bug.
+function coldBlock(cold) {
+  const d = el("puredashboard-descriptions");
+  d.columns = 1;
+  d.items = [
+    { label: "Instance", value: cold.instance },
+    { label: "Store", value: cold.projects_dir },
+    { label: "Socket", value: cold.socket_path },
+    { label: "UI port", value: String(cold.ui_port) },
+    { label: "MCP TCP port", value: String(cold.tcp_port) },
+    {
+      label: "Who may write the rules",
+      value: `store: ${cold.rules.store}, project: ${cold.rules.project}, pad: ${cold.rules.pad}`,
+    },
+  ];
+  return el("div", {},
+    el("p", { class: "muted", text: "Fixed while this process runs:" }),
+    d,
+    el("p", {
+      class: "muted",
+      text: "Ports and the socket name are already bound, so changing them here could not be " +
+        "honoured. The rules policy is left out for a different reason: it decides whether an " +
+        `agent may rewrite the operator's instructions, and a browser session is not how that ` +
+        "is granted. Edit " + cold.marker_file + " and restart.",
+    }),
+  );
+}
+
 // storeRulesCard is where the store-wide rules live, because they are a property of this
 // deployment rather than of any one pad — the same reason the store path and the watcher
 // mode are on this page.
@@ -308,6 +495,12 @@ function diagnosticsCard(status) {
       value: status.watcher === "push"
         ? "kernel filesystem events (instant)"
         : "periodic rescan — filesystem notification is unavailable here, so changes appear within 30s",
+    },
+    {
+      label: "Settings reload",
+      value: status.config_watcher === "push"
+        ? "kernel filesystem events (instant)"
+        : "periodic rescan — a saved setting still applies, within 30s",
     },
   ];
   card.append(d);

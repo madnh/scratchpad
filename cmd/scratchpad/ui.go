@@ -40,10 +40,11 @@ func newUICmd() *cobra.Command {
 			"$" + config.EnvDir + " / default, see `" + appinfo.Name() + " skills docs config`).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			st, cfg, err := dir.open()
+			st, live, err := dir.open()
 			if err != nil {
 				return err
 			}
+			cfg := live.Get()
 
 			// flag > env > marker > default, the same precedence as everywhere else.
 			resolvedPort := cfg.UI.Port
@@ -62,7 +63,7 @@ func newUICmd() *cobra.Command {
 				resolvedNoAuth = noAuth
 			}
 
-			srv, err := webui.New(st, cfg, webui.Options{Port: resolvedPort, NoAuth: resolvedNoAuth})
+			srv, err := webui.New(st, live, webui.Options{Port: resolvedPort, NoAuth: resolvedNoAuth})
 			if err != nil {
 				return err
 			}
@@ -80,7 +81,9 @@ func newUICmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(),
 					"warning: --no-auth — every local process that can reach this port can read OR DELETE every pad,")
 				fmt.Fprintln(cmd.ErrOrStderr(),
-					"         including password-protected ones (the password gates content, never deletion)")
+					"         including password-protected ones (the password gates content, never deletion),")
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"         and can rewrite this deployment's settings (limits, wait, default project)")
 			} else {
 				fmt.Fprintln(cmd.ErrOrStderr(),
 					"open the URL above; the token in it starts a session, then it is dropped from the address bar")

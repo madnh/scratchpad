@@ -105,6 +105,16 @@ export const api = {
   // UI is exempt from the policy over who may write rules — it is the surface the policy
   // points at — but not from the version check. A tab left open while an agent posted new
   // rules would otherwise save over a version nobody here ever saw.
+  // The deployment's own settings. The digest that comes back with a read must be quoted
+  // on the write — the same compare-and-set the rules use, and for the same reason: two
+  // tabs of this page lose an edit exactly the way two agents do.
+  config: () => request("/api/config"),
+  setConfig: (config, ifDigest) =>
+    request("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({ config, if_digest: ifDigest || "" }),
+    }),
+
   storeRules: () => request("/api/rules"),
   setStoreRules: (text, replace, ifDigest) =>
     request("/api/rules", {

@@ -81,8 +81,9 @@ const padSizeSlack = 1024
 // append — and a single oversized pad would take down every listing that walks the
 // store, not just its own page.
 func (s *Store) maxPadBytes() int64 {
-	perSection := int64(s.limits.MaxContentKB+s.limits.MaxTitleKB)*1024 + padSizeSlack
-	return perSection*int64(s.limits.MaxSectionsPerPad) + padSizeSlack
+	lim := s.limits()
+	perSection := int64(lim.MaxContentKB+lim.MaxTitleKB)*1024 + padSizeSlack
+	return perSection*int64(lim.MaxSectionsPerPad) + padSizeSlack
 }
 
 // readPadFile reads a pad file with that ceiling enforced, so an oversized file fails
@@ -107,13 +108,16 @@ func (s *Store) readPadFile(f *os.File, ref string) ([]byte, error) {
 }
 
 // Store reads and writes pads under a projects directory, enforcing the deployment's
-// limits. It holds no open handles or caches — every operation goes to disk, which is
-// what lets separate processes (CLI, server) share one store safely.
+// limits. It holds no open handles and caches no pad content — every operation goes to
+// disk, which is what lets separate processes (CLI, server) share one store safely.
+//
+// The limits and the rules policy are read from a *config.Live rather than copied in,
+// for the same reason: a copy taken at startup is a cache, and it was the one thing that
+// made two processes over one store enforce two different sets of rules.
 type Store struct {
 	dir         string // the Scratchpad dir; the store-wide rules file lives here
 	projectsDir string
-	limits      config.Limits
-	rules       config.RulesPolicy
+	live        *config.Live
 }
 
 // New builds a Store over a loaded deployment config: its dir, its projects directory,
@@ -122,14 +126,22 @@ type Store struct {
 // It takes the whole config rather than the three fields it reads today, because a policy
 // that a call site can forget to pass is a policy that a call site WILL forget to pass —
 // and the one it would silently drop is the one deciding who may rewrite the rules.
-func New(cfg config.Config) *Store {
+func New(live *config.Live) *Store {
+	cfg := live.Get()
 	return &Store{
 		dir:         cfg.RootDir,
 		projectsDir: cfg.ProjectsDir,
-		limits:      cfg.Limits,
-		rules:       cfg.Rules,
+		live:        live,
 	}
 }
+
+// limits is the deployment's current bounds. Take ONE snapshot per operation and use it
+// throughout: a Post that re-read them mid-flight could check a section against one limit
+// and the pad size against another.
+func (s *Store) limits() config.Limits { return s.live.Get().Limits }
+
+// rulesPolicy is the deployment's current who-may-write-rules policy.
+func (s *Store) rulesPolicy() config.RulesPolicy { return s.live.Get().Rules }
 
 // ProjectsDir returns the root the store operates under.
 func (s *Store) ProjectsDir() string { return s.projectsDir }
@@ -159,24 +171,26 @@ func ValidateProject(name string) error {
 
 // validateTitle enforces the single-line title and its size limit.
 func (s *Store) validateTitle(title string) error {
+	maxKB := s.limits().MaxTitleKB
 	switch {
 	case strings.TrimSpace(title) == "":
 		return coded(CodeInvalidInput, "title is required")
 	case strings.ContainsAny(title, "\n\r"):
 		return coded(CodeInvalidInput, "title must be a single line")
-	case len(title) > s.limits.MaxTitleKB*1024:
-		return coded(CodeContentTooLarge, "title is %d bytes; the limit is %d KB", len(title), s.limits.MaxTitleKB)
+	case len(title) > maxKB*1024:
+		return coded(CodeContentTooLarge, "title is %d bytes; the limit is %d KB", len(title), maxKB)
 	}
 	return nil
 }
 
 // validateContent enforces the per-section content size limit.
 func (s *Store) validateContent(content string) error {
+	maxKB := s.limits().MaxContentKB
 	switch {
 	case strings.TrimSpace(content) == "":
 		return coded(CodeInvalidInput, "content is required (pass the message body)")
-	case len(content) > s.limits.MaxContentKB*1024:
-		return coded(CodeContentTooLarge, "content is %d bytes; the limit is %d KB per section", len(content), s.limits.MaxContentKB)
+	case len(content) > maxKB*1024:
+		return coded(CodeContentTooLarge, "content is %d bytes; the limit is %d KB per section", len(content), maxKB)
 	}
 	return nil
 }
@@ -233,7 +247,7 @@ func (s *Store) CreatePad(req CreateRequest) (*Pad, string, error) {
 	}
 	if n, err := countPads(projDir); err != nil {
 		return nil, "", err
-	} else if n >= s.limits.MaxPadsPerProject {
+	} else if n >= s.limits().MaxPadsPerProject {
 		return nil, "", coded(CodeLimitExceeded, "project %q already holds %d pads (the limit); delete old pads first", project, n)
 	}
 
@@ -439,7 +453,7 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 			}
 		}
 	}
-	if len(p.Sections) >= s.limits.MaxSectionsPerPad {
+	if len(p.Sections) >= s.limits().MaxSectionsPerPad {
 		return nil, coded(CodeLimitExceeded, "pad %s already holds %d sections (the limit)", req.Ref, len(p.Sections))
 	}
 

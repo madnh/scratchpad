@@ -542,6 +542,26 @@ pad-outline, .outline-pop, pad-tasks, .pad__people {
   color: var(--text); background: var(--panel-2);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
+/* The deployment settings form. Not .field-row: that one dresses a single small number
+   beside its label, and a 5rem box clips a deployment name to "Scratchpa". Here the
+   labels share a column so the values line up and can be read down the page, and the
+   text inputs get room while the numbers stay narrow enough to scan as numbers.
+   Below 40rem the label sits above its input — a fixed label column and a usable input
+   do not both fit, and the input is the part you came to type in. */
+.setting-row { display: flex; align-items: center; gap: .75rem; margin-top: .5rem; }
+.setting-row > span { flex: 0 0 13rem; }
+.setting-row input {
+  flex: 1 1 auto; min-width: 0; max-width: 20rem; padding: .25rem .4rem; font: inherit;
+  color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.setting-row input[type="number"] { flex: 0 0 7rem; }
+@media (max-width: 40rem) {
+  .setting-row { align-items: stretch; flex-direction: column; gap: .25rem; }
+  .setting-row > span { flex: none; }
+  .setting-row input { max-width: none; }
+}
+
 /* The delete confirmation is written in lines — what is being destroyed, then how
    much of it — so keep the line breaks the text puts there. */
 .puredashboard-dialog__message { white-space: pre-line; }

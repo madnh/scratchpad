@@ -52,16 +52,20 @@ type Options struct {
 // the session table, and the SSE hub.
 type Server struct {
 	store   *store.Store
-	cfg     config.Config
+	live    *config.Live
 	opts    Options
 	watcher *watch.Watcher
-	auth    *authState
-	hub     *hub
+	// marker keeps live in step with the config file. The UI needs it even more than the
+	// other surfaces do: it is the one that WRITES the marker, and a save that changed
+	// nothing until a restart would be a lie told by its own Save button.
+	marker *watch.Marker
+	auth   *authState
+	hub    *hub
 }
 
 // New assembles a UI server over a store. It touches no sockets and no filesystem —
 // Run does that.
-func New(st *store.Store, cfg config.Config, opts Options) (*Server, error) {
+func New(st *store.Store, live *config.Live, opts Options) (*Server, error) {
 	if opts.Port <= 0 {
 		opts.Port = config.DefaultUIPort
 	}
@@ -69,12 +73,14 @@ func New(st *store.Store, cfg config.Config, opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg := live.Get()
 	w := watch.New(cfg.ProjectsDir)
 	return &Server{
 		store:   st,
-		cfg:     cfg,
+		live:    live,
 		opts:    opts,
 		watcher: w,
+		marker:  watch.ReloadConfig(cfg.RootDir, live),
 		auth:    auth,
 		hub:     newHub(st, w),
 	}, nil
@@ -104,6 +110,11 @@ func (s *Server) Run(ctx context.Context) error {
 	go func() {
 		if err := s.watcher.Run(ctx); err != nil {
 			log.Printf("ui: watcher stopped: %v", err)
+		}
+	}()
+	go func() {
+		if err := s.marker.Run(ctx); err != nil {
+			log.Printf("ui: config watcher stopped: %v", err)
 		}
 	}()
 	go s.hub.run(ctx)
@@ -157,6 +168,11 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/stuck", s.api(s.handleStuck))
 	mux.HandleFunc("POST /api/pads/{ref}/unlock", s.api(s.handleUnlock))
 	mux.HandleFunc("DELETE /api/pads/{ref}", s.api(s.handleDelete))
+
+	// The deployment settings — the one thing a person edits here that is not a pad at
+	// all. See config_api.go for the groups it deliberately leaves alone.
+	mux.HandleFunc("GET /api/config", s.api(s.handleConfig))
+	mux.HandleFunc("PUT /api/config", s.api(s.handleSetConfig))
 
 	// Rules are the only pad content this UI writes, and the only reason it can: a rules
 	// section does not take the turn, and it is authored by pad.SystemAuthor rather than

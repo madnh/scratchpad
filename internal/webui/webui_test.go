@@ -48,9 +48,10 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, *http.Client, *stor
 		// to the rules under it is exactly what these tests should be exercising.
 		Rules: config.DefaultRulesPolicy,
 	}
-	st := store.New(cfg)
+	live := config.NewLive(cfg)
+	st := store.New(live)
 
-	srv, err := New(st, cfg, Options{Port: config.DefaultUIPort})
+	srv, err := New(st, live, Options{Port: config.DefaultUIPort})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +365,8 @@ func TestRunStopsPromptlyWithAnOpenEventStream(t *testing.T) {
 		// to the rules under it is exactly what these tests should be exercising.
 		Rules: config.DefaultRulesPolicy,
 	}
-	srv, err := New(store.New(cfg), cfg,
+	live := config.NewLive(cfg)
+	srv, err := New(store.New(live), live,
 		Options{Port: freePort(t), NoAuth: true})
 	if err != nil {
 		t.Fatal(err)
@@ -482,8 +484,9 @@ func newNoAuthServer(t *testing.T) (*Server, *httptest.Server, *store.Store) {
 		// to the rules under it is exactly what these tests should be exercising.
 		Rules: config.DefaultRulesPolicy,
 	}
-	st := store.New(cfg)
-	srv, err := New(st, cfg, Options{Port: config.DefaultUIPort, NoAuth: true})
+	live := config.NewLive(cfg)
+	st := store.New(live)
+	srv, err := New(st, live, Options{Port: config.DefaultUIPort, NoAuth: true})
 	if err != nil {
 		t.Fatal(err)
 	}

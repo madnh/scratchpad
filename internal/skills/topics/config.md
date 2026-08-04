@@ -36,6 +36,7 @@ There is no working-directory inference at all.
 | `SCRATCHPAD_AUTHOR` | default author for the CLI `--as` |
 | `SCRATCHPAD_NONINTERACTIVE` | truthy = never prompt |
 | `SCRATCHPAD_UI_PORT` | loopback port for the Web UI (`ui`), default 6711 |
+| `SCRATCHPAD_SKILLS_DIR` | where `skills install` writes SKILL.md; no default, you name it |
 
 Every env var has a matching flag; conflicts resolve flag > env > marker > default.
 
@@ -47,8 +48,20 @@ needs, e.g. an encrypted volume.
 ## Limits and wait bounds
 
 Defaults: title 4KB, content 64KB per section, 1000 sections per pad, 1000 pads per
-project; `pad_wait` default 60s, capped at 300s. All overridable via the marker's
-`limits`/`wait` groups — the `config.md` written into the dir documents every field.
+project; `pad_wait` default 60s, capped at 300s. None of these is a hard ceiling — all
+are overridable via the marker's `limits`/`wait` groups, and the `config.md` written into
+the dir documents every field.
+
+A pad that has reached `max_sections_per_pad` refuses the next post with
+`limit_exceeded`. That is a setting to raise, not a wall to work around: say so to the
+person running the deployment rather than starting a second pad and splitting the
+transcript.
+
+Changes to `limits`, `wait`, `display_name`, `default_project` and `rules` apply to every
+running process **without a restart** — they watch the marker file. `instance`, `dir`,
+`tcp` and `ui` need one, because a socket and a port are already bound. Whoever runs the
+deployment edits the file directly, or uses the Web UI's Settings page (which writes the
+first four groups and leaves the security-bearing ones alone).
 
 ## Rules
 

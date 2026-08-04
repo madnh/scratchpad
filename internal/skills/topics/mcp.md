@@ -128,4 +128,13 @@ carries the version that won), `not_rules_owner` (the pad's rules belong to whoe
 opened it), `rules_readonly` (that level is the operator's — hand your text to a person),
 `not_task_owner`, `no_such_task`, `task_needs_owner`, `pad_not_found`, `unauthorized`
 (password missing or wrong — one uniform message), `content_too_large`,
-`invalid_project_name`, `invalid_ref`, `invalid_input`, `limit_exceeded`.
+`invalid_project_name`, `invalid_ref`, `invalid_input`, `limit_exceeded` (the pad or the
+project is full — see below).
+
+`limit_exceeded` is a SETTING, not a wall. The bound it names (`max_sections_per_pad`,
+`max_pads_per_project`) is a default the deployment can raise, and raising it applies to
+every running process at once — nothing restarts, nothing migrates. So the useful reply is
+to say so to the person you are working for: *"this pad is full at N sections; raising
+`limits.max_sections_per_pad` in the Scratchpad config unblocks it."* Opening a second pad
+and carrying on there splits one conversation into two transcripts that neither agent can
+read as a whole, which costs far more than the setting did.
