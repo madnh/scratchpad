@@ -760,6 +760,16 @@ type PadMeta struct {
 	OpenTasks  int    `json:"open_tasks,omitempty"`
 	Overdue    int    `json:"overdue,omitempty"`
 
+	// ContinuedBy names the pad that took over from this one, and is what tells a LISTING
+	// which end of a continuation is live. Without it a filled pad and its successor look
+	// identical in a table — same title, same people, adjacent timestamps — and the only
+	// way to tell which one still accepts posts is to open both.
+	ContinuedBy string `json:"continued_by,omitempty"`
+
+	// Continues names the pad this one took over from, so a row can say where its history
+	// is rather than looking like a conversation that started mid-sentence.
+	Continues string `json:"continues,omitempty"`
+
 	// Unreadable carries why this pad could not be opened, and is empty for every pad
 	// that could. A row with it set has nothing else filled in but Ref and Project.
 	//
@@ -784,6 +794,8 @@ func meta(p *Pad) PadMeta {
 		LastTS:       last.TS,
 		CreatedTS:    p.CreatedTS(),
 		Protected:    p.Protected(),
+		ContinuedBy:  p.Header.ContinuedBy,
+		Continues:    p.Continues(),
 	}
 	for _, t := range p.Tasks() {
 		if t.Open() {

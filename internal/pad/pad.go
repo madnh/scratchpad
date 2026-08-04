@@ -249,7 +249,20 @@ func (p *Pad) RulesSection() (cur Section, history []int, ok bool) {
 // title of its first section — the opening question is what makes it recognisable in a
 // listing. It is a method rather than something each caller digs out of Sections[0],
 // which is how three surfaces end up disagreeing about what a pad is called.
+//
+// Sections the TOOL wrote are skipped. On a pad that continues a full one, section 1 is
+// the carried house rules and section 2 a carried task, so the plain answer would name
+// every successor "House rules, carried over" — three of them in a listing, indistinguish-
+// able, none of them saying what the conversation is about. What a person needs to see is
+// the first thing an AGENT said here.
 func (p *Pad) Title() string {
+	for _, sec := range p.Sections {
+		if sec.Author != SystemAuthor {
+			return sec.Title
+		}
+	}
+	// A pad holding nothing but tool-written sections has no better answer than the first
+	// one — and saying nothing at all would be worse in a listing.
 	if len(p.Sections) == 0 {
 		return ""
 	}

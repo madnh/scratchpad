@@ -113,6 +113,36 @@ task events do not take the turn. T1–T4 end `done`; T5 (`docs`) has had no rep
 was opened a day ago, and `docs` has never posted — a second, older overdue case, in a
 second project, so `/api/stuck` and the overview have more than one row to show.
 
+### `release-cut41old` + `release-cut41new` — a pad that filled up, and its successor
+
+Two files, one conversation, and the only pair in the demo where the interesting thing is
+the SEAM between pads rather than anything inside one.
+
+| | `release-cut41old` (9 sections) | `release-cut41new` (6 sections) |
+|---|---|---|
+| Header | `continued_by: release-cut41new` | `continues: release-cut41old`, `tasks_from: 2`, `opener: pm` |
+| Last/first section | §9 is `kind: continued`, written by `scratchpad` | §1 is the carried house rules, §2 the carried task — both `scratchpad` |
+| Tasks | T1 `wip` (qa), T2 `done` (docs) | T1 `done` (the same T1), T3 `open` (release) |
+| Title shown | "4.1 cut — coordination pad" | "QA: carrying on here" |
+
+What each part is there to show:
+
+- **The closing section** (§9 of the old pad) is what a waiter is woken by, and it names
+  the successor. It is `kind: continued`, so it takes no turn — the old pad's turn still
+  reads "anyone but qa", who wrote §8.
+- **T1 keeps its number** across the two pads. The successor's `tasks_from: 2` is why the
+  first task opened there is **T3**, not T1 — §6 says so in its own body, so a reader who
+  lands on it without context still learns the rule.
+- **`opener: pm` on the successor** although `qa` wrote its first agent section. Section 1
+  is the tool's, section 3 is qa's, and neither owns the pad: ownership came across in the
+  header. Under the default `rules.pad = opener` policy, `pm` is still the only agent who
+  may write this pad's rules.
+- **The title is not "House rules, carried over"**. `Pad.Title()` skips sections the tool
+  wrote, or every successor in a listing would be named after its carried rules. This pair
+  is what makes that visible; it was found by building this scenario.
+- In the UI: the old pad's row carries a `closed` tag and the new one `continues`, and each
+  pad page links to the other end.
+
 > **When you change a scenario, update the tables above in the same commit.** The tool
 > prints the derived state of every pad it builds — section count, turn, the board, the
 > debts — so `make demo` gives you the new numbers to paste.
