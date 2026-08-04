@@ -80,8 +80,7 @@ const padSizeSlack = 1024
 // Without this, a pad file is an unbounded allocation triggered by anyone who can
 // append — and a single oversized pad would take down every listing that walks the
 // store, not just its own page.
-func (s *Store) maxPadBytes() int64 {
-	lim := s.limits()
+func (s *Store) maxPadBytes(lim config.Limits) int64 {
 	perSection := int64(lim.MaxContentKB+lim.MaxTitleKB)*1024 + padSizeSlack
 	return perSection*int64(lim.MaxSectionsPerPad) + padSizeSlack
 }
@@ -90,8 +89,8 @@ func (s *Store) maxPadBytes() int64 {
 // with a clear error instead of an OOM. The size is checked twice: once from the
 // file's own metadata (cheap, catches the normal case) and once by reading one byte
 // past the limit (authoritative, and immune to the file growing between the two).
-func (s *Store) readPadFile(f *os.File, ref string) ([]byte, error) {
-	limit := s.maxPadBytes()
+func (s *Store) readPadFile(lim config.Limits, f *os.File, ref string) ([]byte, error) {
+	limit := s.maxPadBytes(lim)
 	if st, err := f.Stat(); err == nil && st.Size() > limit {
 		return nil, coded(CodeContentTooLarge,
 			"pad %s is %d bytes; this deployment reads at most %d (raise limits, or split the pad)", ref, st.Size(), limit)
@@ -170,8 +169,8 @@ func ValidateProject(name string) error {
 }
 
 // validateTitle enforces the single-line title and its size limit.
-func (s *Store) validateTitle(title string) error {
-	maxKB := s.limits().MaxTitleKB
+func (s *Store) validateTitle(lim config.Limits, title string) error {
+	maxKB := lim.MaxTitleKB
 	switch {
 	case strings.TrimSpace(title) == "":
 		return coded(CodeInvalidInput, "title is required")
@@ -184,8 +183,8 @@ func (s *Store) validateTitle(title string) error {
 }
 
 // validateContent enforces the per-section content size limit.
-func (s *Store) validateContent(content string) error {
-	maxKB := s.limits().MaxContentKB
+func (s *Store) validateContent(lim config.Limits, content string) error {
+	maxKB := lim.MaxContentKB
 	switch {
 	case strings.TrimSpace(content) == "":
 		return coded(CodeInvalidInput, "content is required (pass the message body)")
@@ -224,16 +223,17 @@ func (s *Store) CreatePad(req CreateRequest) (*Pad, string, error) {
 	if err := pad.ValidateAuthor(author); err != nil {
 		return nil, "", err
 	}
-	if err := s.validateTitle(title); err != nil {
+	lim := s.limits() // one snapshot for the whole operation — see Post
+	if err := s.validateTitle(lim, title); err != nil {
 		return nil, "", err
 	}
-	if err := s.validateContent(content); err != nil {
+	if err := s.validateContent(lim, content); err != nil {
 		return nil, "", err
 	}
 	// The rules of the project this pad is about to join. There is no pad to check
 	// against yet, so this is the two file levels — the same reading an agent would get
 	// from `project rules` before it starts.
-	rules, err := s.buildRules(project, nil)
+	rules, err := s.buildRules(lim, project, nil)
 	if err != nil {
 		return nil, "", err
 	}
@@ -247,7 +247,7 @@ func (s *Store) CreatePad(req CreateRequest) (*Pad, string, error) {
 	}
 	if n, err := countPads(projDir); err != nil {
 		return nil, "", err
-	} else if n >= s.limits().MaxPadsPerProject {
+	} else if n >= lim.MaxPadsPerProject {
 		return nil, "", coded(CodeLimitExceeded, "project %q already holds %d pads (the limit); delete old pads first", project, n)
 	}
 
@@ -356,10 +356,15 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if err := validateAuthor(req.Author); err != nil {
 		return nil, err
 	}
-	if err := s.validateTitle(req.Title); err != nil {
+	// ONE snapshot for the whole operation, threaded down from here. Re-reading it per
+	// check is how a post ends up validated against two different configurations: the
+	// marker reloads under a running process, so the gap between two reads is a real
+	// window, not a theoretical one.
+	lim := s.limits()
+	if err := s.validateTitle(lim, req.Title); err != nil {
 		return nil, err
 	}
-	if err := s.validateContent(req.Content); err != nil {
+	if err := s.validateContent(lim, req.Content); err != nil {
 		return nil, err
 	}
 	project, id, err := ParseRef(req.Ref)
@@ -373,7 +378,7 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	}
 	defer f.Close() // closing the fd releases the flock
 
-	data, err := s.readPadFile(f, req.Ref)
+	data, err := s.readPadFile(lim, f, req.Ref)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +427,7 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 		}
 		return full, nil
 	}
-	if err := s.checkRules(project, fullPad, p, req); err != nil {
+	if err := s.checkRules(lim, project, fullPad, p, req); err != nil {
 		return nil, err
 	}
 	// Writing the pad's rules is checked AFTER the read gate: an agent that has not read
@@ -453,7 +458,7 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 			}
 		}
 	}
-	if len(p.Sections) >= s.limits().MaxSectionsPerPad {
+	if len(p.Sections) >= lim.MaxSectionsPerPad {
 		return nil, coded(CodeLimitExceeded, "pad %s already holds %d sections (the limit)", req.Ref, len(p.Sections))
 	}
 
@@ -488,7 +493,7 @@ func (s *Store) Get(ref, password string) (*Pad, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := s.readPadFile(f, ref)
+	data, err := s.readPadFile(s.limits(), f, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -773,7 +778,7 @@ func (s *Store) readNoPassword(project, id string) (*Pad, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := s.readPadFile(f, ref)
+	data, err := s.readPadFile(s.limits(), f, ref)
 	if err != nil {
 		return nil, err
 	}
