@@ -140,6 +140,17 @@ func foldTask(n int, events []Section) Task {
 				// Reopening hands the task back to its owners rather than asserting an
 				// answer over them, so it CLEARS the override instead of setting one.
 				openerOverride = ""
+				// It also RESETS their slices. Clearing the override alone is what an
+				// opener disagreeing with a `done` used to get: every owner had already
+				// reported done, the aggregate recomputed to done from those same
+				// reports, and the reopening section landed in the file having moved
+				// nothing. Disagreeing with a `done` is the one moment reopening is for,
+				// and it was the one case where it did nothing at all.
+				//
+				// Emptying the map rather than setting each owner to `open` is what makes
+				// this survive a reassignment in the same event: `owners` may have just
+				// been replaced, and an owner with no state already folds to `open`.
+				clear(perOwner)
 			default:
 				openerOverride = ev.Status
 			}
@@ -258,6 +269,49 @@ func (p *Pad) CheckTaskOwner(taskNo int, author string) error {
 	return Coded(CodeNotTaskOwner,
 		"T%d is owned by %s and was opened by %q; %q may not move it — post a message instead, or ask an owner",
 		taskNo, who, t.Opener, author)
+}
+
+// CheckTaskReassign enforces who may MOVE THE WORK, as opposed to who may report on it.
+//
+// On a task event `to` is not addressing — it is the owner set, and the fold takes the
+// latest one written. CheckTaskOwner admits owners as well as the opener, because an owner
+// must be able to report; without this second check that same admission let an owner
+// rewrite the owner set, which the ownership table has never granted them.
+//
+// The failure it prevents is silent and costs the reporter their own report: an owner that
+// writes `--status done --to someone` hands the task away, and because the fold publishes
+// states only for CURRENT owners, its own `done` is dropped on the way out. The task then
+// reads as unfinished work belonging to an agent that never touched it. Nothing in the
+// transcript says this happened.
+//
+// It does not apply to the opening event, where `to` is how a task acquires its first
+// owners, and it does not apply when `to` merely restates the owners a task already has —
+// that changes nothing, so refusing it would only punish an agent for being explicit.
+func (p *Pad) CheckTaskReassign(taskNo int, author string, to []string) error {
+	t, ok := p.Task(taskNo)
+	if !ok {
+		return Coded(CodeNoSuchTask, "pad %s has no task T%d", p.Ref(), taskNo)
+	}
+	if author == t.Opener || sameOwners(t.Owners, to) {
+		return nil
+	}
+	return Coded(CodeNotTaskOwner,
+		"`to` on a task event REASSIGNS T%d, and only its opener (%q) may do that; %q may report"+
+			" its own status with --status and no --to, or post an ordinary message to address someone",
+		taskNo, t.Opener, author)
+}
+
+// sameOwners reports whether to names exactly the task's current owners, in any order.
+func sameOwners(owners []OwnerState, to []string) bool {
+	if len(owners) != len(to) {
+		return false
+	}
+	for _, o := range owners {
+		if !containsStr(to, o.Author) {
+			return false
+		}
+	}
+	return true
 }
 
 // containsStr reports membership in a small slice.

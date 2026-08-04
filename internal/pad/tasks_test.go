@@ -102,10 +102,17 @@ func TestOpenerManagesButDoesNotComplete(t *testing.T) {
 			sec{"ios", "shipped", task(1, nil, StatusDone)},
 			sec{"pm", "regressed", task(1, nil, StatusOpen)},
 		)...)
-		// The reopen clears the override rather than pinning the task at "open", so the
-		// board reflects the owners again.
-		if got, _ := p.Task(1); got.Status != StatusDone {
-			t.Fatalf("after a reopen the per-owner state should rule, got %q", got.Status)
+		// This case used to assert `done` — that clearing the override let "the per-owner
+		// state rule" again. It reads reasonably and it is wrong: the owner's state IS the
+		// `done` being overruled, so recomputing from it hands back the same answer and the
+		// reopen moves nothing. The section is titled "regressed" precisely because the
+		// case being described is an opener DISAGREEING with a completion, which is the one
+		// moment reopening is for and was the one case where it did nothing.
+		//
+		// Reopening therefore resets the slices as well: handing work back means the owners
+		// must report on it again.
+		if got, _ := p.Task(1); got.Status != StatusOpen {
+			t.Fatalf("the opener reopened a regressed task, board says %q", got.Status)
 		}
 	})
 	t.Run("a stranger may not move it", func(t *testing.T) {
@@ -268,5 +275,119 @@ func TestAContinuedPadHoldsNoTurn(t *testing.T) {
 	// blocked authors must grey out all of them.
 	if len(got.Blocked) != 2 {
 		t.Errorf("blocked = %v, want every author on the pad", got.Blocked)
+	}
+}
+
+// TestOpenerCanReopenAClosedTask pins the one moment reopening exists for. An opener that
+// disagrees with a `done` used to post `--status open`, have the section accepted and
+// written, and watch the board not move: the override was cleared, and the aggregate then
+// recomputed to `done` from the very owner reports the opener was overruling.
+func TestOpenerCanReopenAClosedTask(t *testing.T) {
+	p := build(
+		sec{"pm", "seed", Meta{}},
+		sec{"pm", "Crash on resume", task(1, []string{"ios"}, StatusOpen)},
+		sec{"ios", "ios: fixed", task(1, nil, StatusDone)},
+	)
+	if got, _ := p.Task(1); got.Status != StatusDone {
+		t.Fatalf("precondition: owner reported done, want done, got %q", got.Status)
+	}
+
+	// The reopen names its owners, because `status: open` without `to` is refused at write
+	// time (a task must have an owner). Reopening therefore always restates the owner set,
+	// usually the one already there — which is why CheckTaskReassign treats a restatement
+	// as no reassignment at all.
+	p = build(
+		sec{"pm", "seed", Meta{}},
+		sec{"pm", "Crash on resume", task(1, []string{"ios"}, StatusOpen)},
+		sec{"ios", "ios: fixed", task(1, nil, StatusDone)},
+		sec{"pm", "pm: still crashing, reopening", task(1, []string{"ios"}, StatusOpen)},
+	)
+	got, _ := p.Task(1)
+	if got.Status != StatusOpen {
+		t.Errorf("opener reopened a closed task, board says %q", got.Status)
+	}
+	if len(got.Owners) != 1 || got.Owners[0].Author != "ios" {
+		t.Fatalf("reopening must leave the work with its owner, got %+v", got.Owners)
+	}
+	if got.Owners[0].Status != StatusOpen {
+		t.Errorf("the owner's slice must go back to open, got %q", got.Owners[0].Status)
+	}
+
+	// The owner reporting again after a reopen must land normally: a reset that also
+	// swallowed later events would trade one silent no-op for another.
+	p.Sections = append(p.Sections, Section{
+		N: 5, Author: "ios", Title: "ios: fixed properly", TS: 1300,
+		Meta: task(1, nil, StatusDone),
+	})
+	if again, _ := p.Task(1); again.Status != StatusDone {
+		t.Errorf("owner re-reported done after a reopen, board says %q", again.Status)
+	}
+}
+
+// TestReopenSurvivesReassignmentInTheSameEvent covers an opener that hands the work to
+// somebody else while reopening it — one event carrying both. The new owner has never
+// reported, so the task must read open under their name, not inherit the previous owner's
+// `done`.
+func TestReopenSurvivesReassignmentInTheSameEvent(t *testing.T) {
+	p := build(
+		sec{"pm", "seed", Meta{}},
+		sec{"pm", "Crash on resume", task(1, []string{"ios"}, StatusOpen)},
+		sec{"ios", "ios: fixed", task(1, nil, StatusDone)},
+		sec{"pm", "pm: reopening, android take it", task(1, []string{"android"}, StatusOpen)},
+	)
+	got, _ := p.Task(1)
+	if got.Status != StatusOpen {
+		t.Errorf("reopen + reassign, board says %q", got.Status)
+	}
+	if len(got.Owners) != 1 || got.Owners[0].Author != "android" || got.Owners[0].Status != StatusOpen {
+		t.Errorf("want android at open, got %+v", got.Owners)
+	}
+}
+
+// TestOnlyTheOpenerMayReassign is the ownership table stated as a test: an owner reports on
+// its own slice, the opener moves the work. Without it CheckTaskOwner admits an owner and
+// the fold then takes whatever `to` that owner wrote, so `--status done --to someone` hands
+// the task away AND drops the reporter's own `done` on the way out — the board reads as
+// unfinished work belonging to an agent that never touched it.
+func TestOnlyTheOpenerMayReassign(t *testing.T) {
+	p := build(
+		sec{"pm", "seed", Meta{}},
+		sec{"pm", "Crash on resume", task(1, []string{"ios"}, StatusOpen)},
+	)
+	if err := p.CheckTaskReassign(1, "ios", []string{"android"}); err == nil {
+		t.Error("an owner reassigned the task away and was allowed to")
+	} else if !HasCode(err, CodeNotTaskOwner) {
+		t.Errorf("want not_task_owner, got %v", err)
+	} else if !strings.Contains(err.Error(), "pm") {
+		t.Errorf("the refusal must name who may reassign: %v", err)
+	}
+	if err := p.CheckTaskReassign(1, "pm", []string{"android"}); err != nil {
+		t.Errorf("the opener may reassign: %v", err)
+	}
+	// Restating the owners a task already has changes nothing, so refusing it would punish
+	// an agent for being explicit rather than prevent anything.
+	if err := p.CheckTaskReassign(1, "ios", []string{"ios"}); err != nil {
+		t.Errorf("an owner restating the existing owners must be allowed: %v", err)
+	}
+	if err := p.CheckTaskReassign(1, "ios", []string{"ios", "android"}); err == nil {
+		t.Error("ADDING an owner is still a reassignment")
+	}
+	if err := p.CheckTaskReassign(9, "pm", []string{"ios"}); !HasCode(err, CodeNoSuchTask) {
+		t.Errorf("want no_such_task for an unknown task, got %v", err)
+	}
+}
+
+// TestSameOwnersIgnoresOrder: the owner set is a set. Two agents listing the same owners in
+// different orders must not be told one of them is reassigning.
+func TestSameOwnersIgnoresOrder(t *testing.T) {
+	p := build(
+		sec{"pm", "seed", Meta{}},
+		sec{"pm", "Shared work", task(1, []string{"ios", "android"}, StatusOpen)},
+	)
+	if err := p.CheckTaskReassign(1, "ios", []string{"android", "ios"}); err != nil {
+		t.Errorf("same owners in another order is not a reassignment: %v", err)
+	}
+	if err := p.CheckTaskReassign(1, "ios", []string{"android"}); err == nil {
+		t.Error("dropping an owner is a reassignment")
 	}
 }

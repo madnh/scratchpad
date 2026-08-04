@@ -500,7 +500,14 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 			return nil, coded(CodeInvalidInput, "pad %s has no section %d to reply to", req.Ref, meta.Re)
 		}
 		// Replying to a section addresses its author without the caller repeating it.
-		if !containsStr(meta.To, parent.Author) && parent.Author != req.Author {
+		//
+		// Never on a task event. There `to` is the owner set, so this convenience would
+		// hand the task to whoever wrote the section being answered — a reassignment the
+		// author did not type, cannot see in its own command, and would not find anywhere
+		// in the transcript afterwards. `re` still records what the event answers; it just
+		// stops meaning "and give them the work".
+		if meta.Kind != pad.KindTask &&
+			!containsStr(meta.To, parent.Author) && parent.Author != req.Author {
 			meta.To = append(meta.To, parent.Author)
 		}
 	}
@@ -546,6 +553,14 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 			if err := p.CheckTaskOwner(meta.Task, req.Author); err != nil {
 				return nil, err
 			}
+			// Reporting and reassigning are separate rights that arrive through the same
+			// section, so they are checked separately. CheckTaskOwner has just admitted an
+			// owner; this asks the narrower question the ownership table actually answers.
+			if len(meta.To) > 0 {
+				if err := p.CheckTaskReassign(meta.Task, req.Author, meta.To); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	// Computed before the pad's capacity is considered, because a post that MOVES to a
@@ -587,7 +602,8 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	// Counted AFTER this post, because that is the number the author just caused and the
 	// one it can act on. The limit is read from the snapshot this call took at the top, so
 	// a marker edited mid-post cannot make the warning and the refusal disagree.
-	if w := pad.CapacityWarning(len(p.Sections)+1, lim.MaxSectionsPerPad, lim.WarnAtPercent); w != "" {
+	if w := pad.CapacityWarning(len(p.Sections)+1, lim.MaxSectionsPerPad, lim.WarnAtPercent,
+		lim.OnFull != config.OnFullReject); w != "" {
 		warnings = append(warnings, w)
 	}
 

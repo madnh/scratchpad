@@ -312,8 +312,12 @@ func newPadPostCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&title, "title", "", "one-line title of this section (required)")
 	f.StringVar(&password, "password", "", "the pad's password (when protected)")
-	f.StringSliceVar(&to, "to", nil, "authors this section is addressed to (comma-separated); omit to broadcast")
-	f.IntVar(&re, "re", 0, "the section number this one answers")
+	f.StringSliceVar(&to, "to", nil,
+		"authors this section is addressed to (comma-separated); omit to broadcast."+
+			" On a TASK EVENT it is not addressing — it sets the task's owners, and only the opener may")
+	f.IntVar(&re, "re", 0,
+		"the section number this one answers; it also addresses that section's author,"+
+			" except on a task event where `to` means ownership")
 	f.BoolVar(&taskOpen, "task-open", false, "open a new task (needs --to) and print its number")
 	f.IntVar(&task, "task", 0,
 		"the number of an existing task this section concerns; on its own it merely references the task and stays an ordinary message")

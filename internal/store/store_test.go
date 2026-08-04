@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/madnh/scratchpad/internal/config"
+	"github.com/madnh/scratchpad/internal/pad"
 )
 
 func testStore(t *testing.T) *Store {
@@ -767,5 +768,105 @@ func TestMaxPadBytesNeverDropsBelowTheFloor(t *testing.T) {
 	huge := config.Limits{MaxTitleKB: 4, MaxContentKB: 1024, MaxSectionsPerPad: 10000}
 	if got := s.maxPadBytes(huge); got <= maxReadablePadBytes {
 		t.Errorf("huge limits: ceiling = %d, want policy to raise it above %d", got, maxReadablePadBytes)
+	}
+}
+
+// TestOwnerCannotReassignByAddressing covers the write-time half of the ownership table.
+// `to` on a task event is the OWNER SET, not addressing, and the fold takes the latest one
+// written by anybody. So an owner reporting progress while naming a colleague used to hand
+// the task away — and because the fold publishes states only for CURRENT owners, its own
+// report went out with it. The task then read as unfinished work owned by an agent that had
+// never touched it, with nothing in the transcript saying so.
+func TestOwnerCannotReassignByAddressing(t *testing.T) {
+	s := testStore(t)
+	p, _, err := create(s, "p", "pm", "seed", "c", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "pm", Title: "Crash on resume", Content: "c",
+		OpenTask: true, Meta: Meta{To: []string{"ios"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.Post(PostRequest{
+		Ref: p.Ref(), Author: "ios", Title: "ios: done, telling android", Content: "c",
+		Meta: Meta{Kind: pad.KindTask, Task: 1, Status: pad.StatusDone, To: []string{"android"}},
+	})
+	if !HasCode(err, CodeNotTaskOwner) {
+		t.Fatalf("an owner reassigned the task by addressing someone: %v", err)
+	}
+	if !strings.Contains(err.Error(), "pm") {
+		t.Errorf("the refusal must name who may reassign: %v", err)
+	}
+
+	// The report itself, without the reassignment, must still land — the fix removes a
+	// right the owner never had, not the one it does.
+	res, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "ios", Title: "ios: done", Content: "c",
+		Meta: Meta{Kind: pad.KindTask, Task: 1, Status: pad.StatusDone},
+	})
+	if err != nil {
+		t.Fatalf("an owner must still be able to report its own status: %v", err)
+	}
+	board, ok := res.Pad.Task(1)
+	if !ok || board.Status != "done" {
+		t.Fatalf("the owner's done must reach the board, got %+v", board)
+	}
+	if len(board.Owners) != 1 || board.Owners[0].Author != "ios" {
+		t.Errorf("the task must still belong to ios, got %+v", board.Owners)
+	}
+}
+
+// TestReplyDoesNotReassignATask closes the second door to the same defect, and the worse
+// one: `re` implies `to` so a reply addresses the author it answers without repeating them.
+// On a task event that convenience wrote an owner set the author never typed, so answering
+// a question about your work silently handed the work to whoever asked. There is no `--to`
+// in the command to notice.
+func TestReplyDoesNotReassignATask(t *testing.T) {
+	s := testStore(t)
+	p, _, err := create(s, "p", "pm", "seed", "c", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "pm", Title: "Crash on resume", Content: "c",
+		OpenTask: true, Meta: Meta{To: []string{"ios"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A bystander asks about it, so the section being answered belongs to neither the
+	// opener nor the owner.
+	if _, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "erp", Title: "how is it going", Content: "c",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "ios", Title: "ios: still on it", Content: "c",
+		Meta: Meta{Kind: pad.KindTask, Task: 1, Status: pad.StatusWIP, Re: 3},
+	})
+	if err != nil {
+		t.Fatalf("answering a question about your own task must be allowed: %v", err)
+	}
+	board, ok := res.Pad.Task(1)
+	if !ok {
+		t.Fatal("task vanished")
+	}
+	if len(board.Owners) != 1 || board.Owners[0].Author != "ios" {
+		t.Fatalf("replying reassigned the task, owners are now %+v", board.Owners)
+	}
+	if board.Owners[0].Status != "wip" {
+		t.Errorf("the owner's own report was dropped, got %q", board.Owners[0].Status)
+	}
+	// `re` still records what was answered; it just no longer hands over the work.
+	last := res.Pad.Last()
+	if last.Re != 3 {
+		t.Errorf("re should survive on a task event, got %d", last.Re)
+	}
+	if len(last.To) != 0 {
+		t.Errorf("re must not inject an owner set on a task event, got %v", last.To)
 	}
 }

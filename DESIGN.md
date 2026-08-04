@@ -183,6 +183,29 @@ comes back would be immortal, so those rights are separated rather than dropped.
 Enforcement lives in `Post`, under the flock, next to the turn rule — never in a
 surface. Violations return `not_task_owner`.
 
+**Reporting and reassigning are two rights arriving through one section, so they are
+checked twice.** `CheckTaskOwner` admits owners *and* the opener, because an owner must be
+able to report; `CheckTaskReassign` then asks the narrower question the table above
+actually answers — may this author move the WORK. Without the second check the first one's
+admission was enough: an owner writing `--status done --to someone` reassigned the task,
+and since the fold publishes states only for *current* owners, its own `done` went out with
+it. The task then read as unfinished work belonging to an agent that had never touched it,
+with nothing in the transcript recording the handover. Restating the existing owners is not
+a reassignment and is allowed — it changes nothing, so refusing it would only punish an
+agent for being explicit.
+
+The same defect has a second door, and a quieter one: **`re` implies `to`, but never on a
+task event.** On a message that convenience is right; on a task event it would write an
+owner set the author never typed, handing the work to whoever wrote the section being
+answered. There is no `--to` in that command to notice afterwards. `re` still records what
+the event answers.
+
+`to` on a task event is the owner set and not addressing, which is the root of both. It is
+not being renamed: every existing pad replays its owner set from that key, so a key meaning
+one thing in an old file and another in a new one is the failure this format works hardest
+to avoid. The cost is that a task event has no way to address anybody, which the CLI help,
+`SKILL.md` and the refusal message all have to say out loud.
+
 ### The two-level fold
 
 A task may have several owners, and that is the common case: one investigation covering
@@ -197,6 +220,15 @@ needed to fix it, because **every event already records its author**:
 1. **Per owner** — that owner's state is the last `kind: task` event *written by them*.
 2. **Aggregate** — `done` only when every current owner is `done`; a `dropped` or
    force-close by the opener overrides; otherwise the task is open / wip / blocked.
+
+**Reopening resets the slices.** An opener posting `open` clears its own override *and*
+empties the per-owner states, so every current owner reads `open` and has to report again.
+Clearing the override alone is what this used to do, and it reads reasonable until you try
+it: the owner states being recomputed from are the very `done` the opener is overruling, so
+the aggregate returns `done` and the reopening section lands in the file having moved
+nothing. Disagreeing with a completion is the one moment reopening exists for, and it was
+the one case where it did nothing at all. Emptying the map rather than setting each owner
+to `open` is what makes it survive a reassignment carried in the same event.
 
 | Field | Taken from |
 |---|---|
@@ -717,6 +749,14 @@ keeps meaning "this pad". A merged view would need each of them to quietly mean 
 else, and one place forgetting is a turn computed across a boundary it cannot see. What a
 reader gets instead is a link, which is enough to follow the work and impossible to
 misread.
+
+**The approach warning names the ending the policy actually produces.** `CapacityWarning`
+takes the on-full policy as a bool, because a warning that says "before posts are refused"
+under the default `continue` describes a wall that is not there — an agent then wraps up
+against nothing, which is the opposite of the behaviour the warning is for. The advice is
+the same under both policies (a successor keeps the tasks but leaves the transcript a hop
+behind, so "wrap up here" holds either way); only the consequence differs, and a policy
+that changed the advice too would be a second message to keep in step with this one.
 
 Ordering, since a half-done continuation is the one outcome that would be worse than the
 refusal it replaces: the successor is written FIRST, and only then is the old pad closed.
