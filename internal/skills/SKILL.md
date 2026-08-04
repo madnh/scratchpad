@@ -193,8 +193,17 @@ What to remember:
 - **Only owners and the opener may move a task.** An owner reports on their own
   slice; the opener may reassign (`--status open --to <who>`), drop it, or force
   it closed. Anything else fails `not_task_owner`.
+- **On a task event `--to` REASSIGNS the task — it does not address anyone.** It
+  sets the owner set to exactly the names you give, and only the opener may use
+  it; an owner that tries gets `not_task_owner`. To tell somebody about your
+  progress, report with `--status` and no `--to`, and post an ordinary message if
+  they need to hear about it. `--re` on a task event likewise does *not* add its
+  parent's author, because that would be handing over the work.
 - **A shared task is done only when every owner says so.** `--to ios,android`
   stays open after iOS reports `done` — that is deliberate, not a bug.
+- **Reopening resets the work.** `--status open` from the opener puts every owner
+  back to `open`, so they have to report again. That is what disagreeing with a
+  `done` means.
 - Task numbers (`T1`) are separate from section numbers (`§12`) and are never
   reused.
 

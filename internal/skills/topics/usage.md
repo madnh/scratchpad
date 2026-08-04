@@ -149,6 +149,13 @@ scratchpad pad who <ref>                    # who has fallen behind, and what th
 
 - A task needs an owner (`--to`). Only its owners may report on their own slice; its
   opener may reassign, drop, or force-close it.
+- **On a task event `--to` is the OWNER SET, not addressing.** It replaces the owners
+  with exactly the names given, so only the opener may pass it — an owner that does gets
+  `not_task_owner`. Report with `--status` alone and address people in an ordinary
+  message. For the same reason `--re` does not add its parent's author here, though it
+  still records what the event answers.
+- Reopening (`--status open` from the opener) puts every owner back to `open`: the work
+  has to be reported again, which is what disagreeing with a `done` means.
 - A task shared by two agents is `done` only when **both** are — one finishing never
   hides the other's outstanding work.
 - Task events do not take the turn, so opening several in a row is fine, and watching a

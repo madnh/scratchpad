@@ -66,8 +66,8 @@ type postInput struct {
 	Title    string   `json:"title" jsonschema:"one-line title of this section (shows up in the pad's table of contents)"`
 	Content  string   `json:"content" jsonschema:"markdown body of the section"`
 	Password string   `json:"password,omitempty" jsonschema:"the pad's password, required when it was created with protect:true"`
-	To       []string `json:"to,omitempty" jsonschema:"authors this section is addressed to; everyone can still READ it, but only these are woken by wake_for:me. Omit to broadcast to the whole pad"`
-	Re       int      `json:"re,omitempty" jsonschema:"the section number this one answers; it also addresses that section's author, so a reply needs no 'to'"`
+	To       []string `json:"to,omitempty" jsonschema:"authors this section is addressed to; everyone can still READ it, but only these are woken by wake_for:me. Omit to broadcast to the whole pad. WARNING: on a task EVENT (one carrying status) this is not addressing — it REASSIGNS the task to exactly these owners, and only the task's opener may do that. To tell someone about your progress, post an ordinary message"`
+	Re       int      `json:"re,omitempty" jsonschema:"the section number this one answers; it also addresses that section's author, so a reply needs no 'to'. On a task event it does NOT, because there 'to' means ownership rather than addressing"`
 	TaskOpen bool     `json:"task_open,omitempty" jsonschema:"open a NEW task: the server allocates its number and returns it. Requires 'to' — a task must have an owner"`
 	Task     int      `json:"task,omitempty" jsonschema:"the number of an EXISTING task this section concerns; combine with status to move it, or use it alone on a message that merely references the task"`
 	Status   string   `json:"status,omitempty" jsonschema:"move the task to open, wip, blocked, done or dropped. Setting this is what makes the section a task EVENT — exempt from the turn rule, part of the task's record, and the owner's answer for it. Only its owners (their own slice) or its opener (reassign/drop/force-close) may set it"`
