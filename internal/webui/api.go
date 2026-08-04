@@ -366,7 +366,7 @@ func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
 	turn := pad.TurnState()
 	resp := padResponse{
 		Ref: pad.Ref(), Project: pad.Project, PadID: pad.ID,
-		Title: pad.Title(), CreatedTS: pad.CreatedTS,
+		Title: pad.Title(), CreatedTS: pad.CreatedTS(),
 		Protected: pad.Protected(), Locked: false,
 		SectionCount: len(pad.Sections), Authors: pad.Authors(),
 		Turn: &turn, Sections: toc,

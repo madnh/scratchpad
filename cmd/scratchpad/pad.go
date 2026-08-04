@@ -344,7 +344,7 @@ func newPadGetCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "ref: %s\n", p.Ref())
 			fmt.Fprintf(out, "project: %s\n", p.Project)
-			fmt.Fprintf(out, "created: %s\n", time.Unix(p.CreatedTS, 0).UTC().Format(time.RFC3339))
+			fmt.Fprintf(out, "created: %s\n", time.Unix(p.CreatedTS(), 0).UTC().Format(time.RFC3339))
 			fmt.Fprintf(out, "sections: %d\n", len(p.Sections))
 			fmt.Fprintf(out, "authors: %s\n", strings.Join(p.Authors(), ", "))
 			fmt.Fprintf(out, "protected: %t\n", p.Protected())

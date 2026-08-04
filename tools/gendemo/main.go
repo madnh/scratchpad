@@ -126,7 +126,12 @@ func prepare(dir string, force bool) error {
 // appending it — the same order store.Post checks them in.
 func build(sc scenario, now time.Time) (string, error) {
 	var b strings.Builder
-	b.WriteString(pad.RenderHeader(now.Add(-sc.Events[0].Ago), "") + "\n")
+	// The demo's pads are opened by whoever writes their first event, the same way a real
+	// pad's opener is the agent that created it.
+	b.WriteString(pad.RenderHeader(pad.Header{
+		Created: now.Add(-sc.Events[0].Ago),
+		Opener:  sc.Events[0].Author,
+	}) + "\n")
 
 	sections := map[string]int{} // label -> section number
 	tasks := map[string]int{}    // label -> task number

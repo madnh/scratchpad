@@ -13,7 +13,7 @@ func buildPad(t *testing.T, secs ...Section) *Pad {
 	t.Helper()
 	now := time.Now().UTC()
 	var b strings.Builder
-	b.WriteString(RenderHeader(now, "") + "\n")
+	b.WriteString(RenderHeader(Header{Created: now, Opener: secs[0].Author}) + "\n")
 	for i, sec := range secs {
 		title := sec.Title
 		if title == "" {

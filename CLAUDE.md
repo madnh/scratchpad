@@ -24,11 +24,25 @@ and the runtime socket.
 ## Storage model
 
 One pad = one markdown file `projects/<project>/<padid>.md`, append-only. The first
-line is the pad header (created ts + optional bcrypt password hash); sections are
-headed `# <n> - <author> - <title>`. Turn state is DERIVED from the last section —
-there is no state outside the pad files. Appends take an exclusive `flock` on the pad
-file; reads a shared one. The CLI and the MCP server share `internal/store` — never
-write a second disk path.
+line is the pad header — `scratchpad v<N>` plus `key: value` fields (`created`, `opener`,
+optional `password`, optional `continues`); sections are headed
+`# <n> - <author> - <title>`. Turn state is DERIVED from the last section — there is no
+state outside the pad files. Appends take an exclusive `flock` on the pad file; reads a
+shared one. The CLI and the MCP server share `internal/store` — never write a second disk
+path.
+
+**The header is parsed in ONE place (`pad.ParseHeader`) and there are two parsers.**
+`scan` (offset, keeps bodies) and `scanLines` (streaming, discards them) must never grow
+their own copy of the header rules — that is how the two start disagreeing about what a
+pad is. The same goes for what a field MEANS: `Opener()` reads `Header.Opener` and nothing
+else. Deriving it from section 1 was correct until a pad could continue another; the
+derivation now lives only in `pad.Upgrade`, which runs once per legacy file.
+
+**Migrating the file format is the tool's job — there is no `migrate` command.** A v1 pad
+is read normally and rewritten on its first post, in place (never temp-file+rename: rename
+swaps the inode and every `flock` here is on the pad file). A REFUSED post migrates
+nothing. Bumping `pad.FileVersion` means old binaries call the file corrupt, so it is
+reserved for a header change a v1 reader cannot skip.
 
 **Naming law, one definition.** A file starting with `_` belongs to the tool
 (`_rules.md`); a pad is `[a-z0-9]{1,64}.md` and nothing else. The predicates live in

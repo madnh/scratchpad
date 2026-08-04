@@ -14,7 +14,9 @@ type sec struct {
 }
 
 func build(sections ...sec) *Pad {
-	p := &Pad{Project: "p", ID: "id", CreatedTS: 1000}
+	p := &Pad{Project: "p", ID: "id", Header: Header{
+		Version: FileVersion, Created: time.Unix(1000, 0).UTC(), Opener: sections[0].author,
+	}}
 	for i, s := range sections {
 		m := s.meta
 		if m.Kind == "" {

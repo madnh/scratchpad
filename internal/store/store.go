@@ -322,7 +322,10 @@ func (s *Store) CreatePad(req CreateRequest) (*Pad, string, error) {
 	}
 
 	now := time.Now()
-	body := pad.RenderHeader(now, hash) + "\n" +
+	// The opener is written into the header AT CREATION, from the author this call already
+	// validated — never taken from a request field and never re-derived later. A pad's owner
+	// is decided once, by the code that opens it.
+	body := pad.RenderHeader(pad.Header{Created: now, PasswordHash: hash, Opener: author}) + "\n" +
 		pad.RenderSection(1, author, title, now, pad.Meta{Kind: pad.KindMessage}, content)
 
 	for attempt := 0; attempt < 10; attempt++ {
@@ -439,6 +442,18 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Bring the file up to the current format IN MEMORY, so every check below reads a
+	// current header — pad rules ownership among them, which is answered from Header.Opener
+	// and would refuse everyone on a file that predates the field.
+	//
+	// The rewrite itself is deferred to the append (see needsUpgrade at the write), because
+	// a post that is about to be REFUSED must not leave the file changed. Migration is the
+	// tool's own business and needs no command, but it is still not something a rejected
+	// request should do.
+	data, needsUpgrade, err := pad.Upgrade(project, id, data)
+	if err != nil {
+		return nil, err
+	}
 	// Appending needs the turn holder, the section count, the task state and the
 	// password hash — never the bodies, so they are not materialised on the write path.
 	// That one scan answers all of it, which is why ownership checks and task-number
@@ -447,7 +462,7 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pad %s is corrupt: %w", req.Ref, err)
 	}
-	if err := checkPassword(p.PasswordHash, req.Password); err != nil {
+	if err := checkPassword(p.PasswordHash(), req.Password); err != nil {
 		return nil, err
 	}
 
@@ -527,7 +542,18 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		chunk = "\n" + chunk
 	}
-	if _, err := f.WriteString(chunk); err != nil {
+	if needsUpgrade {
+		// The header grew, so the file is rewritten rather than appended to — the one
+		// operation here that is not O(chunk). It happens at most once per pad, on the
+		// first post after the upgrade, under the exclusive flock this call already holds.
+		//
+		// Rewritten IN PLACE, never through a temp file and rename: rename swaps the inode,
+		// and a concurrent reader holding a shared flock on the old one would go on reading
+		// a file nobody can see. Keeping the inode keeps the lock meaningful.
+		if err := writeWholePad(f, data, chunk); err != nil {
+			return nil, err
+		}
+	} else if _, err := f.WriteString(chunk); err != nil {
 		return nil, err
 	}
 
@@ -558,7 +584,7 @@ func (s *Store) Get(ref, password string) (*Pad, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pad %s is corrupt: %w", ref, err)
 	}
-	if err := checkPassword(p.PasswordHash, password); err != nil {
+	if err := checkPassword(p.PasswordHash(), password); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -701,7 +727,7 @@ func meta(p *Pad) PadMeta {
 		LastAuthor:   last.Author,
 		TurnAuthor:   p.TurnState().LastAuthor,
 		LastTS:       last.TS,
-		CreatedTS:    p.CreatedTS,
+		CreatedTS:    p.CreatedTS(),
 		Protected:    p.Protected(),
 	}
 	for _, t := range p.Tasks() {
@@ -981,6 +1007,34 @@ func openPad(path, ref string, flag int, lock int) (*os.File, error) {
 		return nil, fmt.Errorf("lock pad %s: %w", ref, err)
 	}
 	return f, nil
+}
+
+// writeWholePad replaces a pad file's contents with body+chunk, in place.
+//
+// In place is the whole point: the alternative — write a temp file, rename it over this
+// one — swaps the inode, and every flock in this package is taken on the pad file itself.
+// A reader that acquired a shared lock a moment earlier would keep reading the old inode
+// while a writer holds a lock on the new one, so the lock stops meaning anything precisely
+// when two callers are present. See DESIGN.md on why the same reasoning rules out a
+// rewrite-based section format.
+//
+// The cost of that choice is honest: a crash midway leaves a truncated pad, where rename
+// would have left the old file intact. It is accepted because this runs on an upgrade path
+// that touches only the first line, at most once per pad.
+func writeWholePad(f *os.File, body []byte, chunk string) error {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := f.Write(body); err != nil {
+		return err
+	}
+	if _, err := f.WriteString(chunk); err != nil {
+		return err
+	}
+	// The header only ever grows, so there is nothing to cut today. Truncating anyway costs
+	// one syscall and means a future header that SHRINKS cannot leave a tail of the old file
+	// behind — a failure that would look like corruption and be invisible in review.
+	return f.Truncate(int64(len(body) + len(chunk)))
 }
 
 // newPadID draws a random pad id from the unambiguous alphabet.

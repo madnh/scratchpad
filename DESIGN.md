@@ -1279,7 +1279,7 @@ Design consequence: the CLI and MCP use **one shared storage layer** (the same f
 Each pad is one markdown file, with the metadata header as an HTML comment on the first line, followed by the sections (formatted as in IDEA.md):
 
 ```markdown
-<!-- scratchpad v1; created: 2026-07-11T10:29:00Z; password: $2b$12$... -->
+<!-- scratchpad v2; created: 2026-07-11T10:29:00Z; opener: frontend; password: $2b$12$... -->
 
 # 1 - frontend - How does API X work
 <!-- ts: 2026-07-11T10:30:00Z -->
@@ -1293,6 +1293,48 @@ Content...
 ```
 
 - `password` (a bcrypt hash) appears only when the pad is protected. The file remains one-file-per-pad, the user can `cat` it, and cleanup can be done with `rm` (Scratchpad treats a vanished file as a deleted pad — there is no state outside it).
+
+### The header is keyed, versioned, and holds what the sections cannot say
+
+The header is `scratchpad v<N>` followed by `key: value` fields. Both properties were
+bought at the same time and for the same reason.
+
+**Keyed, because positional parsing cannot be extended.** v1 read the line by cutting it
+at `"; password: "`. Any field added before that point corrupted the timestamp; any field
+added after it was absorbed into the hash, so a protected pad silently refused its own
+password. A format whose only extension point breaks the field next to it has no extension
+point.
+
+**Versioned as a NUMBER, because v1's version was decoration.** It sat inside the literal
+prefix the parser matched, so nothing ever read it: a v2 file was "not a scratchpad file",
+the same answer as a shopping list. A version you cannot compare is not a version — it
+cannot say "newer than me, upgrade", which is the only message worth having.
+
+**`opener` is in the header because the sections genuinely cannot say it.** Everything
+else about a pad's participants is derived (see *Authors*), and derivation is preferred
+here — a derived fact cannot go stale. Ownership is the exception: for a pad that
+CONTINUES another, section 1 is written by whichever agent happened to fill the previous
+pad, so "the author of section 1" hands the pad to a passer-by. It is written once, by the
+code that creates the pad, from an author that code has already validated. **No request
+field sets it** — the same rule as `SystemPost` and `RulesWriter`, and for the same reason:
+a privilege an agent can name is a privilege an agent will claim.
+
+**Upgrading is the tool's job, not an operator's.** There is no `migrate` command and
+nothing to schedule. A v1 pad reads normally; the first post to it rewrites line 1 with
+`opener` taken from section 1's author — the answer v1 itself derived — under the exclusive
+`flock` that post already holds. `pad.Upgrade` is pure and is the ONLY place that
+derivation exists, so it cannot drift into a fallback that every reader has to remember.
+A post that is refused rewrites nothing: "it was rejected" and "the file changed" must not
+be true at once.
+
+The rewrite is **in place**, never temp-file-and-rename. Rename swaps the inode, and every
+lock here is taken on the pad file itself — a reader holding a shared lock on the old inode
+would read a file no writer can see. That is the same reasoning that rules out a
+rewrite-based section format above, applied to the one write that cannot be an append.
+
+The honest cost, in both directions: an **older** binary meeting a v2 file calls it corrupt
+("not a scratchpad file"), because v1 had no version to compare and nothing in v2 can
+change what the old binary prints. Upgrade every binary that shares a store.
 - The section header line is **unchanged and stays strictly parsed** (`# <digits> - `); everything added since lives on the metadata line beneath it (see *Section metadata*). The header is the line that defines a section boundary, and it is deliberately the one line that never grows.
 - Writing: open the file with an exclusive `flock` → parse the metadata of every section → check the turn (last `message`) and, for a task event, ownership → allocate the section number and, when opening a task, the task number → append → release. **Nothing is stored outside the file**: turn state, task state, ownership and the task counter are all derived from the sections themselves, which is why a hand-edited or truncated pad heals instead of corrupting.
 - One pass over the metadata answers all of it, and `Post` already performs that pass to find the turn holder — so ownership checks and task-number allocation cost no additional read.
@@ -1325,4 +1367,4 @@ part of the config schema:
 
 - `internal/config/config.md` documents the on-disk format (its "Pad files" section shows the `ts` line). It is embedded and written into every Scratchpad dir, so it must be updated **in the same change that makes the binary write the new line** — not before, or it would describe a format the binary does not produce.
 - `internal/skills/topics/usage.md` and `mcp.md` teach the CLI and tool surfaces; both gain the new flags/params, and `usage.md` gains the discipline this design depends on: **never end a turn without arming a background `pad wait`**.
-- `config.ConfigVersion` does **not** move: the marker's schema is untouched, and the pad file format stays `scratchpad v1` (see *Backwards compatibility, in both directions*).
+- `config.ConfigVersion` does **not** move: the marker's schema is untouched. The pad file format stayed `scratchpad v1` through the metadata line (see *Backwards compatibility, in both directions*); it moved to v2 later, when the header gained `opener` — a header field, unlike a metadata key, cannot be skipped by a reader that does not know it.

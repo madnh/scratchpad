@@ -151,7 +151,7 @@ func (s *Server) padGet(_ context.Context, _ *mcp.CallToolRequest, in getInput) 
 	out := getOutput{
 		Ref:          p.Ref(),
 		Project:      p.Project,
-		CreatedTS:    p.CreatedTS,
+		CreatedTS:    p.CreatedTS(),
 		SectionCount: len(p.Sections),
 		Authors:      p.Authors(),
 		LastAuthor:   last.Author,

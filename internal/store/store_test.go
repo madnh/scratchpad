@@ -138,7 +138,7 @@ func TestPasswordProtection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(got.PasswordHash, pw) {
+	if strings.Contains(got.PasswordHash(), pw) {
 		t.Fatal("plaintext password leaked into the pad header")
 	}
 	// Listing shows the pad without a password.
