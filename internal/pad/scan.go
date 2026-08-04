@@ -13,39 +13,25 @@ import (
 
 // Pad file format (one markdown file per pad):
 //
-//	<!-- scratchpad v1; created: 2026-07-11T10:29:00Z; password: $2b$12$... -->
+//	<!-- scratchpad v2; created: 2026-07-11T10:29:00Z; opener: frontend; password: $2b$12$... -->
 //
 //	# 1 - frontend - How does API X work
 //	<!-- ts: 2026-07-11T10:30:00Z -->
 //
 //	body…
 //
-// The first line is the pad header (password appears only when protected). Every post
-// is a section headed `# <n> - <author> - <title>`; ONLY lines matching that exact
-// pattern count as section boundaries — a `# something` inside content does not (the
-// residual collision risk of a content line shaped exactly like a header is accepted
-// by design). The line beneath carries the timestamp and the section's metadata (see
-// meta.go). Turn and task state are derived from the sections; there is no other state.
-
-// HeaderPrefix opens the mandatory first line of every pad file. "scratchpad v1" names
-// the FILE format version — independent of the config marker's schema version. It stays
-// v1 through the metadata-line addition: old pads parse unchanged, and a new pad read by
-// an older binary loses a timestamp but keeps every section boundary.
-const HeaderPrefix = "<!-- scratchpad v1; created: "
+// The first line is the pad header (see header.go — password and the rest appear only
+// when they apply). Every post is a section headed `# <n> - <author> - <title>`; ONLY
+// lines matching that exact pattern count as section boundaries — a `# something` inside
+// content does not (the residual collision risk of a content line shaped exactly like a
+// header is accepted by design). The line beneath carries the timestamp and the section's
+// metadata (see meta.go). Turn and task state are derived from the sections; the header
+// holds the little that the sections cannot say, and there is no other state.
 
 // sectionHeaderRe matches exactly `# <n> - <rest>`; rest is split on the first " - "
 // into author and title. Authors are validated to never contain " - ", so the split is
 // unambiguous.
 var sectionHeaderRe = regexp.MustCompile(`^# (\d+) - (.*)$`)
-
-// RenderHeader builds the pad header line.
-func RenderHeader(created time.Time, passwordHash string) string {
-	s := HeaderPrefix + created.UTC().Format(time.RFC3339)
-	if passwordHash != "" {
-		s += "; password: " + passwordHash
-	}
-	return s + " -->"
-}
 
 // RenderSection builds the on-disk text of one section, including the leading blank
 // line that separates it from what came before. Content is stored verbatim with a
@@ -105,17 +91,12 @@ func ScanMeta(project, id string, r io.Reader) (*Pad, error) {
 // data, so parsing costs the file's size once, not a multiple of it.
 func scan(project, id string, data []byte, withContent bool) (*Pad, error) {
 	firstLine, rest := splitLine(data)
-	if !strings.HasPrefix(string(firstLine), HeaderPrefix) {
-		return nil, fmt.Errorf("not a scratchpad file: missing %q header on line 1", strings.TrimSpace(HeaderPrefix))
-	}
-	header := strings.TrimSuffix(strings.TrimPrefix(string(firstLine), HeaderPrefix), " -->")
-	createdStr, passwordHash, _ := strings.Cut(header, "; password: ")
-	created, err := time.Parse(time.RFC3339, strings.TrimSpace(createdStr))
+	header, err := ParseHeader(firstLine)
 	if err != nil {
-		return nil, fmt.Errorf("bad created timestamp in pad header: %w", err)
+		return nil, err
 	}
 
-	p := &Pad{Project: project, ID: id, CreatedTS: created.Unix(), PasswordHash: strings.TrimSpace(passwordHash)}
+	p := &Pad{Project: project, ID: id, Header: header}
 
 	var cur *Section
 	// Byte range of the current section's body within data. bodyStart < 0 means the
@@ -205,17 +186,12 @@ func scanLines(project, id string, r io.Reader) (*Pad, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !strings.HasPrefix(string(firstLine), HeaderPrefix) {
-		return nil, fmt.Errorf("not a scratchpad file: missing %q header on line 1", strings.TrimSpace(HeaderPrefix))
-	}
-	header := strings.TrimSuffix(strings.TrimPrefix(string(firstLine), HeaderPrefix), " -->")
-	createdStr, passwordHash, _ := strings.Cut(header, "; password: ")
-	created, err := time.Parse(time.RFC3339, strings.TrimSpace(createdStr))
+	header, err := ParseHeader(firstLine)
 	if err != nil {
-		return nil, fmt.Errorf("bad created timestamp in pad header: %w", err)
+		return nil, err
 	}
 
-	p := &Pad{Project: project, ID: id, CreatedTS: created.Unix(), PasswordHash: strings.TrimSpace(passwordHash)}
+	p := &Pad{Project: project, ID: id, Header: header}
 
 	var cur *Section
 	// bodyStarted stands in for the offset parser's "bodyStart >= 0": it says the body has

@@ -46,6 +46,15 @@ type event struct {
 	// history the UI shows as superseded. Replace cuts off the project and store levels.
 	Rules   bool
 	Replace bool
+
+	// Continued makes this the section a full pad ends with, naming its successor. Only
+	// the tool writes one, so the author is always pad.SystemAuthor.
+	Continued bool
+
+	// TaskNo pins a task to a number instead of allocating the next one. It exists for
+	// the sections a CONTINUATION carries over, where the number came from the pad before
+	// this one and keeping it is the entire point.
+	TaskNo int
 }
 
 // storeRules and projectRules are the two FILE levels of the demo. They are here for the
@@ -64,6 +73,17 @@ type scenario struct {
 	ID      string
 	Note    string // one line, printed after the build
 	Events  []event
+
+	// Opener overrides who owns the pad. Normally that is whoever writes section 1, which
+	// is what the header records — but a pad that CONTINUES another keeps the original
+	// owner, and its section 1 belongs to whichever agent happened to fill the old pad.
+	Opener string
+
+	// The two ends of a continuation, and the task numbering that crosses it. They are
+	// header fields, so they are set on the scenario rather than on any event.
+	Continues   string
+	ContinuedBy string
+	TasksFrom   int
 }
 
 var scenarios = []scenario{
@@ -319,6 +339,89 @@ var scenarios = []scenario{
 				Title: "Docs has not answered at all",
 				Body: "No reply since I opened it — the board shows it, and so does `pad who`.\n" +
 					"Presence would not have told us this; a task nobody moved does."},
+		},
+	},
+
+	// ── A pad that filled up, and the pad that took over ─────────────────────────
+	//
+	// Two files, one conversation. Everything a continuation is supposed to preserve is
+	// visible from these two: the closing section that names where to go, the successor's
+	// carried rules and carried task, a task number that did NOT restart, and an owner who
+	// did not change hands even though someone else wrote the successor's section 1.
+	//
+	// The pair also gives the UI something to render at both ends: a "closed" pad in the
+	// table, and a "continues" one right beside it.
+	{
+		Project: "release", ID: "cut41old",
+		Note: "a pad that reached its limit and was continued (the closed end)",
+		// The successor's id is fixed here rather than discovered: these two files are
+		// written independently, so the link is part of the story, not a side effect.
+		ContinuedBy: "release-cut41new",
+		Events: []event{
+			{Ago: 5 * day, Author: "pm", Label: "kick",
+				Title: "4.1 cut — coordination pad",
+				Body: "Everything for the 4.1 cut goes here. Long one; we have been at this\n" +
+					"since the branch was taken."},
+			{Ago: 5*day - 30*minute, Author: "pm", Rules: true,
+				Title: "Pad rules",
+				Body: "- One decision per message; the reasons go in the task, not here.\n" +
+					"- If you claim a task, say which build you reproduced on."},
+			{Ago: 4 * day, Author: "pm", Opens: "signoff", To: []string{"qa"},
+				Title: "Sign-off matrix for 4.1",
+				Body:  "Devices, OS versions, and who runs which. Needed before the cut."},
+			{Ago: 4*day - 2*hour, Author: "qa", Task: "signoff", Status: pad.StatusWIP,
+				Title: "QA: matrix started", Body: "Half the devices are in the lab already."},
+			{Ago: 3 * day, Author: "pm", Opens: "changelog", To: []string{"docs"},
+				Title: "Changelog for 4.1", Body: "The user-visible list, not the commit log."},
+			{Ago: 3*day - 1*hour, Author: "docs", Task: "changelog", Status: pad.StatusDone,
+				Title: "Docs: changelog published", Body: "Merged. Nothing else pending here."},
+			{Ago: 2 * day, Author: "pm", To: []string{"qa"},
+				Title: "This pad is nearly full",
+				Body: "We have been warned at 80 and 90 percent for the last few days. Say\n" +
+					"what is unfinished before it rolls over."},
+			{Ago: 2*day - 20*minute, Author: "qa", Label: "lastword",
+				Title: "QA: the matrix is what is left",
+				Body:  "Everything else is closed. The matrix is still mine."},
+			// The tool's own closing section. Written by scratchpad, takes no turn, and
+			// wakes every waiter regardless of their selectors.
+			{Ago: 2*day - 25*minute, Author: pad.SystemAuthor, Continued: true,
+				Title: "This pad is full — continued in release-cut41new",
+				Body: "This pad reached its section limit. The conversation continues in\n" +
+					"release-cut41new, which carries this pad's owner, house rules, password\n" +
+					"and task numbering.\n\nThis pad stays readable; it accepts no further posts."},
+		},
+	},
+
+	// ── …and the successor ───────────────────────────────────────────────────────
+	{
+		Project: "release", ID: "cut41new",
+		Note: "the successor: carried rules, a carried task that kept its number, and the owner it inherited",
+		// pm opened the ORIGINAL pad; qa wrote section 3 of this one. Ownership follows
+		// the header, which is the whole reason the header carries it.
+		Opener:    "pm",
+		Continues: "release-cut41old",
+		// The old pad issued T1 and T2, so the first task opened here is T3.
+		TasksFrom: 2,
+		Events: []event{
+			{Ago: 2*day - 25*minute, Author: pad.SystemAuthor, Rules: true,
+				Title: "House rules, carried over",
+				Body: "- One decision per message; the reasons go in the task, not here.\n" +
+					"- If you claim a task, say which build you reproduced on."},
+			{Ago: 2*day - 25*minute, Author: pad.SystemAuthor, Opens: "signoff", TaskNo: 1,
+				To:    []string{"qa"},
+				Title: "Sign-off matrix for 4.1",
+				Body:  "Carried over from release-cut41old §3, still wip. Its history is in that pad."},
+			{Ago: 2*day - 30*minute, Author: "qa", Label: "resume",
+				Title: "QA: carrying on here",
+				Body:  "Same matrix, same T1 — the number did not move. Two devices left."},
+			{Ago: day, Author: "pm", Re: "resume",
+				Title: "Understood", Body: "Ping me when the last two are through."},
+			{Ago: 6 * hour, Author: "qa", Task: "signoff", Status: pad.StatusDone,
+				Title: "QA: matrix complete", Body: "All devices signed off. 4.1 can cut."},
+			{Ago: 5 * hour, Author: "pm", Opens: "tag", To: []string{"release"},
+				Title: "Tag and publish 4.1",
+				Body: "This is the first task opened in this pad, and it is T3: numbering\n" +
+					"continued across the pads rather than restarting."},
 		},
 	},
 }

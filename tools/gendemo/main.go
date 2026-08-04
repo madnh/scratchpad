@@ -126,7 +126,19 @@ func prepare(dir string, force bool) error {
 // appending it — the same order store.Post checks them in.
 func build(sc scenario, now time.Time) (string, error) {
 	var b strings.Builder
-	b.WriteString(pad.RenderHeader(now.Add(-sc.Events[0].Ago), "") + "\n")
+	// The demo's pads are opened by whoever writes their first event, the same way a real
+	// pad's opener is the agent that created it.
+	opener := sc.Events[0].Author
+	if sc.Opener != "" {
+		opener = sc.Opener
+	}
+	b.WriteString(pad.RenderHeader(pad.Header{
+		Created:     now.Add(-sc.Events[0].Ago),
+		Opener:      opener,
+		Continues:   sc.Continues,
+		ContinuedBy: sc.ContinuedBy,
+		TasksFrom:   sc.TasksFrom,
+	}) + "\n")
 
 	sections := map[string]int{} // label -> section number
 	tasks := map[string]int{}    // label -> task number
@@ -156,6 +168,9 @@ func build(sc scenario, now time.Time) (string, error) {
 		if ev.Rules {
 			meta.Kind, meta.Replace = pad.KindRules, ev.Replace
 		}
+		if ev.Continued {
+			meta.Kind = pad.KindContinued
+		}
 		switch {
 		case ev.Opens != "":
 			if _, dup := tasks[ev.Opens]; dup {
@@ -164,6 +179,9 @@ func build(sc scenario, now time.Time) (string, error) {
 			meta.Task = 1
 			if p != nil {
 				meta.Task = p.NextTaskNo()
+			}
+			if ev.TaskNo > 0 {
+				meta.Task = ev.TaskNo // carried over from the pad this one continues
 			}
 			meta.Status = pad.StatusOpen
 			tasks[ev.Opens] = meta.Task

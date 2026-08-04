@@ -41,6 +41,13 @@ type padEvent struct {
 	LastTS     int64  `json:"last_ts,omitempty"`
 	Protected  bool   `json:"protected,omitempty"`
 
+	// Which end of a continuation this pad is. Listing-level, like everything above: the
+	// Pads table repaints a row in place from this event, so a pad that closes while the
+	// page is open has to lose its live status HERE — otherwise the table goes on showing
+	// it as the current pad until someone reloads.
+	ContinuedBy string `json:"continued_by,omitempty"`
+	Continues   string `json:"continues,omitempty"`
+
 	// Routing and task fields, so a notification can say "T3 → done" rather than "the
 	// pad changed", and so the task panel stays live without refetching.
 	//
@@ -156,6 +163,8 @@ func (h *hub) enrich(ev watch.Event) padEvent {
 	out.LastTitle = lastTitle
 	out.LastTS = m.LastTS
 	out.Protected = m.Protected
+	out.ContinuedBy = m.ContinuedBy
+	out.Continues = m.Continues
 	if m.Protected {
 		return out // nothing beyond the listing level leaves here
 	}

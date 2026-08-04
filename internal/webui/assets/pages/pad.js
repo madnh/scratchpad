@@ -782,6 +782,16 @@ export default function mount(outlet, ctx) {
       el("span", { class: "muted", title: absTime(pad.created_ts), text: `created ${relTime(pad.created_ts)}` }),
     );
     if (pad.protected) row.append(el("puredashboard-tag", { color: "warning", size: "sm", text: "protected" }));
+    // A pad that filled up hands the conversation on. Both ends are real LINKS to real
+    // pads, never a merged view: two files are two pads, and a reader who cannot see the
+    // seam cannot tell which one is still live.
+    if (pad.continued_by) {
+      row.append(el("puredashboard-tag", { color: "neutral", size: "sm", text: "full — continued" }));
+      row.append(el("a", { href: `#/pads/${pad.continued_by}`, class: "muted", text: `continues in ${pad.continued_by}` }));
+    }
+    if (pad.continues) {
+      row.append(el("a", { href: `#/pads/${pad.continues}`, class: "muted", text: `continues from ${pad.continues}` }));
+    }
     // No roster here: the participants strip below IS this pad's roster, and it is shown
     // whole — this page is where you come to find out exactly who is on a conversation,
     // so a "+2" would be hiding the answer. The pads TABLE still caps its own list,

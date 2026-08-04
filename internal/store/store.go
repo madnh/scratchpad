@@ -322,7 +322,10 @@ func (s *Store) CreatePad(req CreateRequest) (*Pad, string, error) {
 	}
 
 	now := time.Now()
-	body := pad.RenderHeader(now, hash) + "\n" +
+	// The opener is written into the header AT CREATION, from the author this call already
+	// validated — never taken from a request field and never re-derived later. A pad's owner
+	// is decided once, by the code that opens it.
+	body := pad.RenderHeader(pad.Header{Created: now, PasswordHash: hash, Opener: author}) + "\n" +
 		pad.RenderSection(1, author, title, now, pad.Meta{Kind: pad.KindMessage}, content)
 
 	for attempt := 0; attempt < 10; attempt++ {
@@ -395,6 +398,11 @@ type PostResult struct {
 	Section int
 	Task    int // the task this post opened or moved, 0 when it touched none
 
+	// ContinuedFrom is set when the pad named in the request was full and this post landed
+	// in its successor instead. It is the ref the caller ASKED for, so a surface can say
+	// "you posted to X, it is now Y" rather than silently answering about a different pad.
+	ContinuedFrom string
+
 	// Warnings are advisory and never mean failure — today, that an addressee has been
 	// silent long enough that nobody may be listening. They are returned at the moment
 	// the sender can still act on it, which is what presence was wanted for.
@@ -439,6 +447,18 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Bring the file up to the current format IN MEMORY, so every check below reads a
+	// current header — pad rules ownership among them, which is answered from Header.Opener
+	// and would refuse everyone on a file that predates the field.
+	//
+	// The rewrite itself is deferred to the append (see needsUpgrade at the write), because
+	// a post that is about to be REFUSED must not leave the file changed. Migration is the
+	// tool's own business and needs no command, but it is still not something a rejected
+	// request should do.
+	data, needsUpgrade, err := pad.Upgrade(project, id, data)
+	if err != nil {
+		return nil, err
+	}
 	// Appending needs the turn holder, the section count, the task state and the
 	// password hash — never the bodies, so they are not materialised on the write path.
 	// That one scan answers all of it, which is why ownership checks and task-number
@@ -447,8 +467,21 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pad %s is corrupt: %w", req.Ref, err)
 	}
-	if err := checkPassword(p.PasswordHash, req.Password); err != nil {
+	if err := checkPassword(p.PasswordHash(), req.Password); err != nil {
 		return nil, err
+	}
+	// A pad that has already been continued accepts nothing further, whatever the limits
+	// say now — its successor holds the conversation, and a second live end would mean two
+	// agents talking in two files that both look current.
+	//
+	// Checked HERE, before the turn rule and the rules gate, because on a closed pad those
+	// answers are all misleading. "It is not your turn" invites a wait for a turn that will
+	// never come; the truthful answer is that this pad is finished and names where to go.
+	// Only the password comes first: what a pad says, including where it continued, is not
+	// something an unauthorised caller gets to learn.
+	if next := p.Header.ContinuedBy; next != "" {
+		return nil, coded(CodePadContinued,
+			"pad %s is full and was continued in %s — post there", req.Ref, next)
 	}
 
 	meta := req.Meta
@@ -515,11 +548,48 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 			}
 		}
 	}
+	// Computed before the pad's capacity is considered, because a post that MOVES to a
+	// successor carries the same advice about its addressees as one that stays.
+	warningsSoFar := p.SilenceWarnings(meta.To, time.Now())
+
 	if len(p.Sections) >= lim.MaxSectionsPerPad {
-		return nil, coded(CodeLimitExceeded, "pad %s already holds %d sections (the limit)", req.Ref, len(p.Sections))
+		if lim.OnFull == config.OnFullReject {
+			return nil, coded(CodeLimitExceeded,
+				"pad %s already holds %d sections (the limit); raise limits.max_sections_per_pad,"+
+					" or set limits.on_full to %q to let full pads continue in a new one",
+				req.Ref, len(p.Sections), config.OnFullContinue)
+		}
+		// Continuing needs the section BODIES: the pad's house rules are a section body,
+		// and they carry over. This is the one path where the append route pays for a full
+		// parse, and it happens once in a pad's life.
+		fp, err := fullPad()
+		if err != nil {
+			return nil, err
+		}
+		cont, err := s.continuePad(project, id, p, fp, f, data, req, meta, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		moved, err := s.Get(cont.Ref, req.Password)
+		if err != nil {
+			return nil, err
+		}
+		return &PostResult{
+			Pad: moved, Section: cont.Section, Task: cont.Task,
+			ContinuedFrom: req.Ref,
+			Warnings: append(warningsSoFar,
+				fmt.Sprintf("pad %s was full, so this post opened %s to continue it — "+
+					"use that ref from now on; the old pad stays readable", req.Ref, cont.Ref)),
+		}, nil
 	}
 
-	warnings := p.SilenceWarnings(meta.To, time.Now())
+	warnings := warningsSoFar
+	// Counted AFTER this post, because that is the number the author just caused and the
+	// one it can act on. The limit is read from the snapshot this call took at the top, so
+	// a marker edited mid-post cannot make the warning and the refusal disagree.
+	if w := pad.CapacityWarning(len(p.Sections)+1, lim.MaxSectionsPerPad, lim.WarnAtPercent); w != "" {
+		warnings = append(warnings, w)
+	}
 
 	n := p.Last().N + 1
 	now := time.Now()
@@ -527,7 +597,18 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		chunk = "\n" + chunk
 	}
-	if _, err := f.WriteString(chunk); err != nil {
+	if needsUpgrade {
+		// The header grew, so the file is rewritten rather than appended to — the one
+		// operation here that is not O(chunk). It happens at most once per pad, on the
+		// first post after the upgrade, under the exclusive flock this call already holds.
+		//
+		// Rewritten IN PLACE, never through a temp file and rename: rename swaps the inode,
+		// and a concurrent reader holding a shared flock on the old one would go on reading
+		// a file nobody can see. Keeping the inode keeps the lock meaningful.
+		if err := writeWholePad(f, data, chunk); err != nil {
+			return nil, err
+		}
+	} else if _, err := f.WriteString(chunk); err != nil {
 		return nil, err
 	}
 
@@ -558,7 +639,7 @@ func (s *Store) Get(ref, password string) (*Pad, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pad %s is corrupt: %w", ref, err)
 	}
-	if err := checkPassword(p.PasswordHash, password); err != nil {
+	if err := checkPassword(p.PasswordHash(), password); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -679,6 +760,16 @@ type PadMeta struct {
 	OpenTasks  int    `json:"open_tasks,omitempty"`
 	Overdue    int    `json:"overdue,omitempty"`
 
+	// ContinuedBy names the pad that took over from this one, and is what tells a LISTING
+	// which end of a continuation is live. Without it a filled pad and its successor look
+	// identical in a table — same title, same people, adjacent timestamps — and the only
+	// way to tell which one still accepts posts is to open both.
+	ContinuedBy string `json:"continued_by,omitempty"`
+
+	// Continues names the pad this one took over from, so a row can say where its history
+	// is rather than looking like a conversation that started mid-sentence.
+	Continues string `json:"continues,omitempty"`
+
 	// Unreadable carries why this pad could not be opened, and is empty for every pad
 	// that could. A row with it set has nothing else filled in but Ref and Project.
 	//
@@ -701,8 +792,10 @@ func meta(p *Pad) PadMeta {
 		LastAuthor:   last.Author,
 		TurnAuthor:   p.TurnState().LastAuthor,
 		LastTS:       last.TS,
-		CreatedTS:    p.CreatedTS,
+		CreatedTS:    p.CreatedTS(),
 		Protected:    p.Protected(),
+		ContinuedBy:  p.Header.ContinuedBy,
+		Continues:    p.Continues(),
 	}
 	for _, t := range p.Tasks() {
 		if t.Open() {
@@ -981,6 +1074,34 @@ func openPad(path, ref string, flag int, lock int) (*os.File, error) {
 		return nil, fmt.Errorf("lock pad %s: %w", ref, err)
 	}
 	return f, nil
+}
+
+// writeWholePad replaces a pad file's contents with body+chunk, in place.
+//
+// In place is the whole point: the alternative — write a temp file, rename it over this
+// one — swaps the inode, and every flock in this package is taken on the pad file itself.
+// A reader that acquired a shared lock a moment earlier would keep reading the old inode
+// while a writer holds a lock on the new one, so the lock stops meaning anything precisely
+// when two callers are present. See DESIGN.md on why the same reasoning rules out a
+// rewrite-based section format.
+//
+// The cost of that choice is honest: a crash midway leaves a truncated pad, where rename
+// would have left the old file intact. It is accepted because this runs on an upgrade path
+// that touches only the first line, at most once per pad.
+func writeWholePad(f *os.File, body []byte, chunk string) error {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := f.Write(body); err != nil {
+		return err
+	}
+	if _, err := f.WriteString(chunk); err != nil {
+		return err
+	}
+	// The header only ever grows, so there is nothing to cut today. Truncating anyway costs
+	// one syscall and means a future header that SHRINKS cannot leave a tail of the old file
+	// behind — a failure that would look like corruption and be invisible in review.
+	return f.Truncate(int64(len(body) + len(chunk)))
 }
 
 // newPadID draws a random pad id from the unambiguous alphabet.

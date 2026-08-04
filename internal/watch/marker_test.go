@@ -168,7 +168,7 @@ func TestReloadConfigKeepsRunningConfigOnBadMarker(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	got := live.Get()
-	if got.Rules != running.Rules || got.Limits != running.Limits {
+	if got.Rules != running.Rules || !config.SameLimits(got.Limits, running.Limits) {
 		t.Fatalf("a broken marker changed the running config: %+v", got)
 	}
 }

@@ -95,6 +95,7 @@ export function renderPadTable(outlet, { project = "", heading, subtitle, action
       section_count: ev.section_count, authors: ev.authors || [],
       last_author: ev.last_author, turn_author: ev.turn_author,
       last_ts: ev.last_ts, protected: ev.protected,
+      continued_by: ev.continued_by, continues: ev.continues,
     };
     if (idx < 0) rows.unshift(next); else rows[idx] = { ...rows[idx], ...next };
     repaint();
@@ -105,10 +106,26 @@ export function renderPadTable(outlet, { project = "", heading, subtitle, action
   return () => { disposed = true; off(); offWatch(); };
 }
 
-// flags renders the at-a-glance markers: protected, watched, and unread.
+// flags renders the at-a-glance markers: protected, watched, unread, and which end of a
+// continuation this is.
+//
+// "closed" earns a place in a table this dense because without it a filled pad and its
+// successor are indistinguishable here — same title, same people, timestamps a second
+// apart — and the only way to tell which one still takes posts is to open both.
 function flags(pad) {
   const box = el("span", { class: "flags" });
   if (pad.protected) box.append(el("puredashboard-tag", { color: "warning", size: "sm", text: "locked" }));
+  if (pad.continued_by) {
+    box.append(el("puredashboard-tag", {
+      color: "neutral", size: "sm", text: "closed",
+      title: `full — continued in ${pad.continued_by}`,
+    }));
+  } else if (pad.continues) {
+    box.append(el("puredashboard-tag", {
+      color: "neutral", size: "sm", text: "continues",
+      title: `continues ${pad.continues}`,
+    }));
+  }
   if (wl.isWatched(pad.ref)) {
     const unread = pad.section_count > wl.seenCount(pad.ref);
     box.append(el("puredashboard-tag", {

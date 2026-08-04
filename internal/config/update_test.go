@@ -223,7 +223,7 @@ func TestUpdateMarkerRemovesAClearedField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.DefaultProject != DefaultProject || got.Limits != DefaultLimits {
+	if got.DefaultProject != DefaultProject || !SameLimits(got.Limits, DefaultLimits) {
 		t.Errorf("clearing a field must fall back to the defaults: %+v", got)
 	}
 }

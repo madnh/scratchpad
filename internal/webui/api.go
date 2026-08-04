@@ -301,17 +301,24 @@ func (s *Server) handleSectionPreview(r *http.Request, sess *session) (any, erro
 // protected pad that has not been unlocked, the TOC is omitted along with the content
 // it describes — the listing-level metadata still comes through.
 type padResponse struct {
-	Ref          string      `json:"ref"`
-	Project      string      `json:"project"`
-	PadID        string      `json:"pad_id"`
-	Title        string      `json:"title"`
-	CreatedTS    int64       `json:"created_ts"`
-	Protected    bool        `json:"protected"`
-	Locked       bool        `json:"locked"`
-	SectionCount int         `json:"section_count"`
-	Authors      []string    `json:"authors"`
-	Turn         *store.Turn `json:"turn,omitempty"`
-	Sections     []tocEntry  `json:"sections"`
+	Ref          string   `json:"ref"`
+	Project      string   `json:"project"`
+	PadID        string   `json:"pad_id"`
+	Title        string   `json:"title"`
+	CreatedTS    int64    `json:"created_ts"`
+	Protected    bool     `json:"protected"`
+	Locked       bool     `json:"locked"`
+	SectionCount int      `json:"section_count"`
+	Authors      []string `json:"authors"`
+
+	// The two ends of a continuation. They are refs rather than a merged transcript on
+	// purpose: two pads that filled up are two pads, and pretending otherwise would mean
+	// every view built on "a pad" quietly meaning something else. A link is enough to
+	// follow the conversation; a merge would change what the word means.
+	Continues   string      `json:"continues,omitempty"`
+	ContinuedBy string      `json:"continued_by,omitempty"`
+	Turn        *store.Turn `json:"turn,omitempty"`
+	Sections    []tocEntry  `json:"sections"`
 
 	// Participants rides along with the pad rather than living behind its own endpoint:
 	// the strip is always on screen, and a second round-trip for something never hidden
@@ -366,9 +373,10 @@ func (s *Server) handlePad(r *http.Request, sess *session) (any, error) {
 	turn := pad.TurnState()
 	resp := padResponse{
 		Ref: pad.Ref(), Project: pad.Project, PadID: pad.ID,
-		Title: pad.Title(), CreatedTS: pad.CreatedTS,
+		Title: pad.Title(), CreatedTS: pad.CreatedTS(),
 		Protected: pad.Protected(), Locked: false,
 		SectionCount: len(pad.Sections), Authors: pad.Authors(),
+		Continues: pad.Continues(), ContinuedBy: pad.Header.ContinuedBy,
 		Turn: &turn, Sections: toc,
 		Participants: pad.Participants(),
 	}

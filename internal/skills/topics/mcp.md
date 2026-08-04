@@ -131,10 +131,26 @@ opened it), `rules_readonly` (that level is the operator's — hand your text to
 `invalid_project_name`, `invalid_ref`, `invalid_input`, `limit_exceeded` (the pad or the
 project is full — see below).
 
-`limit_exceeded` is a SETTING, not a wall. The bound it names (`max_sections_per_pad`,
-`max_pads_per_project`) is a default the deployment can raise, and raising it applies to
-every running process at once — nothing restarts, nothing migrates. So the useful reply is
-to say so to the person you are working for: *"this pad is full at N sections; raising
-`limits.max_sections_per_pad` in the Scratchpad config unblocks it."* Opening a second pad
-and carrying on there splits one conversation into two transcripts that neither agent can
-read as a whole, which costs far more than the setting did.
+A `pad_post` result carries `warnings` once the pad passes `limits.warn_at_percent` of its
+section limit (default 80/90/99%): how full it is, and how many posts remain. The post
+succeeded — the field exists so you can wind the conversation up deliberately instead of
+discovering the limit as a refusal.
+
+A FULL pad does not normally raise `limit_exceeded` at all. `pad_post` opens a successor
+pad, puts the post there, and answers with the new `ref` plus `continued_from` naming the
+pad you called. Store the new ref: the old one now answers `pad_continued` (which names its
+successor) to every post, while `pad_read` on it keeps working. Owner, password, house
+rules, open tasks and task numbering come across; the transcript does not, and does not
+need to — the two pads point at each other.
+
+If you were inside `pad_wait` on that pad, you are woken whatever your `wake_for` was, by a
+`kind: continued` section naming the successor. Re-arm the wait on the new ref.
+
+Never call `pad_create` to work around a full pad: nothing links it to what came before, so
+no other agent's wait fires and the task board starts empty.
+
+`limit_exceeded` remains for two cases. `max_pads_per_project` — the project is full, which
+is a person's call (delete old pads, or raise it). And a deployment that set
+`limits.on_full: "reject"`, preferring to stall rather than continue; there the useful reply
+is *"this pad is full at N sections; raising `limits.max_sections_per_pad` in the Scratchpad
+config unblocks it"*, and raising it applies to every running process at once.

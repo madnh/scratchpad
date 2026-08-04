@@ -80,7 +80,37 @@ type Limits struct {
 	MaxContentKB      int `json:"max_content_kb,omitempty"`
 	MaxSectionsPerPad int `json:"max_sections_per_pad,omitempty"`
 	MaxPadsPerProject int `json:"max_pads_per_project,omitempty"`
+
+	// WarnAtPercent is how full a pad may get before a post starts saying so, as
+	// percentages of MaxSectionsPerPad.
+	//
+	// It exists because hitting the limit is not a small event: the refusal arrives with
+	// no notice, mid-conversation, at the one moment an agent has something to say. Told
+	// early, an agent can finish what it is doing and wind the pad up on purpose; told by
+	// a refusal, it has already lost its turn and improvises.
+	//
+	// An empty list means the defaults; a list holding only 0 turns the warnings off,
+	// which is the one way to say "never warn" without the field meaning two things.
+	// Nil is shared by every reader of a config snapshot — never sort or append to it in
+	// place (see Live).
+	WarnAtPercent []int `json:"warn_at_percent,omitempty"`
+
+	// OnFull decides what happens to a post that arrives at a pad with no room left:
+	// OnFullContinue (the default) moves the conversation to a fresh pad, OnFullReject
+	// refuses it the way this tool always used to.
+	OnFull string `json:"on_full,omitempty"`
 }
+
+const (
+	// OnFullContinue opens a successor pad and puts the post there. It is the default
+	// because the alternative has no way out that does not need a person: an agent cannot
+	// raise a limit, and the pads that fill up are the ones with the most history to lose.
+	OnFullContinue = "continue"
+
+	// OnFullReject refuses the post, leaving the conversation stopped until somebody
+	// raises the limit. For a deployment that would rather stall than split a transcript.
+	OnFullReject = "reject"
+)
 
 // DefaultLimits are the built-in bounds used when the marker sets none.
 var DefaultLimits = Limits{
@@ -88,6 +118,23 @@ var DefaultLimits = Limits{
 	MaxContentKB:      64,
 	MaxSectionsPerPad: 1000,
 	MaxPadsPerProject: 1000,
+	// 80 leaves room to change how the work is split; 90 is time to start closing
+	// threads; 99 is the last few posts, and its wording says so. Three steps rather than
+	// one because a single threshold is either too early to act on or too late to act on.
+	WarnAtPercent: []int{80, 90, 99},
+	OnFull:        OnFullContinue,
+}
+
+// SameLimits reports whether two limit sets are equal. Limits stopped being comparable
+// with == when WarnAtPercent made it hold a slice; this exists so no caller reaches for
+// reflect.DeepEqual and quietly starts treating a nil and an empty slice as different.
+func SameLimits(a, b Limits) bool {
+	return a.MaxTitleKB == b.MaxTitleKB &&
+		a.MaxContentKB == b.MaxContentKB &&
+		a.MaxSectionsPerPad == b.MaxSectionsPerPad &&
+		a.MaxPadsPerProject == b.MaxPadsPerProject &&
+		a.OnFull == b.OnFull &&
+		slices.Equal(a.WarnAtPercent, b.WarnAtPercent)
 }
 
 // Wait bounds the MCP pad_wait long-poll. The cap exists because an MCP tool call
@@ -264,6 +311,29 @@ func (c *Config) validateSchema() error {
 	return nil
 }
 
+// normalisePercents puts a warning threshold list into the one shape every reader can
+// rely on: ascending, without duplicates, nothing outside 1..100, and never the caller's
+// own slice. A snapshot's slices are shared by every goroutine holding it (see Live), so
+// this allocates rather than sorting in place.
+//
+// Empty means "use the defaults" — the same spelling as a zero limit. A list holding only
+// 0 means OFF, and it is deliberately a separate spelling: without it, "no warnings" and
+// "I did not set this" would be the same JSON and the field would mean two things.
+func normalisePercents(in []int) []int {
+	if len(in) == 0 {
+		return DefaultLimits.WarnAtPercent
+	}
+	out := make([]int, 0, len(in))
+	for _, p := range in {
+		if p <= 0 || p > 100 || slices.Contains(out, p) {
+			continue
+		}
+		out = append(out, p)
+	}
+	slices.Sort(out)
+	return out
+}
+
 // applyDefaults fills neutral defaults for fields the marker leaves empty.
 func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.DisplayName) == "" {
@@ -286,6 +356,10 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Limits.MaxPadsPerProject <= 0 {
 		c.Limits.MaxPadsPerProject = DefaultLimits.MaxPadsPerProject
+	}
+	c.Limits.WarnAtPercent = normalisePercents(c.Limits.WarnAtPercent)
+	if strings.TrimSpace(c.Limits.OnFull) == "" {
+		c.Limits.OnFull = DefaultLimits.OnFull
 	}
 	if c.Wait.DefaultS <= 0 {
 		c.Wait.DefaultS = DefaultWait.DefaultS

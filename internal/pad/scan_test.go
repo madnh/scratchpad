@@ -21,16 +21,14 @@ import (
 // own tests below.
 func referenceParse(project, id string, data []byte) (*Pad, error) {
 	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 || !strings.HasPrefix(lines[0], HeaderPrefix) {
+	if len(lines) == 0 {
 		return nil, fmt.Errorf("not a scratchpad file")
 	}
-	header := strings.TrimSuffix(strings.TrimPrefix(lines[0], HeaderPrefix), " -->")
-	createdStr, passwordHash, _ := strings.Cut(header, "; password: ")
-	created, err := time.Parse(time.RFC3339, strings.TrimSpace(createdStr))
+	header, err := ParseHeader([]byte(lines[0]))
 	if err != nil {
-		return nil, fmt.Errorf("bad created timestamp")
+		return nil, err
 	}
-	p := &Pad{Project: project, ID: id, CreatedTS: created.Unix(), PasswordHash: strings.TrimSpace(passwordHash)}
+	p := &Pad{Project: project, ID: id, Header: header}
 
 	var cur *Section
 	var content []string
@@ -131,7 +129,7 @@ func TestParseMetaMatchesParseWithoutBodies(t *testing.T) {
 			if err != nil {
 				t.Fatalf("meta parse failed where full parse succeeded: %v", err)
 			}
-			if meta.CreatedTS != full.CreatedTS || meta.PasswordHash != full.PasswordHash {
+			if meta.Header != full.Header {
 				t.Fatalf("header mismatch: %#v vs %#v", meta, full)
 			}
 			if len(meta.Sections) != len(full.Sections) {

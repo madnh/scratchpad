@@ -24,20 +24,49 @@ and the runtime socket.
 ## Storage model
 
 One pad = one markdown file `projects/<project>/<padid>.md`, append-only. The first
-line is the pad header (created ts + optional bcrypt password hash); sections are
-headed `# <n> - <author> - <title>`. Turn state is DERIVED from the last section —
-there is no state outside the pad files. Appends take an exclusive `flock` on the pad
-file; reads a shared one. The CLI and the MCP server share `internal/store` — never
-write a second disk path.
+line is the pad header — `scratchpad v<N>` plus `key: value` fields (`created`, `opener`,
+optional `password`, optional `continues`); sections are headed
+`# <n> - <author> - <title>`. Turn state is DERIVED from the last section — there is no
+state outside the pad files. Appends take an exclusive `flock` on the pad file; reads a
+shared one. The CLI and the MCP server share `internal/store` — never write a second disk
+path.
+
+**The header is parsed in ONE place (`pad.ParseHeader`) and there are two parsers.**
+`scan` (offset, keeps bodies) and `scanLines` (streaming, discards them) must never grow
+their own copy of the header rules — that is how the two start disagreeing about what a
+pad is. The same goes for what a field MEANS: `Opener()` reads `Header.Opener` and nothing
+else. Deriving it from section 1 was correct until a pad could continue another; the
+derivation now lives only in `pad.Upgrade`, which runs once per legacy file.
+
+**Migrating the file format is the tool's job — there is no `migrate` command.** A v1 pad
+is read normally and rewritten on its first post, in place (never temp-file+rename: rename
+swaps the inode and every `flock` here is on the pad file). A REFUSED post migrates
+nothing. Bumping `pad.FileVersion` means old binaries call the file corrupt, so it is
+reserved for a header change a v1 reader cannot skip.
 
 **Naming law, one definition.** A file starting with `_` belongs to the tool
 (`_rules.md`); a pad is `[a-z0-9]{1,64}.md` and nothing else. The predicates live in
 `internal/pad` (`IsPadFileName`, `IsToolFileName`) and the store, the watcher and
 `doctor` all call them — never re-derive "is this a pad" from a `.md` suffix.
 
+**A full pad CONTINUES by default** (`limits.on_full`): the store opens a successor, copies
+the pad's identity into its header (`opener`, password, `continues`, `tasks_from`) plus its
+house rules and open tasks, appends a `kind: continued` section to the old pad and records
+`continued_by` in its header. The old pad then refuses posts with `pad_continued` forever —
+two live ends are two conversations that both look current. `internal/store/continue.go`
+holds all of it; the successor is written BEFORE the old pad is closed, so a failure can
+never leave a pad closed with nowhere to go.
+
+**`kind: continued` wakes every waiter, before any selector is consulted.** Selective waking
+spares an agent traffic it has no part in; it must never leave one parked on a pad that can
+no longer receive its answer.
+
 **Turn state filters on `== KindMessage`, never `!= KindTask`.** Every stream added
 later is bookkeeping until proven otherwise; the negative form silently hands the turn
-to each new `kind` on the day it appears.
+to each new `kind` on the day it appears. The RENDER side is spelled the opposite way —
+`renderMetaLine` writes every kind that is not `message` — because a positive list there
+drops each new kind from the file, and a section whose `kind` never reached disk parses
+back as the one value that takes the turn.
 
 The MCP surface is **append-only by design**: no delete/update tools. Deletion/purge
 exist only in the CLI, and so is writing the store/project `_rules.md` (rewriting a file

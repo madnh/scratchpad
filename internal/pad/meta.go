@@ -71,6 +71,8 @@ func parseMetaLine(line string) (ts time.Time, m Meta, ok bool) {
 				m.Kind = KindTask
 			case KindRules:
 				m.Kind = KindRules
+			case KindContinued:
+				m.Kind = KindContinued
 			}
 		case "rules":
 			// The only value that means anything today. An unknown one is ignored like
@@ -103,7 +105,12 @@ func renderMetaLine(ts time.Time, m Meta) string {
 	var b strings.Builder
 	b.WriteString(metaPrefix)
 	b.WriteString(ts.UTC().Format(time.RFC3339))
-	if m.Kind == KindTask || m.Kind == KindRules {
+	// Every kind but the default is written out. Spelled as "not the default" rather than
+	// as a list of the kinds that count, because the list form silently drops each kind
+	// added after it: a section whose `kind` never reached the file parses back as a
+	// message, which is the one value that takes the turn. The turn rule itself is spelled
+	// the opposite way round, and for the same reason — see CheckTurn.
+	if m.Kind != "" && m.Kind != KindMessage {
 		b.WriteString(metaSep + "kind: " + string(m.Kind))
 	}
 	if m.Kind == KindRules && m.Replace {
@@ -196,6 +203,12 @@ func ValidateMeta(m Meta) error {
 	}
 	if m.Replace && m.Kind != KindRules {
 		return Coded(CodeInvalidInput, "`replace` belongs to a rules section")
+	}
+	// A continuation section says where the conversation went. Like a rules section it is
+	// about the pad rather than about a piece of work, and it reaches everyone by being
+	// what it is — see Wakes, which ignores selectors for it.
+	if m.Kind == KindContinued && (m.Task > 0 || m.Status != "" || len(m.To) > 0) {
+		return Coded(CodeInvalidInput, "a continuation section takes no task, status or `to`")
 	}
 	if m.Kind == KindTask && m.Task == 0 {
 		return Coded(CodeInvalidInput, "a task event must name its task")

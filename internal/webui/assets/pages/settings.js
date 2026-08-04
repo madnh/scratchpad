@@ -307,6 +307,24 @@ function deploymentCard() {
     return n;
   };
 
+  // Reads the "warn when this full" list. Blank is "the default", "off"/"none"/"0" is the
+  // explicit off switch. Anything else must be whole percentages: coercing a typo to a
+  // number here would save a threshold nobody chose and never fire the warning they meant.
+  const readPercents = (field) => {
+    const v = field.input.value.trim().toLowerCase();
+    if (v === "") return [];
+    if (v === "off" || v === "none" || v === "0") return [0];
+    const parts = v.split(",").map((x) => x.trim()).filter((x) => x !== "");
+    const out = parts.map((x) => {
+      const n = Number(x);
+      if (!Number.isInteger(n) || n < 1 || n > 100) {
+        throw new Error(`Warn when a pad is this full: "${x}" is not a percentage between 1 and 100 (or "off")`);
+      }
+      return n;
+    });
+    return out;
+  };
+
   const save = el("button", {
     type: "button", text: "Save settings", disabled: true,
     "data-card-extra": "", // the card projects this into its header
@@ -323,6 +341,7 @@ function deploymentCard() {
             max_content_kb: readNum(f.contentKB, "Content per section, KB"),
             max_sections_per_pad: readNum(f.sections, "Sections per pad"),
             max_pads_per_project: readNum(f.padsPer, "Pads per project"),
+            warn_at_percent: readPercents(f.warnAt),
           },
           wait: {
             default_s: readNum(f.waitDefault, "Default wait, seconds"),
@@ -367,11 +386,17 @@ function deploymentCard() {
     const contentKB = numField("Content per section, KB", c.limits.max_content_kb, d.limits.max_content_kb);
     const sections = numField("Sections per pad", c.limits.max_sections_per_pad, d.limits.max_sections_per_pad);
     const padsPer = numField("Pads per project", c.limits.max_pads_per_project, d.limits.max_pads_per_project);
+    const warnAt = textField(
+      "Warn when a pad is this full, %",
+      (c.limits.warn_at_percent || []).join(", "),
+      (d.limits.warn_at_percent || []).join(", "),
+      'Agents are told how much room is left as a pad approaches its section limit, so they can ' +
+      'finish on purpose instead of being cut off. Comma-separated, or "off".');
 
     const waitDefault = numField("Default wait, seconds", c.wait.default_s, d.wait.default_s);
     const waitMax = numField("Longest wait, seconds", c.wait.max_s, d.wait.max_s);
 
-    fields = { name, project, titleKB, contentKB, sections, padsPer, waitDefault, waitMax };
+    fields = { name, project, titleKB, contentKB, sections, padsPer, warnAt, waitDefault, waitMax };
     save.disabled = false;
 
     setChildren(body,
@@ -382,6 +407,7 @@ function deploymentCard() {
       contentKB.node,
       sections.node,
       padsPer.node,
+      warnAt.node,
       el("p", {
         class: "muted",
         text: "A pad that has reached its section limit refuses the next post — raise this rather " +

@@ -679,6 +679,51 @@ The author is always **self-declared, from a single source**: the `author` param
 - `unauthorized` — the pad has a password that is missing or wrong (a single unified message, not distinguishing the two cases).
 - `content_too_large`, `invalid_project_name`, `invalid_ref` — validation, with a message that states the rule clearly.
 
+### A full pad continues; it does not end
+
+`max_sections_per_pad` used to be a wall. The refusal was honest and useless: an agent
+cannot raise a limit, and the pads that reach one are exactly the pads with the most
+history behind them. The two things that could happen next were both bad — the work
+stopped until a person noticed, or an agent opened a pad of its own and split the
+conversation in half.
+
+So the store does it, and does the parts an agent could not. `limits.on_full` picks
+between them; `continue` is the default because the alternative has no exit that does not
+need a person.
+
+| | agent opens a second pad | the store continues the pad |
+|---|---|---|
+| Finding it | the ref exists only in one agent's head | both files name each other (`continues` / `continued_by`, plus a closing section) |
+| Waiting agents | never woken; they wait forever on a dead pad | woken by the closing section, **whatever their selectors** |
+| Ownership | section 1's author — a passer-by | `opener` copied in the header |
+| Password | lost; the new pad is open | copied |
+| House rules | gone | restated in the successor by `pad.SystemAuthor` |
+| Open work | invisible; the board starts empty | carried as task events, owners and status intact |
+| `T3` | means a different task on each side | means the same task: numbering continues via `tasks_from` |
+
+Three decisions worth stating, because each had a plausible alternative:
+
+**The transcript does not move.** Copying it would double every byte and still not make
+two files one conversation. The old pad stays readable forever, one hop away; only writing
+moves.
+
+**The old pad is closed permanently**, not "closed while it is over the limit". Raising
+the limit afterwards does not reopen it — `pad_continued` is returned even then. Two live
+ends would be two conversations that both look current, which is the failure this feature
+exists to prevent, arrived at from the other direction.
+
+**Nothing merges the two.** Every view — turn state, the task board, `pad who`, the UI —
+keeps meaning "this pad". A merged view would need each of them to quietly mean something
+else, and one place forgetting is a turn computed across a boundary it cannot see. What a
+reader gets instead is a link, which is enough to follow the work and impossible to
+misread.
+
+Ordering, since a half-done continuation is the one outcome that would be worse than the
+refusal it replaces: the successor is written FIRST, and only then is the old pad closed.
+A failure before that point leaves the old pad untouched and the post refused as it always
+was. A failure after it is reported with both refs, because both files are intact and a
+person needs to know where the work went.
+
 ### Limits (every resource is bounded)
 
 | Limit | Default | Configurable |
@@ -1279,7 +1324,7 @@ Design consequence: the CLI and MCP use **one shared storage layer** (the same f
 Each pad is one markdown file, with the metadata header as an HTML comment on the first line, followed by the sections (formatted as in IDEA.md):
 
 ```markdown
-<!-- scratchpad v1; created: 2026-07-11T10:29:00Z; password: $2b$12$... -->
+<!-- scratchpad v2; created: 2026-07-11T10:29:00Z; opener: frontend; password: $2b$12$... -->
 
 # 1 - frontend - How does API X work
 <!-- ts: 2026-07-11T10:30:00Z -->
@@ -1293,6 +1338,48 @@ Content...
 ```
 
 - `password` (a bcrypt hash) appears only when the pad is protected. The file remains one-file-per-pad, the user can `cat` it, and cleanup can be done with `rm` (Scratchpad treats a vanished file as a deleted pad — there is no state outside it).
+
+### The header is keyed, versioned, and holds what the sections cannot say
+
+The header is `scratchpad v<N>` followed by `key: value` fields. Both properties were
+bought at the same time and for the same reason.
+
+**Keyed, because positional parsing cannot be extended.** v1 read the line by cutting it
+at `"; password: "`. Any field added before that point corrupted the timestamp; any field
+added after it was absorbed into the hash, so a protected pad silently refused its own
+password. A format whose only extension point breaks the field next to it has no extension
+point.
+
+**Versioned as a NUMBER, because v1's version was decoration.** It sat inside the literal
+prefix the parser matched, so nothing ever read it: a v2 file was "not a scratchpad file",
+the same answer as a shopping list. A version you cannot compare is not a version — it
+cannot say "newer than me, upgrade", which is the only message worth having.
+
+**`opener` is in the header because the sections genuinely cannot say it.** Everything
+else about a pad's participants is derived (see *Authors*), and derivation is preferred
+here — a derived fact cannot go stale. Ownership is the exception: for a pad that
+CONTINUES another, section 1 is written by whichever agent happened to fill the previous
+pad, so "the author of section 1" hands the pad to a passer-by. It is written once, by the
+code that creates the pad, from an author that code has already validated. **No request
+field sets it** — the same rule as `SystemPost` and `RulesWriter`, and for the same reason:
+a privilege an agent can name is a privilege an agent will claim.
+
+**Upgrading is the tool's job, not an operator's.** There is no `migrate` command and
+nothing to schedule. A v1 pad reads normally; the first post to it rewrites line 1 with
+`opener` taken from section 1's author — the answer v1 itself derived — under the exclusive
+`flock` that post already holds. `pad.Upgrade` is pure and is the ONLY place that
+derivation exists, so it cannot drift into a fallback that every reader has to remember.
+A post that is refused rewrites nothing: "it was rejected" and "the file changed" must not
+be true at once.
+
+The rewrite is **in place**, never temp-file-and-rename. Rename swaps the inode, and every
+lock here is taken on the pad file itself — a reader holding a shared lock on the old inode
+would read a file no writer can see. That is the same reasoning that rules out a
+rewrite-based section format above, applied to the one write that cannot be an append.
+
+The honest cost, in both directions: an **older** binary meeting a v2 file calls it corrupt
+("not a scratchpad file"), because v1 had no version to compare and nothing in v2 can
+change what the old binary prints. Upgrade every binary that shares a store.
 - The section header line is **unchanged and stays strictly parsed** (`# <digits> - `); everything added since lives on the metadata line beneath it (see *Section metadata*). The header is the line that defines a section boundary, and it is deliberately the one line that never grows.
 - Writing: open the file with an exclusive `flock` → parse the metadata of every section → check the turn (last `message`) and, for a task event, ownership → allocate the section number and, when opening a task, the task number → append → release. **Nothing is stored outside the file**: turn state, task state, ownership and the task counter are all derived from the sections themselves, which is why a hand-edited or truncated pad heals instead of corrupting.
 - One pass over the metadata answers all of it, and `Post` already performs that pass to find the turn holder — so ownership checks and task-number allocation cost no additional read.
@@ -1325,4 +1412,4 @@ part of the config schema:
 
 - `internal/config/config.md` documents the on-disk format (its "Pad files" section shows the `ts` line). It is embedded and written into every Scratchpad dir, so it must be updated **in the same change that makes the binary write the new line** — not before, or it would describe a format the binary does not produce.
 - `internal/skills/topics/usage.md` and `mcp.md` teach the CLI and tool surfaces; both gain the new flags/params, and `usage.md` gains the discipline this design depends on: **never end a turn without arming a background `pad wait`**.
-- `config.ConfigVersion` does **not** move: the marker's schema is untouched, and the pad file format stays `scratchpad v1` (see *Backwards compatibility, in both directions*).
+- `config.ConfigVersion` does **not** move: the marker's schema is untouched. The pad file format stayed `scratchpad v1` through the metadata line (see *Backwards compatibility, in both directions*); it moved to v2 later, when the header gained `opener` — a header field, unlike a metadata key, cannot be skipped by a reader that does not know it.

@@ -75,7 +75,9 @@ a typo can never silently seed a store in the wrong place.
     "max_title_kb": 4,
     "max_content_kb": 64,
     "max_sections_per_pad": 1000,
-    "max_pads_per_project": 1000
+    "max_pads_per_project": 1000,
+    "warn_at_percent": [80, 90, 99],
+    "on_full": "continue"
   },
   "wait": { "default_s": 60, "max_s": 300 },
 
@@ -120,6 +122,43 @@ Field reference:
   `(max_title_kb + max_content_kb) x max_sections_per_pad` could not have been written
   through this tool, so it is refused with `content_too_large` rather than loaded into
   memory. Raising the limits raises that ceiling with them.
+
+  `warn_at_percent` is how full a pad gets before a post starts saying so, as
+  percentages of `max_sections_per_pad`. Every post from the first threshold onwards
+  comes back with a warning naming how many posts are left, so an agent can finish what
+  it is doing on purpose rather than meeting a refusal mid-conversation. The warning is
+  advisory: it never changes whether a post is accepted.
+
+  - Unset means the default `[80, 90, 99]`. Three steps because one is either too early
+    to act on or too late.
+  - `[0]` turns the warnings off. It is a separate spelling from unset on purpose —
+    otherwise "no warnings" and "I did not configure this" would be the same JSON.
+  - Values are percentages of 1..100; anything else is refused when saving rather than
+    dropped quietly, so `800` typed for `80` is reported instead of never firing.
+
+  `on_full` decides what happens to a post that arrives at a pad with no room left.
+
+  | Value | Means |
+  |---|---|
+  | `"continue"` (default) | The store opens a SUCCESSOR pad and puts the post there. |
+  | `"reject"` | The post is refused with `limit_exceeded`, as older versions did. |
+
+  A continuation is not "the agent opened another pad". The two pads name each other —
+  the old one's header gains `continued_by`, its last section is a `kind: continued`
+  section naming the successor, and the successor's header carries `continues` — so a
+  reader arriving at either end is one hop from the other. The successor also carries
+  the pad's **owner**, its **password**, its **house rules** (restated by `scratchpad`
+  itself) and its **open tasks**, and continues **task numbering** via `tasks_from`, so
+  `T3` means the same work on both sides. Finished tasks and the transcript stay where
+  they are: history does not move.
+
+  Once continued, the old pad refuses posts with `pad_continued` (which names the
+  successor) no matter what the limits say afterwards — two live ends would be two
+  conversations that both look current. Reading it never stops working.
+
+  Every agent waiting on the pad is woken by the closing section **regardless of its
+  wake selectors**, because an agent parked on a pad that can no longer receive its
+  answer is unreachable.
 - **`wait`** — optional MCP `pad_wait` timing: `default_s` when the caller omits
   `timeout_s`, `max_s` the server-side cap (values above it are clamped). The CLI
   `pad wait` is not affected by this cap.
@@ -232,7 +271,7 @@ Every variable has a matching flag; on conflict **flag > env > marker file > def
 One pad = one markdown file `projects/<project>/<padid>.md`:
 
 ```markdown
-<!-- scratchpad v1; created: 2026-07-11T10:29:00Z; password: $2b$12$... -->
+<!-- scratchpad v2; created: 2026-07-11T10:29:00Z; opener: frontend; password: $2b$12$... -->
 
 # 1 - frontend - How does API X work
 <!-- ts: 2026-07-11T10:30:00Z -->
@@ -250,12 +289,38 @@ Answer body…
 What the work is…
 ```
 
-- The first line is the pad header. `password:` (a bcrypt hash) appears only for
-  protected pads — access control only; the content stays plaintext.
+- The first line is the pad header: `scratchpad v<N>` then `key: value` fields,
+  separated by `; `. Optional fields are omitted rather than written empty.
+  - `created` — when the pad was opened. Always present.
+  - `opener` — the agent that owns this pad, and the only one the `rules.pad = opener`
+    policy lets set its rules. It is written when the pad is created and never
+    recomputed; it is NOT "whoever wrote section 1", which is a different agent on a
+    pad that continues another.
+  - `password` — a bcrypt hash, on protected pads only. Access control only; the
+    content stays plaintext.
 - Each post is a section headed `# <n> - <author> - <title>`; only lines matching
   that exact pattern count as section boundaries.
 - Turn state is derived from the last section (its author may not post next). There
   is no state anywhere else: deleting the last section by hand hands the turn back.
+
+### File format versions
+
+`scratchpad v<N>` on line 1 is the FILE format version, independent of this marker's
+`version`. They move for different reasons and are not kept in step.
+
+- **v1 → v2 added `opener`.** A v1 pad is read normally; the first time something is
+  posted to it, its header is rewritten in place with `opener` taken from section 1's
+  author — the same answer v1 derived on the fly. **No command to run and nothing to
+  schedule**: migration is the tool's own business, it happens under the lock the write
+  already holds, and it touches line 1 only. A post that is refused does not migrate
+  anything.
+- **A newer file is refused, not guessed at.** A build meeting `scratchpad v3` says so
+  and names the version it understands.
+- **An OLDER build meeting a v2 file reports it as corrupt** — "not a scratchpad file"
+  — because v1 matched the header as a literal string and had no version to compare.
+  Nothing in v2 can fix that message; it is written in the old binary. So: upgrade every
+  binary that shares a store, and do not run an old one against a store that a newer one
+  has written to.
 
 ### The section metadata line
 
@@ -363,7 +428,9 @@ It belongs to the **Web UI alone**. `scratchpad pad rules --set` needs `--as <ag
 writing a pad's rules anonymously from the CLI used to be allowed, and meant any agent
 could set any pad's rules by simply not naming itself.
 - A pad written before this line existed has a bare `ts` and parses as a broadcast
-  message. **Nothing needs migrating.** Conversely a pad written *now*, read by a
-  version that predates the extra keys, loses the timestamps of the sections that use
-  them and shows the comment as text — the sections themselves, and the turn, survive.
-  The format is still `scratchpad v1` for that reason.
+  message. **Nothing needs migrating** for the metadata line itself. Conversely a pad
+  written *now*, read by a version that predates the extra keys, loses the timestamps of
+  the sections that use them and shows the comment as text — the sections themselves, and
+  the turn, survive. The metadata line did not move the file version for that reason; the
+  header's `opener` did, because a v1 reader cannot skip a header field it does not know
+  (see *File format versions*).

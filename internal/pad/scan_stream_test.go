@@ -12,7 +12,7 @@ func renderPadFile(t *testing.T, bodies ...string) string {
 	t.Helper()
 	ts := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	var b strings.Builder
-	b.WriteString(RenderHeader(ts, "") + "\n")
+	b.WriteString(RenderHeader(Header{Created: ts, Opener: "alpha"}) + "\n")
 	for i, body := range bodies {
 		b.WriteString(RenderSection(i+1, "alpha", "title", ts, Meta{Kind: KindMessage}, body))
 	}
@@ -89,7 +89,7 @@ func TestParseMetaAgreesWithParseExceptBodies(t *testing.T) {
 			t.Errorf("section %d: meta parse kept a body: %q", i+1, m.Content)
 		}
 	}
-	if full.CreatedTS != meta.CreatedTS || full.PasswordHash != meta.PasswordHash {
+	if full.Header != meta.Header {
 		t.Error("pad header differs between the two parses")
 	}
 }

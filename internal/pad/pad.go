@@ -25,6 +25,16 @@ const (
 	// write. Like a task event it is bookkeeping and does NOT take the turn — stating
 	// the rules is not a move in the conversation.
 	KindRules Kind = "rules"
+
+	// KindContinued marks the last section of a pad that filled up: it names the pad the
+	// conversation moved to. Written by the tool, never by an agent.
+	//
+	// It takes no turn — the pad it is written into accepts nothing further, so handing
+	// anyone the turn there would be a lie. It is the one kind that wakes every waiter
+	// regardless of their selectors: an agent parked on a pad that has just stopped
+	// accepting posts is unreachable until it learns where the conversation went, which
+	// is precisely the failure that selective waking must not cause.
+	KindContinued Kind = "continued"
 )
 
 // SystemAuthor is the reserved identity for something a PERSON did through a surface
@@ -119,19 +129,31 @@ func (s Section) Label() string {
 
 // Pad is a fully parsed pad file. Sections are in file order, which is also numbering
 // order.
+//
+// Header and Sections are the only two things a pad is. Nothing derived is stored beside
+// them — turn state, the roster, the task board are all folds over Sections, computed on
+// demand, so there is never a cached answer to go stale against the file.
 type Pad struct {
-	Project      string
-	ID           string
-	CreatedTS    int64
-	PasswordHash string // "" when unprotected
-	Sections     []Section
+	Project  string
+	ID       string
+	Header   Header
+	Sections []Section
 }
 
 // Ref returns the pad's full copy-pasteable identifier `<project>-<padid>`.
 func (p *Pad) Ref() string { return p.Project + "-" + p.ID }
 
+// CreatedTS is when the pad was opened, as a unix timestamp.
+func (p *Pad) CreatedTS() int64 { return p.Header.Created.Unix() }
+
+// PasswordHash is the pad's bcrypt hash, empty when it is unprotected.
+func (p *Pad) PasswordHash() string { return p.Header.PasswordHash }
+
 // Protected reports whether the pad requires a password.
-func (p *Pad) Protected() bool { return p.PasswordHash != "" }
+func (p *Pad) Protected() bool { return p.Header.PasswordHash != "" }
+
+// Continues is the ref of the pad this one took over from, empty on an original pad.
+func (p *Pad) Continues() string { return p.Header.Continues }
 
 // Last returns the final section, whatever its kind. Every pad has at least one section
 // (created with section 1), so callers may rely on it existing.
@@ -175,18 +197,19 @@ func (p *Pad) Authors() []string {
 	return out
 }
 
-// Opener is the author of section 1 — the agent that started this pad. It is who the
-// `opener` rules policy trusts with the pad's rules, and the reason that policy is the
-// default: a pad is nearly always opened by the agent handing work to the others, so the
-// one who framed the job is the one who says how it is worked.
+// Opener is the agent that owns this pad. It is who the `opener` rules policy trusts with
+// the pad's rules, and the reason that policy is the default: a pad is nearly always
+// opened by the agent handing work to the others, so the one who framed the job is the one
+// who says how it is worked.
 //
-// Derived, like everything else here: the opener exists only as the first section's
-// author, so a pad edited by hand carries its own answer with it.
+// It reads the HEADER and nothing else. It used to return section 1's author, which is the
+// same answer on a pad opened by hand and the wrong one on a pad that CONTINUES another:
+// there, section 1 belongs to whichever agent happened to fill the previous pad, and
+// ownership would pass to a passer-by. A rule with two derivations has two answers the day
+// they diverge, so the derivation from section 1 lives in exactly one place now — Upgrade,
+// which runs once per v1 file and writes the answer into the header.
 func (p *Pad) Opener() string {
-	if len(p.Sections) == 0 {
-		return ""
-	}
-	return p.Sections[0].Author
+	return p.Header.Opener
 }
 
 // HasPosted reports whether an author has any section in this pad. It is what "first
@@ -226,7 +249,20 @@ func (p *Pad) RulesSection() (cur Section, history []int, ok bool) {
 // title of its first section — the opening question is what makes it recognisable in a
 // listing. It is a method rather than something each caller digs out of Sections[0],
 // which is how three surfaces end up disagreeing about what a pad is called.
+//
+// Sections the TOOL wrote are skipped. On a pad that continues a full one, section 1 is
+// the carried house rules and section 2 a carried task, so the plain answer would name
+// every successor "House rules, carried over" — three of them in a listing, indistinguish-
+// able, none of them saying what the conversation is about. What a person needs to see is
+// the first thing an AGENT said here.
 func (p *Pad) Title() string {
+	for _, sec := range p.Sections {
+		if sec.Author != SystemAuthor {
+			return sec.Title
+		}
+	}
+	// A pad holding nothing but tool-written sections has no better answer than the first
+	// one — and saying nothing at all would be worse in a listing.
 	if len(p.Sections) == 0 {
 		return ""
 	}
