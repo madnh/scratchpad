@@ -136,8 +136,9 @@ Field reference:
   for a session cookie. `no_auth: true` drops that, leaving only the loopback bind
   and the Host/Origin guard — which means **every local process that can reach the
   port can read or delete every pad**, password-protected ones included (the pad
-  password gates content, never deletion). Set it only on a machine you are the sole
-  user of.
+  password gates content, never deletion), **and rewrite this deployment's settings**
+  (`display_name`, `default_project`, `limits`, `wait` — not `tcp`, `ui` or `rules`,
+  which no UI session may write). Set it only on a machine you are the sole user of.
   There is no origin allow-list here: the UI binds loopback, so the browser's own
   origin is the only one that can ever reach it.
 - **`rules`** — who may WRITE each level of the rules (see *Rules* below for what they
@@ -163,6 +164,49 @@ Field reference:
 
 Only `type`, `version`, `display_name`, and `instance` are written at init; add the
 optional groups when you need them.
+
+### When a change takes effect
+
+Long-running processes (`serve`, `ui`) watch this file and reload it, so most changes
+apply **without a restart** — to every process using the store, within a moment. A CLI
+command reads the file on every run and has always seen the current values.
+
+| Group | Applies |
+|---|---|
+| `display_name`, `default_project`, `limits`, `wait`, `rules` | immediately, no restart |
+| `instance`, `dir`, `tcp`, `ui` | **on restart** |
+
+The second row is not a shortcoming: a listener is already bound and a socket is already
+named, so a process that claimed the new port would be reporting something it is not
+doing. A running server logs a line naming any of these it sees change, so an edit that
+needs a restart says so instead of appearing to have worked.
+
+A marker that fails to parse or validate leaves the running configuration **untouched**
+(with a line in the log). It never falls back to the defaults — that would quietly widen
+`rules` to a permission you did not grant.
+
+### Editing it
+
+Three ways, all equivalent — the file is the source of truth:
+
+- an editor, on `scratchpad.config.json` itself;
+- the **Web UI**, Settings → *Deployment settings*, which writes `display_name`,
+  `default_project`, `limits` and `wait`. It deliberately will not write `tcp`, `ui` or
+  `rules`: those decide who may reach this deployment and who may rewrite the operator's
+  standing instructions, and a browser session is not how that is granted. They are shown
+  there read-only, with the path to edit;
+- any config-management tool that drops a new file in.
+
+A write through the UI is a compare-and-set: it quotes the version it read, and a save
+against a version somebody else already replaced is refused (`config_stale`) rather than
+overwriting them. Writes replace the file atomically, so a reader sees the old marker or
+the new one, never half of either.
+
+A save is an **edit to the groups it names, not a rewrite of the file**. Everything else
+is copied through byte for byte, in its original order: the groups the UI may not write,
+and any key this binary does not know about — a note you keep in the file, or a setting a
+newer build added. Blanking a field it *does* write removes that line, because "unset" is
+spelled by absence.
 
 **Not stored here on purpose:** paths (`projects/`, socket — derived from the dir),
 the author identity (per-agent; set `SCRATCHPAD_AUTHOR` in each agent's

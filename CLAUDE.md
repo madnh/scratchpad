@@ -72,11 +72,28 @@ defaulted that same string, so an agent claimed it by not naming itself. Never r
   `pad.SystemAuthor` ("scratchpad"), which agents may not claim. Do not widen this.
   The UI is also the surface the rules POLICY points at — it is exempt from who-may-write
   and NOT from the version check, since two tabs lose an edit exactly as two agents do.
+  It also edits the deployment's own settings (`PUT /api/config`), which is not a widening
+  of the above: config is the OPERATOR's, takes no turn and carries no author. What it may
+  write is `display_name`, `default_project`, `limits`, `wait` — and nothing else, ever.
+  `tcp`, `ui` and `rules` decide who may reach this deployment and who may rewrite the
+  operator's instructions; a browser session must not be how those are granted.
 
 `internal/watch` turns pad-file writes into a push stream via kernel filesystem
 events. It watches the STORE, never the writers: any writer — CLI, MCP, or a person
 with `rm` — is noticed identically, and `internal/store` stays ignorant of listeners.
 Do not add a writer-side notification hook; it would miss every uncooperative writer.
+The same package watches the MARKER (`watch.Marker`, `watch.ReloadConfig`) — the file,
+not the writers, for the same reason.
+
+**Config is read continuously, never frozen at startup.** Every surface takes a
+`*config.Live` and reads a snapshot per operation; `store.New`/`mcpsrv.New`/`webui.New`
+take nothing else, so no call site can be handed a stale copy. Only the HOT groups reload
+(`config.MergeHot`: display_name, default_project, limits, wait, rules) — `instance`,
+`dir`, `tcp` and `ui` name things the process has already bound, so they are reported and
+applied on restart. A marker that fails to load leaves the running config ALONE: falling
+back to defaults would silently reset the `rules` policy. Writing the marker goes through
+`config.UpdateMarker` (quote-the-version + atomic rename), never `WriteMarker` — that one
+belongs to `init` and refuses to overwrite.
 
 The UI's assets are `go:embed`-ed, so **rebuild the binary after editing anything under
 `internal/webui/assets/`** — a running server keeps serving the old copy. The vendored

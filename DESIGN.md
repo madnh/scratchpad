@@ -681,19 +681,44 @@ The author is always **self-declared, from a single source**: the `author` param
 
 ### Limits (every resource is bounded)
 
-| Limit | Value |
-|---|---|
-| `title` | 4KB |
-| `content` per section | 64KB |
-| Sections / pad | 1000 |
-| Pads / project | 1000 |
-| `timeout_s` of `pad_wait` | cap 300s |
-| `to` targets per section | 20 |
-| `wake_for` selectors per call | 20 |
+| Limit | Default | Configurable |
+|---|---|---|
+| `title` | 4KB | `limits.max_title_kb` |
+| `content` per section | 64KB | `limits.max_content_kb` |
+| Sections / pad | 1000 | `limits.max_sections_per_pad` |
+| Pads / project | 1000 | `limits.max_pads_per_project` |
+| `timeout_s` of `pad_wait` | cap 300s | `wait.max_s` |
+| `to` targets per section | 20 | no — a hard bound in the format |
+| `wake_for` selectors per call | 20 | no — a hard bound in the format |
+
+The first five are **defaults, not ceilings**: a deployment that outgrows one raises it in
+the marker. Because a running process re-reads the marker (see *Config reload* below), the
+pad that just refused a post with `limit_exceeded` accepts the next one — no restart, and
+nothing to migrate.
 
 Tasks need no limit of their own: every task requires a section to open it, so
 `max_sections_per_pad` already bounds them. Adding a config field that can never bind
 would be one more thing to explain in `config.md` for no gain.
+
+### Config reload
+
+The marker is READ CONTINUOUSLY, not once at startup. `internal/watch` watches the file
+the same way it watches the pad store — the file, never the writers — so an edit from the
+Web UI, an editor, or a config-management tool all arrive identically.
+
+Settings split in two, and the split is about honesty rather than importance:
+
+- **Hot** (`display_name`, `default_project`, `limits`, `wait`, `rules`) — consulted per
+  operation, so a new value simply applies to the next one.
+- **Cold** (`instance`, `dir`, `tcp`, `ui`, and every derived path) — already bound by the
+  running process. These are reported in the log when they change and applied on restart;
+  swapping them in memory would leave the process serving the old port while claiming the
+  new one.
+
+A marker that fails to load leaves the running config alone. Falling back to defaults
+would read a half-written file as a request for the built-in settings, and the one that
+would silently change is `rules` — the setting where a wrong guess grants a permission
+nobody granted.
 
 ## CLI
 
