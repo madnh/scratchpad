@@ -35,7 +35,7 @@ func (s *Store) projectRulesPath(project string) string {
 // readRulesFile reads one rules file. A missing file and an empty one mean the same
 // thing — no rules at that level — so an operator can blank the file instead of having to
 // remember to delete it.
-func (s *Store) readRulesFile(path string) (text string, replace bool, err error) {
+func (s *Store) readRulesFile(lim config.Limits, path string) (text string, replace bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -49,7 +49,7 @@ func (s *Store) readRulesFile(path string) (text string, replace bool, err error
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_SH); err != nil {
 		return "", false, err
 	}
-	maxKB := s.limits().MaxContentKB
+	maxKB := lim.MaxContentKB
 	limit := int64(maxKB) * 1024
 	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
@@ -66,7 +66,7 @@ func (s *Store) readRulesFile(path string) (text string, replace bool, err error
 // writeRulesFile replaces a rules file atomically (temp file + rename), so a reader never
 // sees a half-written rule set. Writing an empty text REMOVES the file: "no rules" has
 // one representation on disk, not two.
-func (s *Store) writeRulesFile(path, text string, replace bool) error {
+func (s *Store) writeRulesFile(lim config.Limits, path, text string, replace bool) error {
 	body := pad.RenderRulesFile(text, replace)
 	if body == "" {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -74,7 +74,7 @@ func (s *Store) writeRulesFile(path, text string, replace bool) error {
 		}
 		return nil
 	}
-	if maxKB := s.limits().MaxContentKB; len(body) > maxKB*1024 {
+	if maxKB := lim.MaxContentKB; len(body) > maxKB*1024 {
 		return coded(CodeContentTooLarge,
 			"rules are %d bytes; the limit is %d KB", len(body), maxKB)
 	}
@@ -103,7 +103,7 @@ func (s *Store) writeRulesFile(path, text string, replace bool) error {
 
 // StoreRules returns the store-wide rules.
 func (s *Store) StoreRules() (text string, replace bool, err error) {
-	return s.readRulesFile(s.storeRulesPath())
+	return s.readRulesFile(s.limits(), s.storeRulesPath())
 }
 
 // ProjectRules returns one project's rules.
@@ -111,7 +111,7 @@ func (s *Store) ProjectRules(project string) (text string, replace bool, err err
 	if err := ValidateProject(project); err != nil {
 		return "", false, err
 	}
-	return s.readRulesFile(s.projectRulesPath(project))
+	return s.readRulesFile(s.limits(), s.projectRulesPath(project))
 }
 
 // RulesWriter says which SURFACE is asking to write the rules — not which agent, which is
@@ -151,7 +151,7 @@ func (s *Store) SetStoreRules(w RulesWrite) error {
 	if err := s.checkRulesPolicy(pad.LevelStore, w.By); err != nil {
 		return err
 	}
-	return s.writeRulesLevel(pad.LevelStore, s.storeRulesPath(), w)
+	return s.writeRulesLevel(s.limits(), pad.LevelStore, s.storeRulesPath(), w)
 }
 
 // SetProjectRules replaces one project's rules. The project directory is created if it
@@ -164,7 +164,7 @@ func (s *Store) SetProjectRules(project string, w RulesWrite) error {
 	if err := s.checkRulesPolicy(pad.LevelProject, w.By); err != nil {
 		return err
 	}
-	return s.writeRulesLevel(pad.LevelProject, s.projectRulesPath(project), w)
+	return s.writeRulesLevel(s.limits(), pad.LevelProject, s.projectRulesPath(project), w)
 }
 
 // checkRulesPolicy applies the deployment's policy to a FILE level. The refusal names both
@@ -198,22 +198,22 @@ func (s *Store) checkRulesPolicy(level pad.RuleLevel, by RulesWriter) error {
 // measured in minutes: an agent that read the rules, went away to think, and came back to
 // write over a version somebody else had put there meanwhile. Two writers landing inside
 // the same microsecond end up exactly where they do today, which is no worse than before.
-func (s *Store) writeRulesLevel(level pad.RuleLevel, path string, w RulesWrite) error {
-	cur, curReplace, err := s.readRulesFile(path)
+func (s *Store) writeRulesLevel(lim config.Limits, level pad.RuleLevel, path string, w RulesWrite) error {
+	cur, curReplace, err := s.readRulesFile(lim, path)
 	if err != nil {
 		return err
 	}
 	if err := pad.CheckVersion(level, w.IfDigest, pad.LevelDigest(cur, curReplace), cur); err != nil {
 		return err
 	}
-	return s.writeRulesFile(path, w.Text, w.Replace)
+	return s.writeRulesFile(lim, path, w.Text, w.Replace)
 }
 
 // ProjectRuleSet returns what would apply to a pad in this project — the two file levels,
 // with no pad. It is what the UI shows on a project page, and what an agent sees before
 // creating its first pad there.
 func (s *Store) ProjectRuleSet(project string) (pad.Rules, error) {
-	return s.buildRules(project, nil)
+	return s.buildRules(s.limits(), project, nil)
 }
 
 // PadRules returns the full three-level rule set in force for one pad, reading it from
@@ -235,20 +235,23 @@ func (s *Store) PadRules(ref, password string) (pad.Rules, error) {
 // that doubles the cost and the allocation of the one request that is already the most
 // expensive.
 func (s *Store) RulesOf(p *Pad) (pad.Rules, error) {
-	return s.buildRules(p.Project, p)
+	return s.buildRules(s.limits(), p.Project, p)
 }
 
 // buildRules reads the two files and folds them together with the pad's own rules
 // section. The fold itself lives in internal/pad; this function is only the I/O around
 // it, so the CLI, the MCP server and the Web UI cannot disagree about what is in force.
-func (s *Store) buildRules(project string, p *Pad) (pad.Rules, error) {
-	storeText, storeReplace, err := s.StoreRules()
+func (s *Store) buildRules(lim config.Limits, project string, p *Pad) (pad.Rules, error) {
+	storeText, storeReplace, err := s.readRulesFile(lim, s.storeRulesPath())
 	if err != nil {
 		return pad.Rules{}, err
 	}
 	projectText, projectReplace := "", false
 	if project != "" {
-		projectText, projectReplace, err = s.ProjectRules(project)
+		if err := ValidateProject(project); err != nil {
+			return pad.Rules{}, err
+		}
+		projectText, projectReplace, err = s.readRulesFile(lim, s.projectRulesPath(project))
 		if err != nil {
 			return pad.Rules{}, err
 		}
@@ -266,7 +269,7 @@ func (s *Store) buildRules(project string, p *Pad) (pad.Rules, error) {
 // fullPad yields the pad re-parsed WITH bodies in that case, because the rules are a
 // section body and the append path deliberately parses metadata only. The bytes are
 // already in hand, so this costs no extra read.
-func (s *Store) checkRules(project string, fullPad func() (*Pad, error), p *Pad, req PostRequest) error {
+func (s *Store) checkRules(lim config.Limits, project string, fullPad func() (*Pad, error), p *Pad, req PostRequest) error {
 	// A person editing the rules through the UI is not an agent joining a conversation:
 	// they are the one WRITING the rules, so there is nothing for them to have read.
 	if req.SystemPost || p.HasPosted(req.Author) {
@@ -276,7 +279,7 @@ func (s *Store) checkRules(project string, fullPad func() (*Pad, error), p *Pad,
 	if err != nil {
 		return err
 	}
-	rules, err := s.buildRules(project, full)
+	rules, err := s.buildRules(lim, project, full)
 	if err != nil {
 		return err
 	}

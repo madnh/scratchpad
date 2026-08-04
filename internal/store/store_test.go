@@ -639,3 +639,117 @@ func TestPostWarnsAboutASilentAddressee(t *testing.T) {
 		t.Fatal("a warning must not stop the post from succeeding")
 	}
 }
+
+// A pad that was valid when written stays readable however far the operator lowers the
+// limits afterwards. This is the whole point of the read ceiling not following policy:
+// limits govern WRITES, and an append-only store must never retroactively withdraw reads.
+func TestLoweringLimitsKeepsExistingPadsReadable(t *testing.T) {
+	s := testStore(t)
+	p, _, err := create(s, "p1", "a", "t", strings.Repeat("x", 3000), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "b", Title: "second", Content: strings.Repeat("y", 3000),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The exact configuration that used to make this pad unreadable.
+	lowered := s.live.Get()
+	lowered.Limits = config.Limits{MaxTitleKB: 1, MaxContentKB: 1, MaxSectionsPerPad: 1}
+	s.live.Set(lowered)
+
+	got, err := s.Get(p.Ref(), "")
+	if err != nil {
+		t.Fatalf("a pad written under the old limits became unreadable: %v", err)
+	}
+	if len(got.Sections) != 2 {
+		t.Fatalf("sections = %d, want 2", len(got.Sections))
+	}
+	// WRITES still take the new limit — this is the half that must not change.
+	if _, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "a", Title: "third", Content: strings.Repeat("z", 3000),
+	}); !HasCode(err, CodeContentTooLarge) {
+		t.Fatalf("a write over the new content limit: want content_too_large, got %v", err)
+	}
+}
+
+// The sequence this tool actually recommends: an agent hits a bound, the operator raises
+// the limit, the pad grows, the limit goes back. A ceiling derived from the DEFAULT limits
+// would pass the test above and still fail this one.
+func TestRaiseGrowLowerKeepsPadsReadable(t *testing.T) {
+	s := testStore(t)
+
+	raised := s.live.Get()
+	raised.Limits = config.Limits{MaxTitleKB: 4, MaxContentKB: 512, MaxSectionsPerPad: 50, MaxPadsPerProject: 10}
+	s.live.Set(raised)
+
+	big := strings.Repeat("x", 400*1024) // legal under the raised limit, not under the default
+	p, _, err := create(s, "p1", "a", "t", big, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "b", Title: "second", Content: big}); err != nil {
+		t.Fatal(err)
+	}
+
+	back := s.live.Get()
+	back.Limits = config.DefaultLimits
+	s.live.Set(back)
+
+	if _, err := s.Get(p.Ref(), ""); err != nil {
+		t.Fatalf("a pad grown under a raised limit became unreadable when it was lowered: %v", err)
+	}
+}
+
+// An unreadable pad keeps its row in List, carrying the reason. It used to be dropped,
+// which made a pad the store still holds indistinguishable from a deleted one.
+func TestListKeepsUnreadablePads(t *testing.T) {
+	s := testStore(t)
+	p, _, err := create(s, "p1", "a", "t", "c", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nothing policy can do makes a pad unreadable now, so corrupt the file instead —
+	// the other reason a row used to vanish.
+	path := s.padPath("p1", strings.TrimPrefix(p.Ref(), "p1-"))
+	if err := os.WriteFile(path, []byte("this is not a pad header\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pads, warnings, err := s.List("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want one", warnings)
+	}
+	var row *PadMeta
+	for i := range pads {
+		if pads[i].Ref == p.Ref() {
+			row = &pads[i]
+		}
+	}
+	if row == nil {
+		t.Fatal("the unreadable pad lost its row in List")
+	}
+	if row.Unreadable == "" {
+		t.Fatal("the row does not carry a reason")
+	}
+}
+
+// maxPadBytes takes the LARGER of policy and the fixed floor, in both directions.
+func TestMaxPadBytesNeverDropsBelowTheFloor(t *testing.T) {
+	s := testStore(t)
+
+	tiny := config.Limits{MaxTitleKB: 1, MaxContentKB: 1, MaxSectionsPerPad: 1}
+	if got := s.maxPadBytes(tiny); got != maxReadablePadBytes {
+		t.Errorf("tiny limits: ceiling = %d, want the floor %d", got, maxReadablePadBytes)
+	}
+
+	huge := config.Limits{MaxTitleKB: 4, MaxContentKB: 1024, MaxSectionsPerPad: 10000}
+	if got := s.maxPadBytes(huge); got <= maxReadablePadBytes {
+		t.Errorf("huge limits: ceiling = %d, want policy to raise it above %d", got, maxReadablePadBytes)
+	}
+}

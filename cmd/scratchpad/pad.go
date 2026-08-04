@@ -668,6 +668,13 @@ func newPadListCmd() *cobra.Command {
 			// rule — the second is not implied by the first, so both earn a column.
 			fmt.Fprintln(w, "REF\tSECTIONS\tAUTHORS\tLAST AUTHOR\tLAST TS\tPROT\tTITLE")
 			for _, p := range pads {
+				// A pad this process cannot read still gets its row. Dropping it made a pad
+				// that exists look deleted; the columns it has no values for stay blank and
+				// the reason goes where the title would be.
+				if p.Unreadable != "" {
+					fmt.Fprintf(w, "%s\t-\t-\t-\t-\t-\t(unreadable: %s)\n", p.Ref, p.Unreadable)
+					continue
+				}
 				prot := ""
 				if p.Protected {
 					prot = "yes"

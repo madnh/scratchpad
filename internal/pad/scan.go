@@ -1,8 +1,10 @@
 package pad
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -75,7 +77,26 @@ func ParseMeta(project, id string, data []byte) (*Pad, error) {
 	return scan(project, id, data, false)
 }
 
-// scan walks the file line by line over the ORIGINAL bytes, holding only offsets.
+// ScanMeta is ParseMeta from a READER, for callers holding an open file rather than its
+// bytes. It is what a listing wants: memory stays flat in the pad's size, so one enormous
+// pad no longer sets what walking the whole store costs.
+func ScanMeta(project, id string, r io.Reader) (*Pad, error) {
+	return scanLines(project, id, r)
+}
+
+// scan walks bytes already in hand, holding only offsets — the path taken when the
+// caller wants CONTENT.
+//
+// It is not the streaming path, and measurement is why. A body has to end up in memory
+// either way (it is the return value), and slicing it once out of a resident array beats
+// accumulating it: a strings.Builder grows by doubling and copying, which measured 840 MB
+// peak against this function's 666 MB on a 244 MiB pad. Streaming wins where the body is
+// DISCARDED, which is scanLines' job, not this one's.
+//
+// The two share every decision about what a line MEANS — isSectionHeader,
+// sectionHeaderRe, parseMetaLine — so the format is defined once. What differs is only
+// where the body's bytes come from, and TestParseMetaAgreesWithParseExceptBodies pins the
+// two to the same answer.
 // It deliberately never splits the file into a []string: pad content is written by
 // agents, and a file that is mostly newlines would turn into one 16-byte string header
 // per line — tens of times the file's size in live heap, for every read.
@@ -163,6 +184,129 @@ func scan(project, id string, data []byte, withContent bool) (*Pad, error) {
 		return nil, fmt.Errorf("pad file has no sections")
 	}
 	return p, nil
+}
+
+// scanLines walks the file line by line from a READER, keeping the header lines and
+// throwing every body away as it goes. It is the METADATA path.
+//
+// This is what makes a listing cost the same on a 250 MiB pad as on a 10 KB one: measured,
+// `pad list` over a store holding one 244 MiB pad went from 605 MB peak RSS to 22 MB.
+// Author and title go through string(...), which COPIES — nothing in the result points
+// back at the input, so the bytes behind each line are collectable as soon as the next
+// line is read.
+//
+// It deliberately never splits the file into a []string: pad content is written by
+// agents, and a file that is mostly newlines would turn into one 16-byte string header
+// per line — tens of times the file's size in live heap, for every read.
+func scanLines(project, id string, r io.Reader) (*Pad, error) {
+	br := bufio.NewReaderSize(r, 64*1024)
+
+	firstLine, more, err := readLine(br)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(string(firstLine), HeaderPrefix) {
+		return nil, fmt.Errorf("not a scratchpad file: missing %q header on line 1", strings.TrimSpace(HeaderPrefix))
+	}
+	header := strings.TrimSuffix(strings.TrimPrefix(string(firstLine), HeaderPrefix), " -->")
+	createdStr, passwordHash, _ := strings.Cut(header, "; password: ")
+	created, err := time.Parse(time.RFC3339, strings.TrimSpace(createdStr))
+	if err != nil {
+		return nil, fmt.Errorf("bad created timestamp in pad header: %w", err)
+	}
+
+	p := &Pad{Project: project, ID: id, CreatedTS: created.Unix(), PasswordHash: strings.TrimSpace(passwordHash)}
+
+	var cur *Section
+	// bodyStarted stands in for the offset parser's "bodyStart >= 0": it says the body has
+	// begun, so the metadata line is no longer expected. The body itself is never kept —
+	// discarding it is the entire point of this path.
+	bodyStarted := false
+	flush := func() {
+		if cur == nil {
+			return
+		}
+		p.Sections = append(p.Sections, *cur)
+		cur, bodyStarted = nil, false
+	}
+
+	// A file with no newline at all has no lines after the header, and therefore no
+	// sections — the check below reports that.
+	for more {
+		var line []byte
+		line, more, err = readLine(br)
+		if err != nil {
+			return nil, err
+		}
+		handled := false
+
+		if isSectionHeader(line) {
+			if m := sectionHeaderRe.FindSubmatch(line); m != nil {
+				if author, title, ok := strings.Cut(string(m[2]), " - "); ok {
+					flush()
+					n, _ := strconv.Atoi(string(m[1]))
+					cur = &Section{N: n, Author: author, Title: title, Meta: Meta{Kind: KindMessage}}
+					handled = true
+				}
+			}
+		}
+		if !handled && cur != nil {
+			// The metadata line directly after the header carries the timestamp and the
+			// section's routing/task metadata.
+			if cur.TS == 0 && !bodyStarted && bytes.HasPrefix(line, metaPrefixBytes) {
+				if ts, meta, ok := parseMetaLine(string(line)); ok {
+					cur.TS = ts.Unix()
+					cur.Meta = meta
+					handled = true
+				}
+			}
+			if !handled {
+				bodyStarted = true
+			}
+		}
+	}
+	flush()
+
+	if len(p.Sections) == 0 {
+		return nil, fmt.Errorf("pad file has no sections")
+	}
+	return p, nil
+}
+
+// readLine returns the next line without its newline, and whether another line follows.
+//
+// It reproduces splitLine's contract exactly, including the corner that matters: input
+// ending in "\n" yields a final EMPTY line, the way strings.Split does. Getting that
+// wrong changes where a body ends, so it is spelled out rather than left to bufio's
+// defaults.
+func readLine(br *bufio.Reader) (line []byte, more bool, err error) {
+	chunk, err := br.ReadSlice('\n')
+	switch err {
+	case nil:
+		return chunk[:len(chunk)-1], true, nil
+	case bufio.ErrBufferFull:
+		// A line longer than the buffer: take what we have and keep going. Agent prose
+		// runs to whole paragraphs on one line, so this is ordinary, not exceptional.
+		buf := append([]byte(nil), chunk...)
+		for {
+			chunk, err = br.ReadSlice('\n')
+			buf = append(buf, chunk...)
+			if err == bufio.ErrBufferFull {
+				continue
+			}
+			if err == io.EOF {
+				return buf, false, nil
+			}
+			if err != nil {
+				return nil, false, err
+			}
+			return buf[:len(buf)-1], true, nil
+		}
+	case io.EOF:
+		return chunk, false, nil
+	default:
+		return nil, false, err
+	}
 }
 
 // splitLine returns the next line (without its newline) and everything after that
