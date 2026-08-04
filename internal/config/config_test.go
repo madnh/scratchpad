@@ -32,7 +32,7 @@ func TestBootstrapAndLoad(t *testing.T) {
 	if cfg.DisplayName != DefaultDisplayName || cfg.Instance != DefaultInstance {
 		t.Fatalf("identity defaults wrong: %+v", cfg)
 	}
-	if cfg.DefaultProject != DefaultProject || cfg.Limits != DefaultLimits || cfg.Wait != DefaultWait {
+	if cfg.DefaultProject != DefaultProject || !SameLimits(cfg.Limits, DefaultLimits) || cfg.Wait != DefaultWait {
 		t.Fatalf("setting defaults wrong: %+v", cfg)
 	}
 	if cfg.ProjectsDir != filepath.Join(dir, "projects") {
@@ -275,5 +275,48 @@ func TestResolveSurvivesAnUnwritableDir(t *testing.T) {
 	t.Setenv(EnvDir, dir)
 	if _, _, _, err := Resolve(""); err != nil {
 		t.Fatalf("an unwritable guide broke the command: %v", err)
+	}
+}
+
+// TestWarnAtPercentNormalisation covers the three spellings that must stay distinct:
+// unset means the defaults, [0] means off, and anything else is cleaned up rather than
+// trusted — an operator's list can arrive unsorted, duplicated, or out of range.
+func TestWarnAtPercentNormalisation(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in   []int
+		want []int
+	}{
+		"unset":        {nil, DefaultLimits.WarnAtPercent},
+		"empty":        {[]int{}, DefaultLimits.WarnAtPercent},
+		"off":          {[]int{0}, []int{}},
+		"unsorted":     {[]int{95, 50}, []int{50, 95}},
+		"duplicates":   {[]int{80, 80, 90}, []int{80, 90}},
+		"out of range": {[]int{80, 101, -3, 100}, []int{80, 100}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := Config{Limits: Limits{WarnAtPercent: tc.in}}
+			c.applyDefaults()
+			got := c.Limits.WarnAtPercent
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("got %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestNormalisingDoesNotMutateTheCallersSlice: a config snapshot is shared by every
+// goroutine holding it, so sorting in place would reorder a slice another request is
+// reading.
+func TestNormalisingDoesNotMutateTheCallersSlice(t *testing.T) {
+	in := []int{95, 50}
+	c := Config{Limits: Limits{WarnAtPercent: in}}
+	c.applyDefaults()
+	if in[0] != 95 || in[1] != 50 {
+		t.Errorf("the caller's slice was sorted in place: %v", in)
 	}
 }

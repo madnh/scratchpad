@@ -75,7 +75,8 @@ a typo can never silently seed a store in the wrong place.
     "max_title_kb": 4,
     "max_content_kb": 64,
     "max_sections_per_pad": 1000,
-    "max_pads_per_project": 1000
+    "max_pads_per_project": 1000,
+    "warn_at_percent": [80, 90, 99]
   },
   "wait": { "default_s": 60, "max_s": 300 },
 
@@ -120,6 +121,19 @@ Field reference:
   `(max_title_kb + max_content_kb) x max_sections_per_pad` could not have been written
   through this tool, so it is refused with `content_too_large` rather than loaded into
   memory. Raising the limits raises that ceiling with them.
+
+  `warn_at_percent` is how full a pad gets before a post starts saying so, as
+  percentages of `max_sections_per_pad`. Every post from the first threshold onwards
+  comes back with a warning naming how many posts are left, so an agent can finish what
+  it is doing on purpose rather than meeting a refusal mid-conversation. The warning is
+  advisory: it never changes whether a post is accepted.
+
+  - Unset means the default `[80, 90, 99]`. Three steps because one is either too early
+    to act on or too late.
+  - `[0]` turns the warnings off. It is a separate spelling from unset on purpose —
+    otherwise "no warnings" and "I did not configure this" would be the same JSON.
+  - Values are percentages of 1..100; anything else is refused when saving rather than
+    dropped quietly, so `800` typed for `80` is reported instead of never firing.
 - **`wait`** — optional MCP `pad_wait` timing: `default_s` when the caller omits
   `timeout_s`, `max_s` the server-side cap (values above it are clamped). The CLI
   `pad wait` is not affected by this cap.

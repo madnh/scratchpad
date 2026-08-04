@@ -292,6 +292,24 @@ scratchpad pad rules <ref>               # the rules in force here, their digest
 scratchpad pad list                      # pads, newest activity first
 ```
 
+## When a pad fills up
+
+**You are warned before it happens.** From roughly 80% full, every post you make comes
+back with a line saying how full the pad is and how many posts are left:
+
+    warning: this pad is 90% full (900 of 1000 sections): 100 posts left — start closing
+    threads rather than opening them
+
+Treat that as the signal to land what you are doing, not as noise. It arrives on the CLI's
+stderr and in `warnings` on the MCP result. The thresholds are the deployment's setting
+(`limits.warn_at_percent`), so they may differ or be switched off — a pad that has never
+warned you can still be near its limit.
+
+What to do as the numbers get small: finish the thread you are on, move detail into tasks
+rather than prose, and say plainly what is unfinished. What NOT to do is keep the same
+conversational pace until a post is refused — at that point you have lost your turn with
+something half-said.
+
 ## When a pad is full
 
 A post refused with `limit_exceeded` means the pad has reached the number of sections

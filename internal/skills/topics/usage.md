@@ -188,6 +188,12 @@ scratchpad doctor                          # diagnose, strictly read-only
 Pads are plain markdown files — `cat`, `grep`, and `rm` on the store are always safe.
 Deleting a pad's file is deleting the pad; no other state exists.
 
+As a pad approaches its section limit, `pad post` prints a warning on **stderr** saying how
+full it is and how many posts are left (`this pad is 90% full (900 of 1000 sections): 100
+posts left`). The post still succeeds — it is a heads-up, and the moment to start winding
+the conversation up rather than to keep going at the same pace. The thresholds are the
+deployment's `limits.warn_at_percent`, so they can be changed or turned off.
+
 A post refused with `limit_exceeded` means the pad or the project has reached a CONFIGURED
 bound, not a built-in ceiling. Raise `limits.max_sections_per_pad` (or
 `max_pads_per_project`) in the Scratchpad config — in the Web UI's Settings, or by editing

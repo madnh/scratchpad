@@ -310,3 +310,59 @@ func TestLoweringLimitsThroughTheUIKeepsPadsReadable(t *testing.T) {
 		t.Fatalf("GET the pad itself = %d, want 200", code)
 	}
 }
+
+// TestConfigPutCarriesTheWarningThresholds covers the round trip the Settings page depends
+// on. The page rebuilds the whole `limits` group from its inputs, so a field it does not
+// send is a field a save DELETES — this pins that the threshold list survives being edited
+// through the UI, and that the "off" spelling is not read as "unset".
+func TestConfigPutCarriesTheWarningThresholds(t *testing.T) {
+	for name, tc := range map[string]struct {
+		send string
+		want []int
+	}{
+		"custom list": {`[70,95]`, []int{70, 95}},
+		"off":         {`[0]`, []int{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, ts, client, dir := newConfigServer(t)
+
+			var before configResponse
+			getJSON(t, client, ts.URL+"/api/config", &before)
+
+			body := `{"config":{"display_name":"","default_project":"","limits":` +
+				`{"warn_at_percent":` + tc.send + `},"wait":{}},"if_digest":"` + before.Digest + `"}`
+			var after configResponse
+			if code := putJSON(t, client, ts.URL+"/api/config", body, &after); code != http.StatusOK {
+				t.Fatalf("PUT /api/config = %d", code)
+			}
+
+			onDisk, err := config.LoadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(onDisk.Limits.WarnAtPercent) != len(tc.want) {
+				t.Fatalf("on disk = %v, want %v", onDisk.Limits.WarnAtPercent, tc.want)
+			}
+			for i := range tc.want {
+				if onDisk.Limits.WarnAtPercent[i] != tc.want[i] {
+					t.Fatalf("on disk = %v, want %v", onDisk.Limits.WarnAtPercent, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// A percentage outside 1..100 is refused rather than dropped by the loader, so an operator
+// who typed 800 meaning 80 is told at the moment they press Save.
+func TestConfigPutRejectsImpossiblePercentages(t *testing.T) {
+	_, ts, client, _ := newConfigServer(t)
+	var before configResponse
+	getJSON(t, client, ts.URL+"/api/config", &before)
+
+	body := `{"config":{"display_name":"","default_project":"","limits":` +
+		`{"warn_at_percent":[800]},"wait":{}},"if_digest":"` + before.Digest + `"}`
+	var out map[string]any
+	if code := putJSON(t, client, ts.URL+"/api/config", body, &out); code == http.StatusOK {
+		t.Fatal("800% was accepted as a threshold")
+	}
+}

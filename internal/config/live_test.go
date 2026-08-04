@@ -34,7 +34,7 @@ func TestMergeHotKeepsColdGroups(t *testing.T) {
 	if got.DisplayName != "New" || got.DefaultProject != "new" {
 		t.Errorf("identity strings not adopted: %+v", got)
 	}
-	if got.Limits != fresh.Limits || got.Wait != fresh.Wait || got.Rules != fresh.Rules {
+	if !SameLimits(got.Limits, fresh.Limits) || got.Wait != fresh.Wait || got.Rules != fresh.Rules {
 		t.Errorf("hot groups not adopted: %+v", got)
 	}
 	if got.Instance != "inst-a" || got.Dir != "/somewhere" || got.UI != running.UI || got.TCP.Port != 1111 {

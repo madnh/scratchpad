@@ -535,6 +535,12 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	}
 
 	warnings := p.SilenceWarnings(meta.To, time.Now())
+	// Counted AFTER this post, because that is the number the author just caused and the
+	// one it can act on. The limit is read from the snapshot this call took at the top, so
+	// a marker edited mid-post cannot make the warning and the refusal disagree.
+	if w := pad.CapacityWarning(len(p.Sections)+1, lim.MaxSectionsPerPad, lim.WarnAtPercent); w != "" {
+		warnings = append(warnings, w)
+	}
 
 	n := p.Last().N + 1
 	now := time.Now()

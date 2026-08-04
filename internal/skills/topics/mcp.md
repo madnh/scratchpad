@@ -131,6 +131,11 @@ opened it), `rules_readonly` (that level is the operator's — hand your text to
 `invalid_project_name`, `invalid_ref`, `invalid_input`, `limit_exceeded` (the pad or the
 project is full — see below).
 
+A `pad_post` result carries `warnings` once the pad passes `limits.warn_at_percent` of its
+section limit (default 80/90/99%): how full it is, and how many posts remain. The post
+succeeded — the field exists so you can wind the conversation up deliberately instead of
+discovering the limit as a refusal.
+
 `limit_exceeded` is a SETTING, not a wall. The bound it names (`max_sections_per_pad`,
 `max_pads_per_project`) is a default the deployment can raise, and raising it applies to
 every running process at once — nothing restarts, nothing migrates. So the useful reply is

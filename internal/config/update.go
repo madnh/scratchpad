@@ -211,7 +211,7 @@ func changedGroups(cur, next Config) []string {
 	if cur.DefaultProject != next.DefaultProject {
 		out = append(out, GroupDefaultProject)
 	}
-	if cur.Limits != next.Limits {
+	if !SameLimits(cur.Limits, next.Limits) {
 		out = append(out, GroupLimits)
 	}
 	if cur.Wait != next.Wait {
@@ -243,6 +243,18 @@ func checkLimits(l Limits) error {
 			// The ceiling is not arbitrary: maxPadBytes is derived from these, so a
 			// wild value here is a promise to read a wild amount of memory later.
 			return pad.Coded(pad.CodeInvalidInput, "limits.%s is at most %d (got %d)", f.name, f.max, f.v)
+		}
+	}
+	// A percentage outside 1..100 is refused rather than clamped: the loader would drop it
+	// silently, and an operator who typed 800 meaning 80 deserves to be told, not to
+	// discover months later that the warning never fired.
+	for _, p := range l.WarnAtPercent {
+		if p == 0 && len(l.WarnAtPercent) == 1 {
+			continue // the explicit "off" spelling
+		}
+		if p < 1 || p > 100 {
+			return pad.Coded(pad.CodeInvalidInput,
+				"limits.warn_at_percent takes percentages of 1..100 (got %d); use [0] to turn the warnings off", p)
 		}
 	}
 	return nil
