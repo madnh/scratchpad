@@ -817,9 +817,13 @@ func (s *Store) LastSection(ref string) (Section, error) {
 }
 
 // readNoPassword parses a pad without the password gate — for metadata listings only,
-// so it never materialises section bodies. That is what keeps List() over a directory
-// of large pads proportional to their SIZE rather than to their prose, and what stops
-// one huge pad from making every listing expensive.
+// so it never materialises section bodies.
+//
+// It STREAMS the file rather than reading it whole. Skipping the bodies used to keep the
+// cost proportional to a pad's size rather than to its prose, but the file still had to be
+// resident to be scanned, so one 250 MiB pad set what every listing cost in memory
+// (measured: 605 MB peak RSS for `pad list`). Reading line by line removes the
+// proportionality altogether.
 func (s *Store) readNoPassword(project, id string) (*Pad, error) {
 	ref := project + "-" + id
 	f, err := openPad(s.padPath(project, id), ref, os.O_RDONLY, unix.LOCK_SH)
@@ -827,11 +831,11 @@ func (s *Store) readNoPassword(project, id string) (*Pad, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := s.readPadFile(s.limits(), f, ref)
-	if err != nil {
-		return nil, err
-	}
-	return pad.ParseMeta(project, id, data)
+	// STREAMED, not read whole. This is the path every listing walks, and it wants
+	// metadata only — so the pad's size stops deciding what `pad list` costs in memory.
+	// No read ceiling applies here for the same reason: the ceiling bounds an allocation,
+	// and there is no longer an allocation proportional to the file.
+	return pad.ScanMeta(project, id, f)
 }
 
 // ProjectInfo is one project's listing entry.
