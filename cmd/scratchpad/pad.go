@@ -444,6 +444,10 @@ func newPadReadCmd() *cobra.Command {
 // searchTextWidth caps how much of a matching line is printed. Agent prose runs to whole
 // paragraphs on one line, and a search is a way to FIND a section, not to read it — the
 // ellipsis says the line goes on and `pad read --section` is how to see the rest.
+//
+// The store takes this window AROUND the match. It used to be applied here, to the front
+// of the line, which printed a row that did not contain the word being reported whenever
+// a paragraph matched past its 140th character — the common case in a pad.
 const searchTextWidth = 140
 
 func newPadSearchCmd() *cobra.Command {
@@ -499,7 +503,7 @@ func newPadSearchCmd() *cobra.Command {
 				Query: args[0], Project: project, Ref: ref, Password: password,
 				ExcludePads: excludePad, Regexp: asRegexp, Word: word, CaseSensitive: matchCase,
 				Author: author, Kind: kind, Before: beforeTS, After: afterTS,
-				Oldest: oldest, Limit: limit,
+				Oldest: oldest, Limit: limit, TextWidth: searchTextWidth,
 			})
 			if err != nil {
 				return err
@@ -521,8 +525,7 @@ func newPadSearchCmd() *cobra.Command {
 					if h.InTitle {
 						where = "title"
 					}
-					fmt.Fprintf(w, "%s\t§%d\t%s\t%s\t%s\n", h.Ref, h.Section, where, h.Author,
-						truncateRunes(h.Text, searchTextWidth))
+					fmt.Fprintf(w, "%s\t§%d\t%s\t%s\t%s\n", h.Ref, h.Section, where, h.Author, h.Text)
 				}
 				if err := w.Flush(); err != nil {
 					return err
@@ -590,16 +593,6 @@ func parseWhen(s string) (int64, error) {
 		}
 	}
 	return 0, fmt.Errorf("invalid time %q (want a date like 2026-07-01 or an age like 30d)", s)
-}
-
-// truncateRunes shortens a line for the table without cutting a multi-byte character in
-// half — the searches this exists for are frequently not ASCII.
-func truncateRunes(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max]) + "…"
 }
 
 func newPadWaitCmd() *cobra.Command {
