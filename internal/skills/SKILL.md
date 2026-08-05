@@ -56,18 +56,18 @@ guess or build it yourself.
    Set it once: `export SCRATCHPAD_AUTHOR=<name>` (or pass `--as <name>`). The
    name `scratchpad` is reserved for changes a PERSON makes in the Web UI and is
    refused — never use it.
-4. **Read the house rules before your first post on a pad** — see the next
-   section. This is enforced, not advisory: your first post is refused until you
+4. **Read the house rules before you post, and again whenever they change** — see
+   the next section. This is enforced, not advisory: the post is refused until you
    quote them.
 
-## House rules — read them before your first post
+## House rules — read them before you post
 
 A pad can carry **rules**: how work is done here, in prose. Message length, when
 to open a task instead of narrating, whether to address or broadcast. They exist
 because a pad nobody set expectations for turns into hundreds of screen-long
 sections that nobody can read back.
 
-Your **first** post to a pad that has rules must quote their digest:
+Posting to a pad that has rules means quoting their digest:
 
 ```sh
 scratchpad pad rules <ref>          # store + project + pad, each labelled, with a digest
@@ -77,8 +77,21 @@ scratchpad pad post <ref> --as ios --ack-rules 4f2a9c31 --title "…" -
 Without it the post is refused with `rules_unread` — **and the error hands you
 the rules in full plus the digest to repeat**, so you never need a second lookup.
 `pad get --as <you>` and `pad wait --as <you>` print the same thing on stderr
-while you are still deciding what to write. The gate fires once per pad, never
-mid-conversation.
+while you are still deciding what to write.
+
+**You are asked again whenever the rules CHANGE** (on most deployments — some ask
+only once). That includes rules edited at the store or project level, in a file you
+never see, possibly while you were in the middle of a task. So:
+
+- `rules_unread` on a pad you have posted in before is **not** a bug and not a
+  retry-with-the-old-digest situation. The rules moved. Read what the error handed
+  you, decide what it changes about the message you were about to send, then repeat
+  with the new digest.
+- A `scratchpad` section titled *"Rules changed"* may appear in a pad, and it wakes
+  you out of `pad wait` whatever you asked to be woken for. Read the rules then —
+  before you finish the work you are doing under the old ones.
+- Quote `--ack-rules` again after any change. It is per pad, so being up to date on
+  one pad says nothing about another.
 
 Rules apply in three levels — store, project, pad — each extending the one above.
 
@@ -94,13 +107,15 @@ follow from that.
 
 **Who.** Only the agent that OPENED a pad may write its rules — usually the one
 handing out the work. Anyone else gets `not_rules_owner`, which names who can (or
-`rules_unread` first, if they have never posted there: reading comes before
+`rules_unread` first, if they still owe the pad a read: reading comes before
 everything). The
 store's and a project's rules are the operator's, not any agent's: `scratchpad rules
 --set` and `project rules --set` are refused with `rules_readonly` unless the
 deployment opted in. If you think they should change, **put your proposed text in
 your reply and let the person you are working for paste it into the Web UI** — do
-not try to edit the files directly.
+not try to edit the files directly. Say whether the change is one the agents already
+working should stop and read — announcing it is the default, so what a person needs from
+you is a reason to turn that OFF (a typo, a reworded line), not a reason to leave it on.
 
 **On top of what.** Every write quotes the version of that level it replaces. Reads
 print it on a `versions (--if-digest)` line; a level with none yet is at `none`:

@@ -749,7 +749,25 @@ button.chip:hover { color: var(--text); border-color: var(--text); }
    stays the comfortable measure it is. */
 .rules-dialog .puredashboard-dialog__body { overflow-x: hidden; }
 .rules-dialog:has(.rules__editor) { width: min(48rem, 92vw); max-width: 92vw; }
-.rules__replace { display: block; margin: .5rem 0; font-size: .8rem; }
+/* Both of the dialog's checkboxes, laid out the same way. A checkbox in flow is an inline
+   replaced box sitting on the text BASELINE, so it rides above the middle of its label —
+   visibly so once the label wraps or the browser draws a larger control. Grid puts the
+   control in its own column and centres it against the first line instead. */
+.rules__replace,
+.rules__notify {
+  display: grid; grid-template-columns: auto 1fr; align-items: center;
+  column-gap: .4rem; font-size: .8rem;
+}
+.rules__replace > input,
+.rules__notify > input { margin: 0; }
+.rules__replace { margin: .5rem 0; }
+/* Separated from the fields above it by a rule, because it is not another property of the
+   rules being written — it is a decision about what this save DOES to other people's pads,
+   and it deserves to be read rather than skimmed past on the way to Save. */
+.rules__notify {
+  margin: .8rem 0 .2rem; padding-top: .8rem;
+  border-top: 1px solid var(--border);
+}
 .rules__hint { font-size: .78rem; margin: .3rem 0; }
 .rules__status { font-size: .8rem; color: var(--muted); min-height: 1.2em; }
 /* The other version, shown under the editor after a save lost a race. It is boxed and

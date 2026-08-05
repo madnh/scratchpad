@@ -548,6 +548,15 @@ type rulesBody struct {
 	// at — but not from the version check: a tab left open while an agent posted new
 	// rules, or a second tab, loses an edit exactly the way an agent would.
 	IfDigest string `json:"if_digest"`
+
+	// Notify asks for the change to be ANNOUNCED into the pads this level binds, as a
+	// notice section that wakes whoever is waiting there.
+	//
+	// The DIALOG ships it ticked; the field itself defaults to false, and deliberately so.
+	// A caller that forgot to send it writes into nobody's pad, which is the failure you
+	// can see and fix — the opposite default would let a malformed request fan out across
+	// the store. Where the choice belongs is in front of the person making the edit.
+	Notify bool `json:"notify"`
 }
 
 // decodeRulesBody reads a rules payload, bounded by the deployment's own content limit —
@@ -575,7 +584,38 @@ func (s *Server) handleSetStoreRules(r *http.Request, _ *session) (any, error) {
 	}); err != nil {
 		return nil, err
 	}
-	return s.store.ProjectRuleSet("")
+	return s.rulesSaved(store.NotifyScope{Level: pad.LevelStore}, body.Notify)
+}
+
+// rulesSaved is what a successful rules write returns: the rules as they now stand, plus
+// what the announcement did if one was asked for.
+//
+// The announcement runs AFTER the write and never turns a saved edit into a failed
+// request. The rules are on disk by this point; reporting the save as an error because
+// some pads could not be written to would tell the person the opposite of what happened,
+// and they would edit again. What went wrong travels in the body instead, where the dialog
+// can show it beside the count it promised.
+func (s *Server) rulesSaved(scope store.NotifyScope, notify bool) (any, error) {
+	rules, err := s.store.ProjectRuleSet(scope.Project)
+	if err != nil {
+		return nil, err
+	}
+	out := struct {
+		pad.Rules
+		Notified *store.NotifyResult `json:"notified,omitempty"`
+	}{Rules: rules}
+	if !notify {
+		return out, nil
+	}
+	res, err := s.store.NotifyRulesChanged(scope)
+	if err != nil {
+		// Same reasoning one level up: the edit stands. This is the announcement failing,
+		// and the person needs to know it did rather than to be told their save did.
+		out.Notified = &store.NotifyResult{Failed: map[string]string{"*": err.Error()}}
+		return out, nil
+	}
+	out.Notified = &res
+	return out, nil
 }
 
 func (s *Server) handleProjectRules(r *http.Request, _ *session) (any, error) {
@@ -593,7 +633,18 @@ func (s *Server) handleSetProjectRules(r *http.Request, _ *session) (any, error)
 	}); err != nil {
 		return nil, err
 	}
-	return s.store.ProjectRuleSet(project)
+	return s.rulesSaved(store.NotifyScope{Level: pad.LevelProject, Project: project}, body.Notify)
+}
+
+// handleRulesNotifyTargets answers "how many pads would this reach", so the dialog can put
+// a number beside its checkbox before anyone commits to it. A fan-out whose size is only
+// visible afterwards is one people learn to leave switched off.
+func (s *Server) handleRulesNotifyTargets(r *http.Request, _ *session) (any, error) {
+	scope := store.NotifyScope{Level: pad.LevelStore}
+	if name := r.PathValue("name"); name != "" {
+		scope = store.NotifyScope{Level: pad.LevelProject, Project: name}
+	}
+	return s.store.RulesNotifyTargets(scope)
 }
 
 // handleSetPadRules appends the pad's rules as pad.SystemAuthor. A protected pad must

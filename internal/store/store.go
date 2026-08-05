@@ -199,6 +199,12 @@ func (s *Store) limits() config.Limits { return s.live.Get().Limits }
 // rulesPolicy is the deployment's current who-may-write-rules policy.
 func (s *Store) rulesPolicy() config.RulesPolicy { return s.live.Get().Rules }
 
+// reackPolicy is the same snapshot's answer to when the READ gate fires again. The marker's
+// string is validated at load, so an unrecognised value here means a Store built over a
+// hand-made config — and pad.CheckAck reads anything but "once" as "ask again", which is the
+// direction that costs an agent one refusal rather than the one that silently exempts it.
+func (s *Store) reackPolicy() pad.ReackPolicy { return pad.ReackPolicy(s.rulesPolicy().Reack) }
+
 // ProjectsDir returns the root the store operates under.
 func (s *Store) ProjectsDir() string { return s.projectsDir }
 
@@ -294,7 +300,10 @@ func (s *Store) CreatePad(req CreateRequest) (*Pad, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if err := pad.CheckAck(nil, author, req.AckRules, rules); err != nil {
+	// No pad yet, so there is no receipt to find and no policy to consult: creating a pad
+	// under rules always means quoting them. The digest is then written onto section 1, so
+	// the author starts out holding the receipt for what it just read.
+	if err := pad.CheckAck(nil, author, req.AckRules, rules, s.reackPolicy()); err != nil {
 		return nil, "", err
 	}
 
@@ -326,7 +335,7 @@ func (s *Store) CreatePad(req CreateRequest) (*Pad, string, error) {
 	// validated — never taken from a request field and never re-derived later. A pad's owner
 	// is decided once, by the code that opens it.
 	body := pad.RenderHeader(pad.Header{Created: now, PasswordHash: hash, Opener: author}) + "\n" +
-		pad.RenderSection(1, author, title, now, pad.Meta{Kind: pad.KindMessage}, content)
+		pad.RenderSection(1, author, title, now, pad.Meta{Kind: pad.KindMessage, Acked: rules.Digest}, content)
 
 	for attempt := 0; attempt < 10; attempt++ {
 		id, err := newPadID()
@@ -390,6 +399,26 @@ type PostRequest struct {
 	// identity has to be a deliberate act of the calling code, never a string an agent
 	// can send.
 	SystemPost bool
+
+	// ToolNotice is the store announcing something about the pad ITSELF, on the operator's
+	// instruction — today, only NotifyRulesChanged. It skips the password gate, which is
+	// why it is spelled separately from SystemPost rather than folded into it.
+	//
+	// The two are not the same privilege. SystemPost says "a person is writing under the
+	// reserved identity"; the Web UI sets it to edit a pad's rules, and there it still
+	// unlocks the pad first, because it is writing CONTENT into someone's conversation.
+	// Folding this into SystemPost would quietly hand that path a password bypass nobody
+	// asked for.
+	//
+	// A password keeps other AGENTS out of a pad. It was never a reason to leave a pad out
+	// of an announcement: the rules bind it like every other pad, its agents are refused by
+	// the read gate like every other pad's, and skipping it would make it the one pad that
+	// is blocked without being told why. The notice itself carries nothing but "the rules
+	// changed" — which every agent on the store may read anyway.
+	//
+	// Never expose this through a surface. It is set by store code, on a path a person
+	// authenticated to, and by nothing else.
+	ToolNotice bool
 }
 
 // PostResult is what an append produced.
@@ -467,8 +496,14 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pad %s is corrupt: %w", req.Ref, err)
 	}
-	if err := checkPassword(p.PasswordHash(), req.Password); err != nil {
-		return nil, err
+	// A tool notice is the store speaking about the pad, not a caller reaching into it, so
+	// it is the one append that does not present a password. See PostRequest.ToolNotice for
+	// why that is not a hole: the field is set by store code on an operator's action, no
+	// surface can send it, and what it writes says only that the rules moved.
+	if !req.ToolNotice {
+		if err := checkPassword(p.PasswordHash(), req.Password); err != nil {
+			return nil, err
+		}
 	}
 	// A pad that has already been continued accepts nothing further, whatever the limits
 	// say now — its successor holds the conversation, and a second live end would mean two
@@ -488,6 +523,12 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 	if meta.Kind == "" {
 		meta.Kind = pad.KindMessage
 	}
+	// The receipt is the store's to write and nobody else's. Cleared here, before any check
+	// or any render, so a caller that sets it — a surface growing a passthrough field, a
+	// test reusing a Meta it read back — cannot hand an agent a way to excuse itself from
+	// reading the rules by simply claiming it already had. Same shape as SystemPost: the
+	// privilege is a field this code sets, never a value that arrives from outside.
+	meta.Acked = ""
 	if req.OpenTask {
 		meta.Kind, meta.Task, meta.Status = pad.KindTask, p.NextTaskNo(), pad.StatusOpen
 	}
@@ -524,8 +565,12 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 		}
 		return full, nil
 	}
-	if err := s.checkRules(lim, project, fullPad, p, req); err != nil {
+	receipt, err := s.checkRules(lim, project, fullPad, p, req, meta)
+	if err != nil {
 		return nil, err
+	}
+	if receipt.Needed {
+		meta.Acked = receipt.Digest
 	}
 	// Writing the pad's rules is checked AFTER the read gate: an agent that has not read
 	// what binds it has no business replacing it, and the read gate is the one that hands
@@ -581,6 +626,12 @@ func (s *Store) Post(req PostRequest) (*PostResult, error) {
 		if err != nil {
 			return nil, err
 		}
+		// The receipt is written unconditionally over there, whatever the gate concluded
+		// here. The successor is a NEW pad: it carries this pad's rules but none of its
+		// transcript, so an author whose receipt was "already on record" would arrive with
+		// no record at all — and be refused on its next post for rules it demonstrably read
+		// one section ago, in a pad it did not choose to leave.
+		meta.Acked = receipt.Digest
 		cont, err := s.continuePad(project, id, p, fp, f, data, req, meta, time.Now())
 		if err != nil {
 			return nil, err

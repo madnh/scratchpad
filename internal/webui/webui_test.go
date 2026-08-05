@@ -741,6 +741,69 @@ func TestRulesEndpoints(t *testing.T) {
 	}
 }
 
+// The checkbox at the bottom of the edit dialog, end to end: it is off by default, the
+// count that precedes it is readable, and ticking it puts a notice in the pads the level
+// binds.
+func TestRulesNotifyFromTheUI(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+	p, _, err := createPad(st, "demo", "alice", "hello", "body", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var targets store.NotifyTargets
+	if code := getJSON(t, client, ts.URL+"/api/rules/notify-targets", &targets); code != http.StatusOK {
+		t.Fatalf("GET notify-targets gave %d", code)
+	}
+	if len(targets.Refs) != 1 || targets.InScope != 1 {
+		t.Fatalf("the live pad should be the one target: %+v", targets)
+	}
+
+	// Saving with the box UNTICKED leaves the pads alone. The dialog ships it ticked, but
+	// the field itself defaults to false on purpose: a request that forgot to send it must
+	// write into nobody's pad rather than fan out across the store.
+	if code := putJSON(t, client, ts.URL+"/api/rules",
+		`{"text":"- be brief","if_digest":"none","notify":false}`, nil); code != http.StatusOK {
+		t.Fatalf("PUT /api/rules gave %d", code)
+	}
+	quiet, err := st.Get(p.Ref(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quiet.Sections) != 1 {
+		t.Fatalf("an unannounced rules change must not touch any pad: %+v", quiet.Sections)
+	}
+
+	// With it, each pad gains a notice — and the reply says how many, so the dialog can
+	// report what it actually did rather than what it offered to do.
+	var saved struct {
+		pad.Rules
+		Notified *store.NotifyResult `json:"notified"`
+	}
+	digest := pad.LevelDigest("- be brief", false)
+	if code := putJSON(t, client, ts.URL+"/api/rules",
+		`{"text":"- be brief\n- say which device","if_digest":"`+digest+`","notify":true}`, &saved); code != http.StatusOK {
+		t.Fatalf("PUT with notify gave %d", code)
+	}
+	if saved.Notified == nil || len(saved.Notified.Notified) != 1 {
+		t.Fatalf("the save must report what the announcement reached: %+v", saved.Notified)
+	}
+	told, err := st.Get(p.Ref(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := told.Last()
+	if last.Kind != pad.KindNotice || last.Author != store.SystemAuthor {
+		t.Fatalf("want a notice from the tool, got %+v", last.Meta)
+	}
+	// And it still is not a move in the conversation: alice wrote the last message and is
+	// still the one who may not post.
+	if turn := told.TurnState(); turn.LastAuthor != "alice" {
+		t.Fatalf("a notice must not take the turn: %+v", turn)
+	}
+}
+
 // A write without a same-origin Origin is a cross-site write attempt; the same guard
 // that protects DELETE protects these.
 func TestRulesWriteNeedsOrigin(t *testing.T) {

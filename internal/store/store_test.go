@@ -18,13 +18,20 @@ func testStore(t *testing.T) *Store {
 	limits := config.DefaultLimits
 	limits.MaxSectionsPerPad = 5
 	limits.MaxPadsPerProject = 3
-	// The permissive rules policy is the DEFAULT for these tests, so the ones that
-	// predate the policy keep testing what they were written to test. The tests that
-	// care about the policy build their own store — see testStorePolicy.
+	// The permissive WRITE policy is the default for these tests, so the ones that predate
+	// the policy keep testing what they were written to test. The tests that care about the
+	// policy build their own store — see testStorePolicy.
+	//
+	// The READ gate is the opposite: it is left at the deployment default, so every test
+	// here runs under the reacking a real store does. A test fixture that quietly picks the
+	// laxer setting is how a default ends up untested everywhere except the one file that
+	// names it.
 	return testStorePolicy(t, limits, config.RulesPolicy{
-		Store:   config.RulesWriteAgent,
-		Project: config.RulesWriteAgent,
-		Pad:     config.RulesWriteAny,
+		Store:            config.RulesWriteAgent,
+		Project:          config.RulesWriteAgent,
+		Pad:              config.RulesWriteAny,
+		Reack:            config.DefaultRulesPolicy.Reack,
+		NotifyActiveDays: config.DefaultRulesPolicy.NotifyActiveDays,
 	})
 }
 

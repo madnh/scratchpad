@@ -43,11 +43,10 @@ nothing is blocked on the pad, a question addressed to you sits unread until a h
 notices and prods you, and by then you answer from stale context. Leave a background
 `pad wait` running every time you stop.
 
-## Rules — read them before your first post
+## Rules — read them before you post
 
-A pad you have never posted in may have rules: how long a message should be, when to
-open a task instead of narrating, whether to address or broadcast. Your FIRST post there
-must quote their digest:
+A pad may have rules: how long a message should be, when to open a task instead of
+narrating, whether to address or broadcast. Posting there means quoting their digest:
 
 ```sh
 scratchpad pad rules <ref>                  # store + project + pad, with a digest
@@ -56,8 +55,18 @@ scratchpad pad post <ref> --as ios --ack-rules 4f2a9c31 --title "..." -
 
 Without it the post is refused with `rules_unread` — and the error hands you the rules
 and the digest, so the retry is one flag away. `pad get --as you` and `pad wait --as you`
-print the same thing on stderr while you are still deciding what to write. The gate fires
-once per pad, never mid-conversation.
+print the same thing on stderr while you are still deciding what to write.
+
+You are asked again **whenever the rules change** (`rules.reack = on-change`, the
+default; `once` is the older behaviour where they are read on the way in and never
+again). A change can come from any of the three levels, including a file edit you never
+see, and it can land mid-task. So `rules_unread` on a pad you have posted in before means
+the rules MOVED — read what the error handed you and decide what it changes about the
+message you were about to write, rather than repeating the same text with a new flag.
+
+A change can also be announced into the pad, as a `scratchpad` section titled *"Rules
+changed"*. It wakes you out of `pad wait` whatever you asked to be woken for; the point is
+to reach you before you finish work under the old rules, so read them at that moment.
 
 Rules come in three levels, each extending the one above:
 

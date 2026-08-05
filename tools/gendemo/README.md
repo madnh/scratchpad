@@ -48,7 +48,7 @@ Almost every change belongs in `scenario.go`.
 
 ## What the demo currently contains
 
-Three pads across two projects. Section numbers below are stable across rebuilds —
+Six pads across two projects. Section numbers below are stable across rebuilds —
 only the timestamps move — so they are safe to quote in a bug report, and they change
 the moment you edit the scenario.
 
@@ -143,6 +143,36 @@ What each part is there to show:
 - In the UI: the old pad's row carries a `closed` tag and the new one `continues`, and each
   pad page links to the other end.
 
+### `release-rules8k` — a rules change that arrived (7 sections, 3 agents, 1 task)
+
+The only pad whose story starts OUTSIDE it. Nobody here said anything to cause §4: a person
+edited the STORE's rules — a file two directories up — and ticked the announce box.
+
+| Section | Who | What it shows |
+|---|---|---|
+| §1–§3 | pm, docs, qa | ordinary traffic, each carrying `acked: 5cb1f7a2` — the receipt for rules that no longer exist |
+| §4 | `scratchpad` | `kind: notice`: the announcement. Takes no turn, and wakes every waiter whatever their selectors say |
+| §5 | qa | the receipt updated — `acked` is now the digest actually in force, which is why qa is not asked again |
+| §6–§7 | qa | T1, opened *because* the new rules ask for it rather than narrating in the thread |
+
+Derived state: turn is held by `qa`; T1 is `wip`; `docs` has not posted since §4.
+
+That last part is the point of the pad, and it is a state no other demo store has anyone in:
+
+```sh
+scratchpad pad get release-rules8k --as docs   # stderr: the rules have CHANGED since you last posted
+scratchpad pad get release-rules8k --as qa     # stderr: nothing — qa is up to date
+```
+
+`docs` still holds the old digest, so its next post is refused with `rules_unread`, carrying
+the current rules in full. Under `rules.reack = once` neither agent would be asked at all —
+which is exactly the difference the setting makes, visible in one pad.
+
+The digests are not typed twice: `demoNewDigest` in `scenario.go` is computed from the same
+rules this build writes. A receipt that quietly stopped matching would leave every agent in
+the demo looking overdue for a read, and the store would still be internally consistent — so
+no test would catch it.
+
 > **When you change a scenario, update the tables above in the same commit.** The tool
 > prints the derived state of every pad it builds — section count, turn, the board, the
 > debts — so `make demo` gives you the new numbers to paste.
@@ -169,6 +199,9 @@ An event is one section:
 | `Status` | moves the task — **setting this is what makes the section a task event** |
 | `Rules` | makes the section the pad's rules; several of them are VERSIONS of one rule set, the last in force |
 | `Replace` | with `Rules`: ignore the project and store levels instead of extending them |
+| `Continued` | the section a full pad ends with, naming its successor; always written by `scratchpad` |
+| `Notice` | the section a rules change is ANNOUNCED with; also `scratchpad`, and it wakes every waiter regardless of selectors |
+| `Acked` | the digest this author had read — the receipt the read gate looks for under `rules.reack = on-change`. Spelled out because a demo pad is written straight to disk, so no `Post` call derives it |
 
 **Nothing refers to a section or task by number.** Insert a line in the middle and
 nothing renumbers; delete a line something replies to and the build fails with the label

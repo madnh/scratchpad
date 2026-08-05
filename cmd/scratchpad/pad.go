@@ -222,7 +222,7 @@ func newPadCreateCmd() *cobra.Command {
 // answers the same question in both: have you read how work is done here?
 func ackRulesFlag(cmd *cobra.Command, ack *string) {
 	cmd.Flags().StringVar(ack, "ack-rules", "",
-		"the digest of the rules you have read (required on your FIRST post to a pad that has rules)")
+		"the digest of the rules you have read (required on your first post to a pad that has rules, and again after they change)")
 }
 
 func newPadPostCmd() *cobra.Command {

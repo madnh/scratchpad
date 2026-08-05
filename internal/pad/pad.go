@@ -35,6 +35,23 @@ const (
 	// accepting posts is unreachable until it learns where the conversation went, which
 	// is precisely the failure that selective waking must not cause.
 	KindContinued Kind = "continued"
+
+	// KindNotice is the tool saying something about the pad itself rather than about the
+	// work — today, that the rules binding this pad have changed at a level that lives in
+	// a FILE (the store's or the project's), where there is no section for an agent to
+	// notice. Written by the tool on a person's instruction, never by an agent.
+	//
+	// It exists because a rules file is not a pad file: internal/watch reports pad writes,
+	// and `pad wait` only counts a pad as having news when a new SECTION appears, so an
+	// edit to `_rules.md` reaches nobody. Every agent's wait runs in its own process, so
+	// the only channel that crosses from the person editing the rules to an agent parked
+	// on a pad is the pad file. This is that channel.
+	//
+	// Like the other bookkeeping kinds it takes no turn. Like KindContinued it wakes every
+	// waiter regardless of selectors: an agent that is about to be refused for not having
+	// read the current rules must not be spared the news on the grounds that it was not
+	// addressed.
+	KindNotice Kind = "notice"
 )
 
 // SystemAuthor is the reserved identity for something a PERSON did through a surface
@@ -81,6 +98,18 @@ type Meta struct {
 	// above (project, store) are ignored instead of being extended. It is written as
 	// `rules: replace` on the metadata line and means nothing on any other kind.
 	Replace bool `json:"replace,omitempty"`
+
+	// Acked records WHICH rules this section's author had read when it wrote this. It is
+	// the durable half of the read gate: with reacking on, CheckAck asks whether the
+	// author has ever posted quoting the digest in force NOW, and that question needs an
+	// answer that survives the process — so it is written into the pad, like every other
+	// piece of state here.
+	//
+	// It is set by the store from the ack the request quoted, only after CheckAck has
+	// accepted it, and it is never a field a surface exposes. An agent that could write
+	// its own `acked` could excuse itself from reading anything — the same reason
+	// SystemPost is a field the calling code sets rather than a name an agent can send.
+	Acked string `json:"acked,omitempty"`
 }
 
 // Section is one post in a pad. Meta is embedded so it flattens in JSON: a section
@@ -218,6 +247,18 @@ func (p *Pad) Opener() string {
 func (p *Pad) HasPosted(author string) bool {
 	for _, sec := range p.Sections {
 		if sec.Author == author {
+			return true
+		}
+	}
+	return false
+}
+
+// HasRulesSection reports whether this pad states rules of its own. It is answered from
+// section METADATA, so it holds on a pad parsed without bodies — which is the point: it
+// lets the append path find out whether it needs the bodies before paying for them.
+func (p *Pad) HasRulesSection() bool {
+	for _, sec := range p.Sections {
+		if sec.IsRules() {
 			return true
 		}
 	}

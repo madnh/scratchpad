@@ -73,11 +73,15 @@ func parseMetaLine(line string) (ts time.Time, m Meta, ok bool) {
 				m.Kind = KindRules
 			case KindContinued:
 				m.Kind = KindContinued
+			case KindNotice:
+				m.Kind = KindNotice
 			}
 		case "rules":
 			// The only value that means anything today. An unknown one is ignored like
 			// an unknown key, so `rules: something-later` degrades to "extend".
 			m.Replace = val == "replace"
+		case "acked":
+			m.Acked = val
 		case "to":
 			m.To = splitTargets(val)
 		case "re":
@@ -127,6 +131,13 @@ func renderMetaLine(ts time.Time, m Meta) string {
 	}
 	if m.Status != "" {
 		b.WriteString(metaSep + "status: " + string(m.Status))
+	}
+	// Written LAST, and only when the author actually quoted an ack. It is a receipt, not
+	// routing: a reader skimming the line wants to see who and what before it sees which
+	// version of the rules that author had read, and the vast majority of sections carry
+	// none — an author only re-quotes when the rules have moved under it.
+	if m.Acked != "" {
+		b.WriteString(metaSep + "acked: " + m.Acked)
 	}
 	b.WriteString(metaSuffix)
 	return b.String()
@@ -209,6 +220,12 @@ func ValidateMeta(m Meta) error {
 	// what it is — see Wakes, which ignores selectors for it.
 	if m.Kind == KindContinued && (m.Task > 0 || m.Status != "" || len(m.To) > 0) {
 		return Coded(CodeInvalidInput, "a continuation section takes no task, status or `to`")
+	}
+	// A notice is about the pad, like the two above, and reaches everyone the same way —
+	// see Wakes, which ignores selectors for it. Addressing one would be a promise the
+	// wake path does not keep.
+	if m.Kind == KindNotice && (m.Task > 0 || m.Status != "" || len(m.To) > 0) {
+		return Coded(CodeInvalidInput, "a notice takes no task, status or `to` — it applies to the whole pad")
 	}
 	if m.Kind == KindTask && m.Task == 0 {
 		return Coded(CodeInvalidInput, "a task event must name its task")
