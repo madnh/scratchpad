@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -956,5 +957,194 @@ func TestListingSeparatesLastWriterFromTurnHolder(t *testing.T) {
 	}
 	if got := list.Pads[0]; got.LastAuthor != store.SystemAuthor || got.TurnAuthor != "alice" {
 		t.Fatalf("last writer %q / turn holder %q, want %q / alice", got.LastAuthor, got.TurnAuthor, store.SystemAuthor)
+	}
+}
+
+// searchResponse mirrors what the endpoint returns, which is store.SearchResult itself.
+type searchResponse struct {
+	Hits []struct {
+		Ref        string `json:"ref"`
+		Section    int    `json:"section"`
+		Author     string `json:"author"`
+		Line       int    `json:"line"`
+		Text       string `json:"text"`
+		InTitle    bool   `json:"in_title"`
+		MatchStart int    `json:"match_start"`
+		MatchEnd   int    `json:"match_end"`
+	} `json:"hits"`
+	Skipped   []string `json:"skipped"`
+	Truncated bool     `json:"truncated"`
+	Scanned   int      `json:"scanned"`
+}
+
+func TestSearchScopes(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+
+	a, _, err := createPad(st, "alpha", "erp", "Alpha pad", "the retry budget is per pad", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := createPad(st, "beta", "ios", "Beta pad", "the retry budget again", false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Whole store: both projects answer.
+	var all searchResponse
+	if code := getJSON(t, client, ts.URL+"/api/search?q=retry+budget", &all); code != http.StatusOK {
+		t.Fatalf("store-wide search gave %d", code)
+	}
+	if len(all.Hits) != 2 {
+		t.Fatalf("want a hit in each project, got %+v", all.Hits)
+	}
+
+	// One project.
+	var one searchResponse
+	if code := getJSON(t, client, ts.URL+"/api/search?q=retry+budget&project=alpha", &one); code != http.StatusOK {
+		t.Fatalf("project search gave %d", code)
+	}
+	if len(one.Hits) != 1 || one.Hits[0].Ref != a.Ref() {
+		t.Fatalf("project scope must narrow to alpha, got %+v", one.Hits)
+	}
+
+	// One pad.
+	var pad1 searchResponse
+	if code := getJSON(t, client, ts.URL+"/api/search?q=retry&ref="+a.Ref(), &pad1); code != http.StatusOK {
+		t.Fatalf("pad search gave %d", code)
+	}
+	if len(pad1.Hits) != 1 || pad1.Scanned != 1 {
+		t.Fatalf("pad scope must read exactly one pad, got %d hits over %d pads", len(pad1.Hits), pad1.Scanned)
+	}
+}
+
+// The offsets the store computes must survive the wire: they are what the page
+// highlights with, and recomputing them in JavaScript would be a second matcher.
+func TestSearchCarriesMatchOffsets(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+
+	if _, _, err := createPad(st, "alpha", "erp", "Alpha", "phần điều tra về địa chỉ hai cấp", false); err != nil {
+		t.Fatal(err)
+	}
+	var res searchResponse
+	if code := getJSON(t, client, ts.URL+"/api/search?q="+url.QueryEscape("địa chỉ"), &res); code != http.StatusOK {
+		t.Fatalf("search gave %d", code)
+	}
+	if len(res.Hits) == 0 {
+		t.Fatal("want a hit")
+	}
+	h := res.Hits[0]
+	r := []rune(h.Text)
+	if h.MatchStart < 0 || h.MatchEnd > len(r) || string(r[h.MatchStart:h.MatchEnd]) != "địa chỉ" {
+		t.Fatalf("offsets %d..%d do not select the match in %q", h.MatchStart, h.MatchEnd, h.Text)
+	}
+}
+
+// A protected pad is not searched by a store-wide query, and the fact that it was left
+// out travels with the result. Named WITH the session's unlock, it opens.
+func TestSearchProtectedPadNeedsTheSessionUnlock(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+
+	secret, pw, err := createPad(st, "alpha", "erp", "Secret", "the codeword is hyacinth", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pw == "" {
+		t.Fatal("a protected pad must return its password")
+	}
+
+	var wide searchResponse
+	if code := getJSON(t, client, ts.URL+"/api/search?q=hyacinth", &wide); code != http.StatusOK {
+		t.Fatalf("store-wide search gave %d", code)
+	}
+	if len(wide.Hits) != 0 {
+		t.Fatalf("a protected pad's content leaked into a store-wide search: %+v", wide.Hits)
+	}
+	if len(wide.Skipped) != 1 || wide.Skipped[0] != secret.Ref() {
+		t.Fatalf("the skipped pad must be reported, got %+v", wide.Skipped)
+	}
+
+	// Named but not unlocked in this session: refused, not silently empty.
+	if code := getJSON(t, client, ts.URL+"/api/search?q=hyacinth&ref="+secret.Ref(), nil); code != http.StatusForbidden {
+		t.Fatalf("searching a locked pad gave %d, want 403", code)
+	}
+
+	// Unlock, then the same request answers.
+	body := strings.NewReader(`{"password":` + strconv.Quote(pw) + `}`)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/pads/"+secret.Ref()+"/unlock", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", ts.URL)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlock gave %d", resp.StatusCode)
+	}
+
+	var opened searchResponse
+	if code := getJSON(t, client, ts.URL+"/api/search?q=hyacinth&ref="+secret.Ref(), &opened); code != http.StatusOK {
+		t.Fatalf("search after unlock gave %d", code)
+	}
+	if len(opened.Hits) != 1 {
+		t.Fatalf("the session's unlock must open the pad to a search, got %+v", opened.Hits)
+	}
+}
+
+// The ceiling is this surface's own: the CLI's "0 means no cap" would let one request
+// ask for the whole store in one response.
+func TestSearchLimitIsBounded(t *testing.T) {
+	srv, ts, client, st := newTestServer(t)
+	authenticate(t, srv, ts, client)
+
+	p, _, err := createPad(st, "alpha", "erp", "Alpha", "needle", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := 2; n <= 6; n++ {
+		author := "erp"
+		if n%2 == 0 {
+			author = "ios"
+		}
+		if _, err := st.Post(store.PostRequest{
+			Ref: p.Ref(), Author: author, Title: fmt.Sprintf("s%d", n), Content: "needle",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var res searchResponse
+	if code := getJSON(t, client, ts.URL+"/api/search?q=needle&limit=2", &res); code != http.StatusOK {
+		t.Fatalf("limited search gave %d", code)
+	}
+	if len(res.Hits) != 2 || !res.Truncated {
+		t.Fatalf("want 2 hits marked truncated, got %d truncated=%v", len(res.Hits), res.Truncated)
+	}
+	if code := getJSON(t, client, ts.URL+"/api/search?q=needle&limit=0", nil); code != http.StatusBadRequest {
+		t.Fatalf("limit=0 gave %d, want 400 — no unbounded response over HTTP", code)
+	}
+}
+
+// An empty query is refused rather than answered with everything.
+func TestSearchNeedsAQuery(t *testing.T) {
+	srv, ts, client, _ := newTestServer(t)
+	authenticate(t, srv, ts, client)
+	if code := getJSON(t, client, ts.URL+"/api/search?q=+", nil); code != http.StatusBadRequest {
+		t.Fatalf("a blank q gave %d, want 400", code)
+	}
+}
+
+// A misspelled flag is refused, not read as "off": a filter that silently turns itself
+// off answers a question nobody asked.
+func TestSearchRejectsABadFlag(t *testing.T) {
+	srv, ts, client, _ := newTestServer(t)
+	authenticate(t, srv, ts, client)
+	if code := getJSON(t, client, ts.URL+"/api/search?q=x&word=yep", nil); code != http.StatusBadRequest {
+		t.Fatalf("word=yep gave %d, want 400", code)
 	}
 }
