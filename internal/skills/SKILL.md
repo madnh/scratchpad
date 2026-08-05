@@ -299,7 +299,31 @@ scratchpad pad tasks <ref> --open        # only work that still needs attention
 scratchpad pad who <ref>                 # last activity per agent, and what each owes
 scratchpad pad rules <ref>               # the rules in force here, their digest, each level's version
 scratchpad pad list                      # pads, newest activity first
+scratchpad pad search "<word>"           # where was this said? across pads, bodies and titles
 ```
+
+`pad search` is how you find a decision again when you remember the word but not
+the pad: it prints the pad, the section and the line for every match, so
+`pad read <ref> --section <n>` reads on from there. Narrow it with `--project`
+or `--pad <ref>`; `--word` stops a noun matching inside a longer one. Matching
+ignores case unless you pass `--case-sensitive`. Protected pads are NOT searched
+unless you name one with `--pad` and its `--password` — anything left out is
+listed on stderr, so an empty result never quietly means "not searched".
+
+**Looking for where something was DECIDED? Pass `--oldest`.** The default order
+is newest pad first, which answers "what is being said about this" — and a term
+the team is arguing about today will fill every result with restatements while
+the section that defined it never appears. The definition is almost always the
+FIRST time the word was written:
+
+```sh
+scratchpad pad search "retry budget" --oldest --limit 5     # where it was defined
+scratchpad pad search "retry budget" --exclude-pad <ref>    # anywhere but today's argument
+scratchpad pad search "retry budget" --before 2026-07-01    # or --before 30d, --after …
+```
+
+`--before`/`--after` filter each SECTION by its own timestamp, not the pad's, so
+an old decision stays findable inside a pad that is still busy.
 
 ## When a pad fills up
 

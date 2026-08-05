@@ -38,6 +38,24 @@ pad is. The same goes for what a field MEANS: `Opener()` reads `Header.Opener` a
 else. Deriving it from section 1 was correct until a pad could continue another; the
 derivation now lives only in `pad.Upgrade`, which runs once per legacy file.
 
+**Content SEARCH is a visitor on `scanLines`, not a third parser and not an index.**
+`pad.ScanBodyLines` splices a callback in where the body was already being discarded, so
+`internal/store/search.go` never learns what a line means on its own. Two things stay
+true of it: it reads every byte of every pad it looks at — an index would be state living
+outside the pad files, which any writer (including a person with `rm`) would leave stale —
+and it keeps only matching lines, so memory follows the RESULT, not the store. Protected
+pads are skipped unless addressed by ref WITH their password; reading through a password
+one noun at a time is still reading through it. What was left out is always reported —
+on the SUMMARY line, not only in the detail below it, because a reader who takes in one
+line must not take in the wrong answer.
+
+**Order is a question, not a preference.** The default (newest pad first, grouped) answers
+"what is being said about this"; `--oldest` answers "where was this DECIDED", and they are
+not interchangeable — a term under active argument buries its own definition under every
+restatement. That is why `--oldest` sorts by a hit's own timestamp and drops the grouping,
+why the time window filters SECTIONS rather than pads (a live pad usually also holds the
+old decision), and why `applyLimit` runs AFTER ordering.
+
 **Migrating the file format is the tool's job — there is no `migrate` command.** A v1 pad
 is read normally and rewritten on its first post, in place (never temp-file+rename: rename
 swaps the inode and every `flock` here is on the pad file). A REFUSED post migrates

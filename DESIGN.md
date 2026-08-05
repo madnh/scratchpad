@@ -832,6 +832,10 @@ scratchpad
     │              [--task-open | --task N] [--status open|wip|blocked|done|dropped]
     ├── get      <ref> [--as <author>] [--kind message|task]   # TOC + turn (compact)
     ├── read     <ref> [--section N | --since N] [--kind K] [--task N]
+    ├── search   <pattern>                         # the only read that selects by CONTENT
+    │              [--project <p>] [--pad <ref> [--password]] [--exclude-pad <ref>,…]
+    │              [--author <a>] [--kind K] [--before <when>] [--after <when>]
+    │              [--oldest] [--regexp] [--word] [--case-sensitive] [--limit N]
     ├── wait     <ref> --since N [--timeout 10m]   # for a background CLI wait
     │              [--as <author>] [--wake-for any|me|mine|tasks|task:N,…] [--unacked 15m]
     ├── tasks    <ref> [--task N] [--open]         # the derived board
@@ -857,6 +861,35 @@ Notes:
 - `pad who` exists because presence does not: it reports *last activity and outstanding
   acknowledgements*, which are derivable, instead of *who is currently blocked in a
   wait*, which is not (see *Knowing whether work is moving*).
+- `pad search` is the one read that selects by **what was written** rather than by
+  position, and it is a CLI (and store) capability rather than an MCP tool for now — the
+  MCP surface stays append-only and small on purpose, and this can be added to it and to
+  the Web UI later from the same `store.Search`. Four decisions are load-bearing:
+  - **No index.** It reads the pads it looks at. An index would be state living outside
+    the pad files, and everything here derives from them precisely so that a person with
+    `rm` or an editor cannot leave a stale second copy of the truth. `--project`, `--pad`
+    and `--exclude-pad` are what keep a large store affordable; memory follows the RESULT,
+    not the store, because the scan streams and only matching lines are kept.
+  - **Titles are searched with bodies.** A section title is the most deliberate statement
+    of what a section is about, and it is the index a person reads a long pad by.
+  - **Order is a question, not a preference.** The default — newest pad first, a pad's
+    hits kept together — answers "what is being said about this". `--oldest` answers
+    "where was this DECIDED", which is almost always the FIRST time a word appears, and
+    it deliberately drops the grouping because "which came first" is about absolute time.
+    `--limit` applies AFTER ordering, so `--oldest --limit 5` keeps the earliest five.
+    The time window (`--before`/`--after`, a date or an age) filters SECTIONS, not pads:
+    a pad that is busy today usually also holds the old decision.
+  - **No reading through a password.** Protected pads are skipped unless addressed by
+    `--pad` WITH `--password`; a search that read through protection would be a way to
+    read a protected pad one noun at a time. Everything left out (protected or unreadable)
+    is reported on stderr, and the COUNT appears on the summary line itself — an empty
+    result must never be readable as "the word is nowhere in the store".
+
+  stdout carries the table and nothing else, and a search that matched nothing prints
+  nothing at all — the header row included. That is `grep`'s convention and it is a
+  contract here: a lone header reads as one result to anything counting lines
+  (`… 2>/dev/null | wc -l`), which is how a script concludes "found it" about a word that
+  is not there. Everything a person needs to read the silence is on stderr.
 - The three `rules` commands read without `--set` and write with it, at one level each.
   Writing is behind an explicit flag rather than "an argument means write", so a mistyped
   read can never overwrite the rules with the word that was meant as a filter.

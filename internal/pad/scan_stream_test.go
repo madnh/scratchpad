@@ -60,6 +60,68 @@ func TestBodyRoundTripsThroughTheParser(t *testing.T) {
 	}
 }
 
+// A search reads bodies through the visitor and nothing else, so what the visitor is shown
+// has to BE the body — every line of it, and no line that belongs to the format around it.
+// If these two ever disagree, a search silently stops finding words that are in the pad.
+func TestScanBodyLinesSeesExactlyTheBodies(t *testing.T) {
+	bodies := []string{
+		"first\n",
+		"second\n\nwith a blank\n",
+		"# not a section header\n",
+		"cần hiểu rõ — ổn\n",
+		strings.Repeat("x", 200*1024) + "\n",
+		"no trailing newline",
+	}
+	raw := renderPadFile(t, bodies...)
+	full, err := Parse("proj", "abc123", []byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seen := map[int][]string{}
+	streamed, err := ScanBodyLines("proj", "abc123", strings.NewReader(raw),
+		func(sec *Section, lineNo int, line []byte) {
+			seen[sec.N] = append(seen[sec.N], string(line))
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(streamed.Sections) != len(full.Sections) {
+		t.Fatalf("sections: full %d, streamed %d", len(full.Sections), len(streamed.Sections))
+	}
+	for _, sec := range full.Sections {
+		// The same normalisation scan applies to the byte range it slices: the leading
+		// newline is the blank line RenderSection writes, the trailing ones separate
+		// sections. Reassembling the visited lines has to land on the same string.
+		got := strings.TrimRight(strings.TrimPrefix(strings.Join(seen[sec.N], "\n"), "\n"), "\n")
+		if got != "" {
+			got += "\n"
+		}
+		if got != sec.Content {
+			t.Errorf("section %d body differs\n visitor %q\n  parser %q", sec.N, got, sec.Content)
+		}
+	}
+}
+
+// The line number a hit carries is only useful if it is the file's own — the one an editor
+// or `sed -n` counts to.
+func TestScanBodyLinesNumbersFileLines(t *testing.T) {
+	raw := renderPadFile(t, "first\nsecond\n", "third\n")
+	lines := strings.Split(raw, "\n")
+	if _, err := ScanBodyLines("proj", "abc123", strings.NewReader(raw),
+		func(_ *Section, lineNo int, line []byte) {
+			if lineNo < 1 || lineNo > len(lines) {
+				t.Fatalf("line number %d is outside the file's %d lines", lineNo, len(lines))
+			}
+			if lines[lineNo-1] != string(line) {
+				t.Errorf("line %d: visitor saw %q, the file has %q",
+					lineNo, string(line), lines[lineNo-1])
+			}
+		}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Metadata-only parsing must see exactly the same sections as a full parse: same count,
 // same numbers, same authors, same metadata. Only the bodies differ.
 func TestParseMetaAgreesWithParseExceptBodies(t *testing.T) {

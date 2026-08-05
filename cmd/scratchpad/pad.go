@@ -32,8 +32,8 @@ func newPadCmd() *cobra.Command {
 			"MCP agents on one store is safe.",
 	}
 	cmd.AddCommand(newPadCreateCmd(), newPadPostCmd(), newPadGetCmd(), newPadReadCmd(),
-		newPadWaitCmd(), newPadTasksCmd(), newPadWhoCmd(), newPadListCmd(),
-		newPadRulesCmd(), newPadDeleteCmd(), newPadPurgeCmd())
+		newPadSearchCmd(), newPadWaitCmd(), newPadTasksCmd(), newPadWhoCmd(),
+		newPadListCmd(), newPadRulesCmd(), newPadDeleteCmd(), newPadPurgeCmd())
 	return cmd
 }
 
@@ -439,6 +439,167 @@ func newPadReadCmd() *cobra.Command {
 	f.IntVar(&task, "task", 0, "print one task's thread (its opening section and everything referencing it)")
 	f.StringVar(&password, "password", "", "the pad's password (when protected)")
 	return cmd
+}
+
+// searchTextWidth caps how much of a matching line is printed. Agent prose runs to whole
+// paragraphs on one line, and a search is a way to FIND a section, not to read it — the
+// ellipsis says the line goes on and `pad read --section` is how to see the rest.
+const searchTextWidth = 140
+
+func newPadSearchCmd() *cobra.Command {
+	var (
+		dir        dirFlags
+		project    string
+		ref        string
+		password   string
+		excludePad []string
+		author     string
+		kind       string
+		before     string
+		after      string
+		oldest     bool
+		asRegexp   bool
+		word       bool
+		matchCase  bool
+		limit      int
+	)
+	cmd := &cobra.Command{
+		Use:   "search <pattern>",
+		Short: "Find a word or phrase in pad CONTENT, across the store",
+		Long: "Search the prose inside pads — the one question the other read commands cannot\n" +
+			"answer, since they select by section, kind or task rather than by what was said.\n" +
+			"Each hit names the pad, the section and the line, so `pad read <ref> --section <n>`\n" +
+			"reads on from where a hit was found. Section TITLES are searched too.\n\n" +
+			"The pattern is a literal substring and matching ignores case; --regexp reads it as\n" +
+			"a pattern instead, --word requires a whole word, --case-sensitive stops the folding.\n\n" +
+			"Results are grouped by pad, most recently active first. Looking for where something\n" +
+			"was DECIDED is the opposite question — that is almost always the FIRST time the word\n" +
+			"appears, and the default buries it under every later restatement — so pass --oldest,\n" +
+			"and narrow with --before/--after or --exclude-pad when a live discussion drowns out\n" +
+			"the pad the thing was settled in.\n\n" +
+			"There is no index: a search reads the pads it looks at, so narrow it with --project\n" +
+			"or --pad on a large store. Protected pads are NOT searched — name one with --pad and\n" +
+			"its --password to search inside it — and every pad left out is reported on stderr, so\n" +
+			"an empty result never quietly means \"not searched\".",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			beforeTS, err := parseWhen(before)
+			if err != nil {
+				return fmt.Errorf("--before: %w", err)
+			}
+			afterTS, err := parseWhen(after)
+			if err != nil {
+				return fmt.Errorf("--after: %w", err)
+			}
+			st, _, err := dir.open()
+			if err != nil {
+				return err
+			}
+			res, err := st.Search(store.SearchRequest{
+				Query: args[0], Project: project, Ref: ref, Password: password,
+				ExcludePads: excludePad, Regexp: asRegexp, Word: word, CaseSensitive: matchCase,
+				Author: author, Kind: kind, Before: beforeTS, After: afterTS,
+				Oldest: oldest, Limit: limit,
+			})
+			if err != nil {
+				return err
+			}
+			errOut := cmd.ErrOrStderr()
+			for _, warn := range res.Warnings {
+				fmt.Fprintln(errOut, "warning:", warn)
+			}
+			// No matches means NOTHING on stdout, header row included — grep's convention,
+			// and here it is a contract rather than a nicety: a caller doing
+			// `search … 2>/dev/null | wc -l` reads a lone header as one result. Everything
+			// a person needs to interpret the silence is on stderr, where it does not
+			// count as output.
+			if len(res.Hits) > 0 {
+				w := tabwriter.NewWriter(cmd.OutOrStdout(), 2, 4, 2, ' ', 0)
+				fmt.Fprintln(w, "REF\tSECTION\tWHERE\tAUTHOR\tMATCH")
+				for _, h := range res.Hits {
+					where := "L" + strconv.Itoa(h.Line)
+					if h.InTitle {
+						where = "title"
+					}
+					fmt.Fprintf(w, "%s\t§%d\t%s\t%s\t%s\n", h.Ref, h.Section, where, h.Author,
+						truncateRunes(h.Text, searchTextWidth))
+				}
+				if err := w.Flush(); err != nil {
+					return err
+				}
+			}
+			// The summary goes to stderr so the table stays pipeable, and it is printed even
+			// when nothing matched: "0 hits in 12 pads" and "0 hits, 12 pads skipped" are
+			// different answers to the same search.
+			//
+			// What was NOT searched belongs on that same line rather than only on the one
+			// below it. A reader who takes in one line takes in the wrong answer otherwise,
+			// and this is precisely the shape of silent miss the command exists to avoid.
+			summary := fmt.Sprintf("%d match(es) in %d pad(s) searched", len(res.Hits), res.Scanned)
+			if len(res.Skipped) > 0 {
+				summary += fmt.Sprintf(", %d pad(s) NOT searched (protected)", len(res.Skipped))
+			}
+			fmt.Fprintln(errOut, summary)
+			if res.Truncated {
+				fmt.Fprintf(errOut, "stopped at --limit %d; there may be more\n", limit)
+			}
+			if len(res.Skipped) > 0 {
+				fmt.Fprintf(errOut, "not searched: %s\n", strings.Join(res.Skipped, ", "))
+			}
+			return nil
+		},
+	}
+	dir.bind(cmd)
+	f := cmd.Flags()
+	f.StringVar(&project, "project", "", "only search pads of this project")
+	f.StringVar(&ref, "pad", "", "only search this pad (the only way to search a protected one)")
+	f.StringVar(&password, "password", "", "the pad's password (with --pad, when protected)")
+	f.StringSliceVar(&excludePad, "exclude-pad", nil, "skip these pads (repeatable) — e.g. the one being argued in today")
+	// --author, not --as: everywhere else --as says who YOU are, and this names whose
+	// sections to look at. One flag cannot mean both without being read as the wrong one.
+	f.StringVar(&author, "author", "", "only sections written by this author")
+	f.StringVar(&kind, "kind", "", "only sections of one stream: message, task or rules")
+	f.StringVar(&before, "before", "", "only sections written before this: a date (2026-07-01) or an age (30d)")
+	f.StringVar(&after, "after", "", "only sections written after this: a date (2026-07-01) or an age (30d)")
+	f.BoolVar(&oldest, "oldest", false, "earliest first — where something was first said, not last repeated")
+	f.BoolVar(&asRegexp, "regexp", false, "read the pattern as a regular expression")
+	f.BoolVar(&word, "word", false, "match whole words only")
+	f.BoolVar(&matchCase, "case-sensitive", false, "match case exactly (default: ignore case)")
+	f.IntVar(&limit, "limit", 0, "stop after this many hits (0 = no cap)")
+	return cmd
+}
+
+// parseWhen reads a point in time written either way people naturally reach for one: an
+// absolute date ("2026-07-01", or a full RFC3339 stamp) or an AGE ("30d", "12h"), which
+// is `purge --older-than`'s vocabulary and means "that long ago". Empty is no bound.
+//
+// It returns unix seconds because that is what a section's timestamp is; 0 means unset,
+// which is safe here for the same reason it is safe everywhere else in this file — a pad
+// written at the epoch is not a case the store can produce.
+func parseWhen(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	if d, err := parseDuration(s); err == nil {
+		return time.Now().Add(-d).Unix(), nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+			return t.Unix(), nil
+		}
+	}
+	return 0, fmt.Errorf("invalid time %q (want a date like 2026-07-01 or an age like 30d)", s)
+}
+
+// truncateRunes shortens a line for the table without cutting a multi-byte character in
+// half — the searches this exists for are frequently not ASCII.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 func newPadWaitCmd() *cobra.Command {
