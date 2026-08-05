@@ -100,12 +100,15 @@ export function showRules(scope, rules, opts = {}) {
       ));
     }
     // The digest is a machine detail, so it goes last and says what it is FOR. A person
-    // never types it; an agent quotes it on its first post.
+    // never types it; an agent quotes it to prove it read this version. Which POST it has
+    // to quote on is the deployment's `rules.reack`, so the sentence does not promise one:
+    // saying "on its first post" was true of one setting and quietly wrong under the other,
+    // which is worse than saying less.
     if (current.digest) {
       parts.push(el("p", { class: "rules__digest" },
-        el("span", { text: "An agent joining this pad must quote the code " }),
+        el("span", { text: "An agent posting here quotes the code " }),
         el("code", { text: current.digest }),
-        el("span", { text: " on its first post, which is how it proves it read the rules." }),
+        el("span", { text: ", which is how it proves it read this version of the rules." }),
       ));
     }
     if (!layers.length) {
@@ -125,6 +128,26 @@ export function showRules(scope, rules, opts = {}) {
     });
     const replace = el("input", { type: "checkbox", checked: !!layer?.replace });
     const status = el("div", { class: "rules__status" });
+    // Announcing the change into the pads it binds. ON by default, because that is what
+    // editing a rule is FOR: a version nobody is told about binds only whoever happens to
+    // post next, and the person editing has no other way to reach an agent mid-task. The
+    // case for announcing nothing — a typo fix — is the rarer one, and it is one click away.
+    //
+    // The count arrives from the server a moment later; the box is usable before it does,
+    // because waiting on a number to allow a click makes the dialog feel broken on a slow
+    // store.
+    const notify = el("input", { type: "checkbox", checked: true });
+    const notifyCount = el("span", { class: "muted", text: "" });
+    // The pad level has nothing to announce: its rules ARE a section, and every waiter on
+    // that pad wakes for it whatever their selectors say.
+    const notifiable = level !== "pad";
+    if (notifiable) {
+      api.rulesNotifyTargets(level === "project" ? scope.project : null)
+        .then((t) => { notifyCount.textContent = " " + notifySummary(t); })
+        // A count that cannot be fetched must not read as zero. The box still works; only
+        // the preview is missing, and saying so is better than a number nobody can trust.
+        .catch(() => { notifyCount.textContent = " (could not count the pads this would reach)"; });
+    }
     // The version this editor opened on. Held HERE rather than read at save time, because
     // that is the whole question the server is being asked: is what I am about to replace
     // still the thing I was shown when I started typing. It moves only when the person
@@ -138,13 +161,21 @@ export function showRules(scope, rules, opts = {}) {
         save.disabled = true;
         status.textContent = "saving…";
         try {
-          current = await write(scope, level, area.value, replace.checked, openedAt);
+          current = await write(scope, level, area.value, replace.checked, openedAt,
+            notifiable && notify.checked);
+          const sent = current.notified;
           if (editOnly) {
             // The caller repaints from onChange, so the page behind already shows the
             // new text; a toast says it landed without making them dismiss anything.
             d.close();
-            toast(`${levelTitle(level, scope)} — rules saved`, { type: "success" });
+            toast(`${levelTitle(level, scope)} — rules saved${notifiedSuffix(sent)}`, { type: "success" });
             return;
+          }
+          if (sent) {
+            // Shown even on the happy path. The person asked for other people's pads to be
+            // written into; how many, and how many were left out, is the result of what
+            // they just did — not a detail to go looking for.
+            toast(`Rules saved${notifiedSuffix(sent)}`, { type: sent.failed ? "warn" : "success" });
           }
           render();
         } catch (err) {
@@ -194,6 +225,18 @@ export function showRules(scope, rules, opts = {}) {
       level === "pad"
         ? el("p", { class: "rules__hint muted", text: "Saved as a new section by “scratchpad”. The previous version stays in the pad as history, and this does not take anyone's turn." })
         : null,
+      // Last thing above the buttons: it is a decision about the save, taken once the text
+      // is written, not a property of the rules themselves.
+      // The label and its count are ONE grid cell, wrapped together: the layout puts the
+      // control in a column of its own, so a third child would drop onto a second row
+      // underneath the checkbox rather than sitting after the text.
+      notifiable
+        ? el("label", { class: "rules__notify" }, notify,
+            el("span", {}, el("span", { text: "Tell the agents on the affected pads" }), notifyCount))
+        : null,
+      notifiable
+        ? el("p", { class: "rules__hint muted", text: "Adds a short notice to each pad, which wakes anyone waiting there. Agents already have to re-read changed rules before their next post; this is what reaches the ones that are mid-task." })
+        : null,
       status,
       conflict,
     );
@@ -213,10 +256,10 @@ export function showRules(scope, rules, opts = {}) {
   // ifDigest is the version of THAT level the editor opened on. It is per-level rather
   // than the combined digest above, because a person editing this pad's rules has no way
   // to resolve — and no business being blocked by — someone else's change to the store's.
-  async function write(sc, level, text, replace, ifDigest) {
+  async function write(sc, level, text, replace, ifDigest, notify) {
     let out;
-    if (level === "store") out = await api.setStoreRules(text, replace, ifDigest);
-    else if (level === "project") out = await api.setProjectRules(sc.project, text, replace, ifDigest);
+    if (level === "store") out = await api.setStoreRules(text, replace, ifDigest, notify);
+    else if (level === "project") out = await api.setProjectRules(sc.project, text, replace, ifDigest, notify);
     else out = await api.setPadRules(sc.ref, text, replace, ifDigest);
     opts.onChange?.(out);
     return out;
@@ -246,6 +289,42 @@ function canEdit(scope, level) {
   if (level === "store") return true;
   if (level === "project") return scope.kind !== "store" && !!scope.project;
   return scope.kind === "pad" && !!scope.ref;
+}
+
+// notifySummary is the count beside the checkbox: how many pads, out of how many, and why
+// the rest are not included.
+//
+// The denominator and the reasons are not decoration. "12 pads" invites two opposite wrong
+// conclusions — that the store only has 12, or that 300 are about to be written into — and
+// the reasons are what tell a person their protected pad was left out BEFORE they rely on
+// having reached it.
+function notifySummary(t) {
+  const total = t.in_scope || 0;
+  const n = (t.refs || []).length;
+  if (!total) return "(no pads here yet)";
+  // Listed in a fixed order — the store's own (SkipOrder), which the CLI prints in too.
+  // Iterating the object would follow whatever the JSON happened to hold, so the same
+  // store would describe itself differently in two places, and neither line would diff.
+  const why = [
+    ["quiet", `quiet for over ${t.active_days}d`],
+    ["continued", "already continued"],
+    ["full", "at their section limit"],
+  ];
+  const skipped = why
+    .filter(([reason]) => (t.skipped || {})[reason] > 0)
+    .map(([reason, label]) => `${t.skipped[reason]} ${label}`);
+  const tail = skipped.length ? ` — skipping ${skipped.join(", ")}` : "";
+  return `(${n} of ${total}${tail})`;
+}
+
+// notifiedSuffix is the same honesty after the fact. A failure never turns the save into an
+// error — the rules are stored by then — so this is the only place it can be said.
+function notifiedSuffix(sent) {
+  if (!sent) return "";
+  const n = (sent.notified || []).length;
+  const failed = Object.keys(sent.failed || {}).length;
+  const tail = failed ? `, ${failed} could not be reached` : "";
+  return ` — ${n} pad${n === 1 ? "" : "s"} told${tail}`;
 }
 
 function dialogTitle(scope) {

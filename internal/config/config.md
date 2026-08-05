@@ -95,7 +95,9 @@ a typo can never silently seed a store in the wrong place.
   "rules": {
     "store": "ui",
     "project": "ui",
-    "pad": "opener"
+    "pad": "opener",
+    "reack": "on-change",
+    "notify_active_days": 7
   }
 }
 ```
@@ -181,19 +183,29 @@ Field reference:
   which no UI session may write). Set it only on a machine you are the sole user of.
   There is no origin allow-list here: the UI binds loopback, so the browser's own
   origin is the only one that can ever reach it.
-- **`rules`** — who may WRITE each level of the rules (see *Rules* below for what they
-  are). This is the one group whose defaults deliberately say **no**: rules are the one
-  thing in this store that is EDITED rather than appended, so an overwritten rule is
-  simply gone, with nothing in any pad recording that it once said something else.
+- **`rules`** — who may WRITE each level of the rules, and when agents must RE-READ them
+  (see *Rules* below for what they are). The write defaults deliberately say **no**: rules
+  are the one thing in this store that is EDITED rather than appended, so an overwritten
+  rule is simply gone, with nothing in any pad recording that it once said something else.
 
   | Key | Values | Default | Means |
   |---|---|---|---|
   | `store` | `ui`, `agent` | `ui` | `ui`: the store's rules are the operator's. The Web UI writes them, and so does an editor — `_rules.md` is a markdown file in a directory you own. The CLI and MCP are refused with `rules_readonly`. `agent`: `scratchpad rules --set` works too. |
   | `project` | `ui`, `agent` | `ui` | The same, for `projects/<p>/_rules.md`. |
   | `pad` | `opener`, `any` | `opener` | `opener`: only the agent that wrote the pad's **section 1** may write its rules. A pad is nearly always opened by the agent handing out the work, so this leaves the house style with whoever framed the job. `any`: any agent on the pad may. |
+  | `reack` | `on-change`, `once` | `on-change` | When the read gate fires again for an agent already on a pad. `on-change`: whenever the rules in force change, at ANY level — the next post is refused until it quotes the new digest. `once`: the rules are read on the way in and never asked for again. |
+  | `notify_active_days` | a number of days | `7` | How far back `--notify` reaches: a pad with no activity in this long has nobody parked on it to wake. Bounds a fan-out, so `0` means "take the default" rather than "no limit". |
 
   A value this binary does not know makes the marker fail to LOAD rather than fall back
   to something looser than you asked for.
+
+  **On `reack`.** `once` was the original behaviour and it makes a rules EDIT nearly inert:
+  every agent already on a pad goes on posting under the version it read on its way in, so
+  the only way to reach them is for a person to interrupt each agent session by hand —
+  which costs that person their time and each agent its context, and still leaves the new
+  rules binding nobody but the next arrival. `on-change` is the default for that reason.
+  Switching it on for an existing store re-gates every live pad once, since sections
+  written before it carry no record of what their author had read.
 
   The Web UI is exempt from all three — it is the surface they point at. An agent that
   wants the store's or a project's rules changed puts its proposed text in its reply and
@@ -331,12 +343,13 @@ first.
 | Key | Meaning | Absent means |
 |---|---|---|
 | `ts` | when it was posted (RFC 3339, UTC) | — always present |
-| `kind` | `message` (the conversation), `task` (the work ledger) or `rules` | `message` |
+| `kind` | `message` (the conversation), `task` (the work ledger), `rules`, `continued` (this pad was full), or `notice` (the tool reporting something about the pad) | `message` |
 | `to` | comma-separated authors it is addressed to | broadcast |
 | `re` | the section number it answers | not a reply |
 | `task` | the task number it concerns | unrelated to a task |
 | `status` | `open`, `wip`, `blocked`, `done` or `dropped` | no change |
 | `rules` | `replace` on a rules section: ignore the project and store rules | extend them |
+| `acked` | the digest of the rules this section's author had read | it quoted none (it already held one, or there are no rules) |
 
 - **Addressing is not access control.** Every agent can read every section; `to` only
   decides who is *woken* by `pad wait --wake-for me`. Nothing is ever hidden by it.
@@ -381,10 +394,56 @@ Three levels apply in order, each **extending** the one above:
 - A pad's rules are a normal append, so **several rules sections are versions of one
   rule set**: the last one is in force and the earlier ones stay as history. Removing
   the file removes them with it, like everything else about a pad.
-- **The read gate**: an author posting to a pad for the FIRST time must quote the digest
-  of the rules in force (`--ack-rules` / `ack_rules`), else `rules_unread` — which hands
-  back the rules and the digest to repeat. It fires once per author per pad; later rule
-  changes travel as an ordinary broadcast section instead.
+- **The read gate**: an author posting to a pad must quote the digest of the rules in
+  force (`--ack-rules` / `ack_rules`), else `rules_unread` — which hands back the rules and
+  the digest to repeat. When it fires again is `rules.reack`: by default whenever the rules
+  CHANGE, at any of the three levels. The proof is kept in the pad, as `acked` on the
+  section that quoted it, so it survives restarts and needs no state outside the files.
+  `pad get` and `pad wait` hand an agent the rules whenever it owes a read, so the ordinary
+  path is to meet them on arrival rather than in a refusal.
+- **Announcing a change**: the gate makes a new rule BIND, it does not make it ARRIVE — an
+  agent mid-task would otherwise find out only when it next posts. So a change to either
+  FILE level is announced **by default**: a `kind: notice` section in each pad the level
+  binds, which wakes everyone waiting there whatever their wake selectors say. The Web UI's
+  rules dialog ships the box ticked; `scratchpad rules --set` announces unless you pass
+  `--notify=false`. A pad's own rules need no such thing — they are already a section in
+  that pad. Pads that are already continued, at their section limit, or quiet for longer
+  than `rules.notify_active_days` are skipped, and the count of each is reported. A
+  **password-protected pad is still told**: the password keeps other agents out of that
+  pad, it is not a reason to leave it uninformed about rules that bind it — and the notice
+  says nothing beyond "the rules changed". Reading and posting there still need the
+  password.
+
+### What happens when you change the rules
+
+Editing the store's or a project's rules in the Web UI, with the box left ticked:
+
+1. **You save.** The dialog sends the new text plus the version it opened on. If somebody
+   changed those rules meanwhile you get `rules_conflict` — nothing is written and nobody
+   is told, and your text stays on screen beside the version that won, to merge from.
+2. **The file is written.** From here the change is real: every agent on every pad the
+   level binds is bound by it, whether or not anyone is told.
+3. **Each affected pad gains a notice** — one short section written by `scratchpad`,
+   which takes nobody's turn and wakes everyone waiting on that pad. Pads that are
+   continued, full, or quiet for longer than `rules.notify_active_days` are skipped and
+   counted; a password-protected pad is told like any other. The toast reports what
+   happened: `rules saved — 6 pads told`.
+
+   This step runs **after** the file is written and never fails the save — the rules are
+   already stored, so a pad that could not be reached is reported (`1 could not be
+   reached`), not treated as a failed edit.
+
+Then, on the agents' side, whichever comes first:
+
+| Where the agent is | How it finds out |
+|---|---|
+| waiting (`pad wait`) | woken by the notice, whatever its wake selectors say |
+| busy, not waiting | its next `pad get --as <name>` / `pad wait` hands it the rules |
+| not running | its next post is refused with `rules_unread`, carrying the full text |
+
+The agent reads them, quotes the digest on its next post, and is not asked again until the
+rules change once more. Untick the box and steps 1–2 still happen exactly the same — you
+have changed what binds everyone, you have simply not interrupted anyone to say so.
 
 ### Changing rules: who, and on top of what
 

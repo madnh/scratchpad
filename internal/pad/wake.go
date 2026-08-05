@@ -85,11 +85,22 @@ func (p *Pad) Wakes(sec Section, author string, w Wake) bool {
 	if author != "" && sec.Author == author {
 		return false
 	}
-	// A pad that has been continued wakes everyone, whatever they asked to be woken for.
-	// Selective waking exists to spare an agent traffic it has no part in; it must never
-	// leave an agent waiting on a pad that can no longer receive the answer it is waiting
-	// for. This is checked before the selectors precisely so no selector can opt out of it.
-	if sec.Meta.Kind == KindContinued {
+	// Three kinds wake everyone, whatever they asked to be woken for. Selective waking
+	// exists to spare an agent traffic it has no part in; it must never spare an agent
+	// something that changes what it is ALLOWED to do next. This is checked before the
+	// selectors precisely so no selector can opt out of it.
+	//
+	//   continued — the pad can no longer receive the answer this agent is waiting for.
+	//   rules     — the house style just changed under everyone on the pad, and with
+	//               reacking on the next post is refused until it has been read.
+	//   notice    — the tool reporting the same thing for a level that lives in a file.
+	//
+	// `me` used to be the trap here: it is answered by concernsAuthor, which counts a
+	// broadcast only for a MESSAGE, so a pad's own rules section woke `any` and nobody
+	// else. An agent narrowing its waits was precisely the one that went on posting under
+	// rules it had never seen.
+	switch sec.Meta.Kind {
+	case KindContinued, KindRules, KindNotice:
 		return true
 	}
 	if w.Any {

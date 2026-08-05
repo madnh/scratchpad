@@ -162,10 +162,16 @@ func TestPadRulesOwnershipSurvivesTheUpgrade(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("the opener must be able to write the pad's rules: %v", err)
 	}
-	// Anyone else may not, and the refusal must name the opener.
-	_, err := s.Post(PostRequest{
+	// Anyone else may not, and the refusal must name the opener. The ack is quoted because
+	// the line above just changed what binds this pad: the read gate runs first, and a
+	// refusal about ownership is only reachable once there is nothing left unread.
+	rules, err := s.PadRules(ref, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Post(PostRequest{
 		Ref: ref, Author: "backend", Title: "rules", Content: "- be long",
-		Meta: Meta{Kind: pad.KindRules}, RulesDigest: "none",
+		Meta: Meta{Kind: pad.KindRules}, RulesDigest: "none", AckRules: rules.Digest,
 	})
 	if err == nil {
 		t.Fatal("a non-opener wrote the pad's rules")

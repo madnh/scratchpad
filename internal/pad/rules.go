@@ -191,6 +191,24 @@ func BuildRules(storeText string, storeReplace bool, projectName, projectText st
 	return r
 }
 
+// WithRules returns a view of this pad as it will be once a rules section carrying text is
+// appended — the pad plus that section, sharing nothing that a caller could write through.
+//
+// It exists so the store can ask what an agent will be bound by AFTER its own post lands,
+// which is the only honest thing to record as that post's receipt. The alternative is to
+// append first and compute second, and there is no "second" under an exclusive flock that
+// the append releases.
+//
+// Nothing here reaches disk: it is a temporary pad used to answer one question, and the
+// section it adds carries no number because BuildRules never asks for one.
+func (p *Pad) WithRules(text string, replace bool) *Pad {
+	next := *p
+	next.Sections = append(append([]Section(nil), p.Sections...), Section{
+		Author: SystemAuthor, Content: text, Meta: Meta{Kind: KindRules, Replace: replace},
+	})
+	return &next
+}
+
 // NoRules is the version of a level that holds no rules. It is a WORD rather than an
 // empty string because it has to be typed: a writer filling an empty level quotes it the
 // same way it would quote a hex digest, and `--if-digest ""` is indistinguishable from
@@ -255,29 +273,89 @@ func rulesTail(text string) string {
 // "have you read this" token, not a security boundary — like every other rule here.
 const DigestLen = 8
 
-// CheckAck is the one mechanical part of rules: an author posting to a pad for the FIRST
-// time must quote the digest of the rules in force.
+// ReackPolicy says WHEN the read gate fires again for an author who is already on a pad.
 //
-// It is deliberately narrow. It fires once per author per pad, because that is when an
-// agent is about to write its first message with no idea how this pad works; after that
-// it never gets in the way of a conversation. Later rule changes travel the way anything
-// else does — the rules section is a broadcast, so it wakes the pad.
+// The two answers are not a preference, they are two readings of what rules are FOR. Under
+// ReackOnce they are an induction: you are told how this pad works on your way in, and are
+// then left alone. Under ReackOnChange they are a standing instruction: every version of
+// them binds everyone, so a version nobody read binds nobody.
+type ReackPolicy string
+
+const (
+	// ReackOnce fires the gate once per author per pad — the behaviour before there was a
+	// policy. A rules change reaches whoever happens to be listening and no one else.
+	ReackOnce ReackPolicy = "once"
+	// ReackOnChange fires it again whenever the rules in force change, at any level.
+	ReackOnChange ReackPolicy = "on-change"
+)
+
+// CheckAck is the one mechanical part of rules: before an author may post, it must have
+// quoted the digest of the rules in force.
+//
+// WHEN that bites is the policy's question. Under ReackOnce it is the author's first post
+// to this pad — the moment an agent is about to write with no idea how the pad works.
+// Under ReackOnChange it is the first post under EACH version: the receipt an earlier post
+// left behind (Meta.Acked) has to name the digest in force now.
+//
+// The receipt is why this works across a rules FILE. A digest spans all three levels, so a
+// store-wide edit moves it exactly as a pad's own rules section does, and neither one has
+// to be noticed by an agent that was not running at the time — the refusal is waiting for
+// it whenever it comes back.
 //
 // Being unable to know whether an agent truly READ them, this checks the one thing that
 // is observable: the digest can only be quoted by something that fetched the rules.
-func CheckAck(p *Pad, author, ack string, r Rules) error {
-	if r.Empty() || (p != nil && p.HasPosted(author)) {
+func CheckAck(p *Pad, author, ack string, r Rules, policy ReackPolicy) error {
+	if r.Empty() {
 		return nil
 	}
 	if strings.EqualFold(strings.TrimSpace(ack), r.Digest) {
 		return nil
 	}
-	// A pad being created has no pad to have posted in yet, so the rules being quoted are
-	// the project's. Saying "this pad" there would point at something that does not exist.
+	if p != nil && p.hasReadRules(author, r.Digest, policy) {
+		return nil
+	}
+	// Three refusals, because they are three different mistakes and the remedy differs in
+	// what the agent has to go and do. Telling a returning agent "you have not posted here
+	// before" is worse than unhelpful — it is false, so the agent looks for the wrong bug.
 	where := "this pad has rules and you have not posted here before"
-	if p == nil {
+	switch {
+	case p == nil:
+		// A pad being created has no pad to have posted in yet, so the rules being quoted
+		// are the project's. Saying "this pad" would point at something that does not exist.
 		where = "this project has rules"
+	case p.HasPosted(author):
+		where = "the rules in force here have CHANGED since you last posted"
 	}
 	return Coded(CodeRulesUnread,
 		"%s — read them, then repeat with the rules digest %s:\n\n%s", where, r.Digest, r.Text)
+}
+
+// hasReadRules answers "has this author already satisfied the gate", which is the only
+// place the policy is consulted.
+func (p *Pad) hasReadRules(author, digest string, policy ReackPolicy) bool {
+	// Named as "the one value that stops asking", never as `!= ReackOnChange`. Every other
+	// value — a typo that reached the marker, a Config assembled in code that predates this
+	// field — then falls to the side that asks again. The opposite form excuses every agent
+	// on the deployment from the gate, silently, and the symptom is agents quietly obeying
+	// rules nobody replaced. Same reason checkPadRulesWrite tests `!= RulesWriteAny`.
+	if policy == ReackOnce {
+		return p.HasPosted(author)
+	}
+	return p.HasAcked(author, digest)
+}
+
+// HasAcked reports whether an author has posted here quoting this exact rules digest. Like
+// HasPosted it is derived from the transcript and nothing else: no per-agent ack list is
+// kept anywhere, so a hand-deleted section takes its receipt with it — which is right, since
+// what the pad no longer says, nobody said.
+func (p *Pad) HasAcked(author, digest string) bool {
+	if digest == "" {
+		return true
+	}
+	for _, sec := range p.Sections {
+		if sec.Author == author && strings.EqualFold(sec.Acked, digest) {
+			return true
+		}
+	}
+	return false
 }

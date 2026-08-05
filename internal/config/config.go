@@ -206,14 +206,45 @@ type RulesPolicy struct {
 	Project string `json:"project,omitempty"`
 	// Pad takes RulesWriteOpener (default) or RulesWriteAny.
 	Pad string `json:"pad,omitempty"`
+
+	// Reack says when the READ gate fires again — pad.ReackOnChange (default) or
+	// pad.ReackOnce. It is the one setting here that is not about who may write: it is
+	// about whether a rule that changed reaches the agents it now binds.
+	//
+	// The default is on-change because the other answer makes a rules EDIT almost
+	// inert. Under `once`, every agent already on a pad goes on posting under the version
+	// it read on the way in, and the only way to reach it is for a person to interrupt
+	// each agent session by hand — which costs that person their time and the agent its
+	// context, and still ends with rules that bind whoever happens to be new.
+	Reack string `json:"reack,omitempty"`
+
+	// NotifyActiveDays bounds which pads a rules change may be announced INTO when the
+	// person editing asks for it (see store.NotifyRulesChanged). A pad nobody has posted
+	// in for this long has no agent parked on it to wake, and writing into it would buy a
+	// section in every pad the store has ever held.
+	//
+	// It bounds a fan-out, so 0 does not mean "unlimited" — it means take the default.
+	// An operator who really wants every live pad says so with a large number, which at
+	// least appears in the marker as a decision somebody made.
+	NotifyActiveDays int `json:"notify_active_days,omitempty"`
 }
 
 // DefaultRulesPolicy is what a marker that says nothing about rules gets.
 var DefaultRulesPolicy = RulesPolicy{
-	Store:   RulesWriteUI,
-	Project: RulesWriteUI,
-	Pad:     RulesWriteOpener,
+	Store:            RulesWriteUI,
+	Project:          RulesWriteUI,
+	Pad:              RulesWriteOpener,
+	Reack:            ReackOnChange,
+	NotifyActiveDays: 7,
 }
+
+// The values RulesPolicy.Reack accepts. They mirror pad.ReackPolicy, which is where the
+// meaning lives; config's copy exists so the marker can be validated without the domain
+// package having to know what a marker is.
+const (
+	ReackOnce     = "once"
+	ReackOnChange = "on-change"
+)
 
 // Config is the marker file: a schema header (type/version), identity, and optional
 // setting groups. `init` writes only the header + identity; the optional groups are
@@ -382,6 +413,12 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Rules.Pad) == "" {
 		c.Rules.Pad = DefaultRulesPolicy.Pad
 	}
+	if strings.TrimSpace(c.Rules.Reack) == "" {
+		c.Rules.Reack = DefaultRulesPolicy.Reack
+	}
+	if c.Rules.NotifyActiveDays <= 0 {
+		c.Rules.NotifyActiveDays = DefaultRulesPolicy.NotifyActiveDays
+	}
 }
 
 // validateRules rejects a policy value this binary does not know. Failing to LOAD is the
@@ -396,6 +433,10 @@ func (c *Config) validateRules() error {
 		{"store", c.Rules.Store, []string{RulesWriteUI, RulesWriteAgent}},
 		{"project", c.Rules.Project, []string{RulesWriteUI, RulesWriteAgent}},
 		{"pad", c.Rules.Pad, []string{RulesWriteOpener, RulesWriteAny}},
+		// Same reasoning as the three above, one step further: a misspelt `reack` that
+		// degraded to a default would degrade to NOT asking, and an operator who typed
+		// "on_change" would believe every agent was being re-gated while none was.
+		{"reack", c.Rules.Reack, []string{ReackOnce, ReackOnChange}},
 	} {
 		if !slices.Contains(f.allowed, f.value) {
 			return fmt.Errorf("rules.%s = %q is not one of %s", f.name, f.value, strings.Join(f.allowed, ", "))

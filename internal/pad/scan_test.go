@@ -173,6 +173,13 @@ func TestMetaLineRoundTrip(t *testing.T) {
 		{Kind: KindMessage, To: []string{"backend", "erp"}, Re: 9},
 		{Kind: KindTask, Task: 3, To: []string{"ios", "android"}, Status: StatusOpen},
 		{Kind: KindTask, Task: 12, Status: StatusDone, Re: 4},
+		{Kind: KindNotice},
+		{Kind: KindRules, Replace: true},
+		// The receipt rides here rather than anywhere else precisely so it round-trips
+		// like every other field: it is read back by the gate on every subsequent post,
+		// and a receipt that does not survive the file is a gate that never stops asking.
+		{Kind: KindMessage, Acked: "3f9a1c22"},
+		{Kind: KindRules, Replace: true, Acked: "3f9a1c22"},
 	}
 	for _, want := range cases {
 		line := renderMetaLine(ts, want)

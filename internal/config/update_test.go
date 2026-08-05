@@ -66,7 +66,7 @@ func TestUpdateMarkerWritesHotAndKeepsTheRest(t *testing.T) {
 	if len(got.TCP.TokenDigests) != 1 || got.TCP.TokenDigests[0] != "sha256:secret" {
 		t.Errorf("tcp token digests were lost: %+v", got.TCP)
 	}
-	if got.Rules != (RulesPolicy{Store: RulesWriteUI, Project: RulesWriteUI, Pad: RulesWriteOpener}) {
+	if got.Rules != DefaultRulesPolicy {
 		t.Errorf("rules policy was lost: %+v", got.Rules)
 	}
 	if fi, err := os.Stat(MarkerPath(dir)); err != nil || fi.Mode().Perm() != 0o600 {

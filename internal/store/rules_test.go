@@ -13,6 +13,22 @@ import (
 // setRules writes one of the FILE levels quoting whatever version is currently there. The
 // tests that are not ABOUT the compare-and-set go through this, so the check stays tested
 // in one place instead of being half-tested everywhere.
+// testStoreReack is testStore with the READ gate's policy spelled out, for the two tests
+// that are about the difference between them.
+func testStoreReack(t *testing.T, reack string) *Store {
+	t.Helper()
+	limits := config.DefaultLimits
+	limits.MaxSectionsPerPad = 5
+	limits.MaxPadsPerProject = 3
+	return testStorePolicy(t, limits, config.RulesPolicy{
+		Store:            config.RulesWriteAgent,
+		Project:          config.RulesWriteAgent,
+		Pad:              config.RulesWriteAny,
+		Reack:            reack,
+		NotifyActiveDays: config.DefaultRulesPolicy.NotifyActiveDays,
+	})
+}
+
 func setRules(t *testing.T, s *Store, project, text string, replace bool) {
 	t.Helper()
 	var cur string
@@ -124,8 +140,12 @@ func TestRulesFilesAreNotPads(t *testing.T) {
 	}
 }
 
+// TestPostGateOnFirstPost pins the `once` policy: the rules are read on the way IN, and
+// after that the gate never interrupts a conversation again. It is the older of the two
+// readings, and still the right one for a deployment whose rules are an induction rather
+// than a standing instruction — see TestPostGateReacksOnChange for the other.
 func TestPostGateOnFirstPost(t *testing.T) {
-	s := testStore(t)
+	s := testStoreReack(t, config.ReackOnce)
 	setRules(t, s, "", "- be brief", false)
 
 	// Creating a pad is the author's first post too, so the project's rules gate it.
@@ -163,6 +183,146 @@ func TestPostGateOnFirstPost(t *testing.T) {
 	}
 }
 
+// TestPostGateReacksOnChange is the deployment default, and the whole reason the receipt
+// exists: a rules change reaches agents that were already here, without a person going
+// round the sessions by hand to tell them.
+//
+// It changes the rules at the STORE level deliberately. A pad's own rules arrive as a
+// section an agent can see; a file two directories up does not, and that is the case the
+// receipt has to carry on its own.
+func TestPostGateReacksOnChange(t *testing.T) {
+	s := testStoreReack(t, config.ReackOnChange)
+	setRules(t, s, "", "- be brief", false)
+	first, err := s.ProjectRuleSet("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := s.CreatePad(CreateRequest{
+		Project: "proj", Author: "pm", Title: "kickoff", Content: "starting", AckRules: first.Digest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "ios", Title: "hi", Content: "hello", AckRules: first.Digest,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing has changed yet, so neither of them is asked again. The gate must cost a
+	// running conversation nothing while the rules hold still.
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "pm", Title: "ok", Content: "fine"}); err != nil {
+		t.Fatalf("an unchanged rule set must not gate anybody: %v", err)
+	}
+
+	setRules(t, s, "", "- be brief\n- and say which device", false)
+	second, err := s.ProjectRuleSet("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Digest == first.Digest {
+		t.Fatal("the fixture did not actually change the rules")
+	}
+
+	// Both of them are gated now — including pm, who opened the pad. Ownership is not
+	// exemption: the rules bind whoever is writing.
+	for _, author := range []string{"ios", "pm"} {
+		_, err := s.Post(PostRequest{Ref: p.Ref(), Author: author, Title: "more", Content: "x"})
+		if !HasCode(err, CodeRulesUnread) {
+			t.Fatalf("%s must be re-gated after a store rules change: %v", author, err)
+		}
+		if !strings.Contains(err.Error(), "say which device") {
+			t.Fatalf("the refusal must carry the NEW rules, not the ones already read: %v", err)
+		}
+	}
+	if _, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "ios", Title: "more", Content: "x", AckRules: second.Digest,
+	}); err != nil {
+		t.Fatalf("quoting the new digest must pass: %v", err)
+	}
+	// And the receipt sticks: ios is not asked again for a version it has now read.
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "pm", Title: "ack", Content: "y", AckRules: second.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "ios", Title: "again", Content: "z"}); err != nil {
+		t.Fatalf("a receipt must survive the post that left it: %v", err)
+	}
+}
+
+// An agent that WRITES a pad's rules has read them by construction — it typed them. Being
+// refused on its own next post for the version it just authored is the kind of nonsense
+// that teaches agents to route around a mechanism.
+func TestWritingRulesLeavesItsOwnReceipt(t *testing.T) {
+	s := testStoreReack(t, config.ReackOnChange)
+	p, _, err := create(s, "proj", "pm", "kickoff", "starting", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setPadRules(t, s, p.Ref(), "pm", "- keep it under 15 lines")
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "ios", Title: "hi", Content: "hello",
+		AckRules: mustRules(t, s, p.Ref()).Digest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "pm", Title: "on we go", Content: "x"}); err != nil {
+		t.Fatalf("the author of the rules must not be gated by them: %v", err)
+	}
+}
+
+// A pad that fills up carries its rules into the successor — so it has to carry the
+// receipts too. Otherwise continuation, which exists so a conversation survives a full
+// pad, would hand every agent a refusal in the new pad for rules it read in the old one.
+func TestReceiptSurvivesContinuation(t *testing.T) {
+	limits := config.DefaultLimits
+	limits.MaxSectionsPerPad = 3
+	limits.OnFull = config.OnFullContinue
+	s := testStorePolicy(t, limits, config.RulesPolicy{
+		Store: config.RulesWriteAgent, Project: config.RulesWriteAgent, Pad: config.RulesWriteAny,
+		Reack: config.ReackOnChange, NotifyActiveDays: 7,
+	})
+	setRules(t, s, "", "- be brief", false)
+	rules, err := s.ProjectRuleSet("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := s.CreatePad(CreateRequest{
+		Project: "proj", Author: "pm", Title: "kickoff", Content: "starting", AckRules: rules.Digest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "ios", Title: "two", Content: "b", AckRules: rules.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "pm", Title: "three", Content: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	// This one does not fit, so it lands in the successor.
+	res, err := s.Post(PostRequest{Ref: p.Ref(), Author: "ios", Title: "four", Content: "d"})
+	if err != nil {
+		t.Fatalf("the post that fills the pad must continue it, not be refused: %v", err)
+	}
+	if res.ContinuedFrom == "" {
+		t.Fatal("the fixture did not actually continue the pad")
+	}
+	// ios arrived in a pad it never chose to join, with a transcript that holds none of
+	// its history. It must not be asked to read again for that.
+	if _, err := s.Post(PostRequest{Ref: res.Pad.Ref(), Author: "pm", Title: "five", Content: "e",
+		AckRules: rules.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(PostRequest{Ref: res.Pad.Ref(), Author: "ios", Title: "six", Content: "f"}); err != nil {
+		t.Fatalf("a receipt must cross into the successor: %v", err)
+	}
+}
+
+func mustRules(t *testing.T, s *Store, ref string) pad.Rules {
+	t.Helper()
+	r, err := s.PadRules(ref, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
 // A store with no rules must behave exactly as it did before this feature existed.
 func TestNoRulesNoGate(t *testing.T) {
 	s := testStore(t)
@@ -190,15 +350,18 @@ func TestSetPadRulesIsAnAppendThatTakesNoTurn(t *testing.T) {
 	if res.Section != 2 {
 		t.Fatalf("rules should be section 2, got %d", res.Section)
 	}
-	// pm posted section 1 and the rules section did not hand the turn on, so pm is still
-	// the one who may not post.
-	if _, err := s.Post(PostRequest{Ref: p.Ref(), Author: "pm", Title: "again", Content: "x"}); !HasCode(err, CodeNotYourTurn) {
-		t.Fatalf("rules must not grant a turn: %v", err)
-	}
-
 	rules, err := s.PadRules(p.Ref(), "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	// pm posted section 1 and the rules section did not hand the turn on, so pm is still
+	// the one who may not post. The ack is quoted because the pad had no rules when pm
+	// opened it and has some now: the read gate runs before the turn rule, so without it
+	// this would be answered by the wrong refusal.
+	if _, err := s.Post(PostRequest{
+		Ref: p.Ref(), Author: "pm", Title: "again", Content: "x", AckRules: rules.Digest,
+	}); !HasCode(err, CodeNotYourTurn) {
+		t.Fatalf("rules must not grant a turn: %v", err)
 	}
 	if len(rules.Layers) != 1 || rules.Layers[0].Level != pad.LevelPad || rules.Layers[0].Author != SystemAuthor {
 		t.Fatalf("layers = %+v", rules.Layers)
@@ -359,9 +522,18 @@ func TestPadRulesBelongToTheOpener(t *testing.T) {
 	}
 
 	// pad_post carries the same gate: set_rules is not a way around it.
+	//
+	// The ack is quoted because the person just changed these rules, and the read gate runs
+	// BEFORE the ownership one — deliberately, so an agent is never told "those are not
+	// yours to write" about a version it was not shown. Answering that first question is
+	// what makes the second one the answer this test is after.
+	now, err := s.PadRules(p.Ref(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Post(PostRequest{
 		Ref: p.Ref(), Author: "ios", Title: "mine now", Content: "- anything goes",
-		Meta: Meta{Kind: pad.KindRules}, RulesDigest: pad.NoRules,
+		Meta: Meta{Kind: pad.KindRules}, RulesDigest: pad.NoRules, AckRules: now.Digest,
 	}); !HasCode(err, CodeNotRulesOwner) {
 		t.Fatalf("pad_post(set_rules) must obey the policy too: %v", err)
 	}

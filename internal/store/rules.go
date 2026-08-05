@@ -262,28 +262,105 @@ func (s *Store) buildRules(lim config.Limits, project string, p *Pad) (pad.Rules
 // checkRules is the rules gate on the append path, called under the exclusive flock Post
 // already holds, beside the turn rule — the same home every other rule has.
 //
-// It does its work only for an author who has never posted in this pad, which is both the
-// point (an agent about to write its first message here) and what keeps it free: the
-// common append pays one map-free scan of authors and no file I/O at all.
+// It returns the RECEIPT the section should carry: the digest this author has just been
+// admitted under, or "" when the section needs none. The receipt is what makes the gate
+// repeatable, so producing it belongs to the code that decided the author passed — a second
+// place recomputing "did they ack" is a second place that can answer differently.
 //
-// fullPad yields the pad re-parsed WITH bodies in that case, because the rules are a
-// section body and the append path deliberately parses metadata only. The bytes are
-// already in hand, so this costs no extra read.
-func (s *Store) checkRules(lim config.Limits, project string, fullPad func() (*Pad, error), p *Pad, req PostRequest) error {
+// What it costs depends on the policy, and the expensive shape is bounded on purpose:
+//
+//   - `once`: an author who has posted here is waved through by a scan of section authors,
+//     with no file I/O at all. That is the common append.
+//   - `on-change`: the digest has to be computed on every post, because the question is no
+//     longer "have you been here" but "have you read THIS version" — and nothing cheaper
+//     than the digest can answer it. It reads the two rules files, which are small and hot
+//     in the page cache.
+//
+// The pad's own rules are the one part that lives in a section BODY, and the append path
+// parses metadata only. So the full parse is taken only when the pad actually states rules
+// of its own — fullPad re-parses bytes already in hand, so it costs CPU, never a read.
+func (s *Store) checkRules(lim config.Limits, project string, fullPad func() (*Pad, error), p *Pad, req PostRequest, meta Meta) (ackReceipt, error) {
 	// A person editing the rules through the UI is not an agent joining a conversation:
 	// they are the one WRITING the rules, so there is nothing for them to have read.
-	if req.SystemPost || p.HasPosted(req.Author) {
-		return nil
+	if req.SystemPost {
+		return ackReceipt{}, nil
 	}
-	full, err := fullPad()
+	policy := s.reackPolicy()
+	if policy == pad.ReackOnce && p.HasPosted(req.Author) {
+		return ackReceipt{}, nil
+	}
+	// Metadata is enough to answer both halves of the gate — `acked` rides on the section
+	// metadata line precisely so a receipt can be found without reading any bodies. Only a
+	// pad that states its OWN rules needs more, because those are a body.
+	rulesPad := p
+	if p.HasRulesSection() {
+		full, err := fullPad()
+		if err != nil {
+			return ackReceipt{}, err
+		}
+		rulesPad = full
+	}
+	rules, err := s.buildRules(lim, project, rulesPad)
 	if err != nil {
-		return err
+		return ackReceipt{}, err
 	}
-	rules, err := s.buildRules(lim, project, full)
-	if err != nil {
-		return err
+	if err := pad.CheckAck(rulesPad, req.Author, req.AckRules, rules, policy); err != nil {
+		return ackReceipt{}, err
 	}
-	return pad.CheckAck(full, req.Author, req.AckRules, rules)
+	// What the author is about to be bound by is not always what it was just admitted
+	// under: a section that WRITES the pad's rules changes them in the same breath. Its
+	// author has plainly read the new version — it typed it — so the receipt records what
+	// will be in force once this section lands, not what was in force a line earlier.
+	// Without this, every agent that sets a pad's rules is refused on its own next post.
+	digest := rules.Digest
+	if meta.Kind == pad.KindRules {
+		after, err := s.buildRules(lim, project, rulesPad.WithRules(req.Content, meta.Replace))
+		if err != nil {
+			return ackReceipt{}, err
+		}
+		digest = after.Digest
+	}
+	// Whether it is WRITTEN is a separate question. An agent that quotes --ack-rules on
+	// every post is being tidy, not making news; repeating the same digest onto each of its
+	// sections would put a token on most lines of a long pad to say the one thing that was
+	// already true. A continuation asks anyway (see Post), because over there the pad has
+	// no history to have said it in.
+	return ackReceipt{
+		Digest: digest,
+		Needed: digest != "" && !rulesPad.HasAcked(req.Author, digest),
+	}, nil
+}
+
+// ackReceipt is what the gate concluded: the digest this author now holds, and whether the
+// section being appended has to say so. Two values rather than one, because the answer to
+// "what did they read" and the answer to "does this section need to record it" diverge on
+// the two paths that matter — a repeat ack, and a post that lands in a successor pad.
+type ackReceipt struct {
+	Digest string
+	Needed bool
+}
+
+// UnreadRules returns the rules this author still has to read before it may post here, and
+// nil when there is nothing owed. It is what lets a surface hand an agent the rules on the
+// call it ARRIVES with, rather than in the error that rejects the message it already wrote.
+//
+// It asks the gate itself rather than reimplementing "has this author read them". The two
+// answers must not be able to differ: a surface that decided on its own would either
+// withhold rules an agent is about to be refused for, or press rules on an agent that has
+// already read them — and each one teaches agents to distrust the other half.
+func (s *Store) UnreadRules(p *Pad, author string) (*pad.Rules, error) {
+	if author == "" {
+		return nil, nil
+	}
+	rules, err := s.RulesOf(p)
+	if err != nil || rules.Empty() {
+		return nil, err
+	}
+	// The empty ack is the point: this asks what a post carrying no digest would be told.
+	if pad.CheckAck(p, author, "", rules, s.reackPolicy()) == nil {
+		return nil, nil
+	}
+	return &rules, nil
 }
 
 // PadRulesRequest is one write to a pad's own rules.
