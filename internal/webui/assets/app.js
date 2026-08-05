@@ -182,6 +182,11 @@ const router = new Router({
   routes: {
     "/": { title: "Overview", load: () => import("/pages/overview.js") },
     "/pads": { title: "Pads", load: () => import("/pages/pads.js") },
+    // The page narrows this to the query itself once it mounts — the router's title hook
+    // is handed the path PARAMS only, and the question here lives in the query string.
+    // Router order makes that safe: it writes the title before mounting, so the page's
+    // own write is the one that stands.
+    "/search": { title: "Search", load: () => import("/pages/search.js") },
     "/pads/:ref": { title: (p) => p.ref, load: () => import("/pages/pad.js") },
     "/projects": { title: "Projects", load: () => import("/pages/projects.js") },
     "/projects/:name": { title: (p) => `Project ${p.name}`, load: () => import("/pages/project.js") },

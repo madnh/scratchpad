@@ -88,15 +88,23 @@ export function outline() {
   return raw === null ? DEFAULTS.outline : raw !== "off";
 }
 
-// Which half of the rail is showing — the outline or the task board. It is a property
-// of the reader, not of a pad, so it survives navigating between pads.
+// Which third of the rail is showing — the outline, the task board or search. It is a
+// property of the reader, not of a pad, so it survives navigating between pads.
+//
+// Anything unrecognised falls back to the outline rather than being stored as-is: this
+// value comes out of localStorage, which an older build, another tab or a person with
+// devtools can have written.
+const RAILS = ["outline", "tasks", "search"];
+
 export function rail() {
-  return read(KEYS.rail) === "tasks" ? "tasks" : "outline";
+  const raw = read(KEYS.rail);
+  return RAILS.includes(raw) ? raw : "outline";
 }
 
 export function setRail(which) {
-  write(KEYS.rail, which === "tasks" ? "tasks" : "outline");
-  announce("rail", which);
+  const v = RAILS.includes(which) ? which : "outline";
+  write(KEYS.rail, v);
+  announce("rail", v);
 }
 
 export function setOutline(on) {

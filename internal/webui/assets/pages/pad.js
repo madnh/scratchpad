@@ -31,6 +31,7 @@ import { menu } from "/vendor/puredashboard/menu.js";
 
 import "/components/pad-outline.js";
 import "/components/pad-tasks.js";
+import "/components/pad-search.js";
 import { rulesChip, showRules } from "/components/rules-dialog.js";
 
 import { api } from "/lib/api.js";
@@ -98,6 +99,10 @@ export default function mount(outlet, ctx) {
   // both are indexes of the same pad, and a second rail would take the room the
   // transcript needs. A two-button strip switches between them.
   const taskPanel = el("pad-tasks");
+  // The third index of the same pad: by what was written. It runs its own search
+  // against /api/search with this pad's ref, so a protected pad answers through the
+  // session that already unlocked it and no password is ever put in a URL.
+  const searchPanel = el("pad-search");
   const railTabs = el("div", { class: "rail__tabs", role: "tablist" });
   const railTab = (id, label) => {
     const b = el("button", {
@@ -115,8 +120,8 @@ export default function mount(outlet, ctx) {
     title: "Hide the rail", "aria-label": "Hide the rail",
     onclick: () => setOutline(false),
   });
-  railTabs.append(railTab("outline", "Outline"), railTab("tasks", "Tasks"), railClose);
-  const railBox = el("div", { class: "pad__rail" }, railTabs, outline, taskPanel);
+  railTabs.append(railTab("outline", "Outline"), railTab("tasks", "Tasks"), railTab("search", "Search"), railClose);
+  const railBox = el("div", { class: "pad__rail" }, railTabs, outline, taskPanel, searchPanel);
   // The way back. A rail that closes with a « and leaves nothing behind is a rail you
   // have to go looking for — the toolbar's toggle is across the page and reads like
   // its neighbours. This puts the opener exactly where the closer was.
@@ -160,6 +165,26 @@ export default function mount(outlet, ctx) {
     setDocTitle();
     loadTasks();
     await loadLatest();
+    await openDeepLink();
+  }
+
+  // A pad is also arrived at FROM a search, and a hit that cannot be followed is a
+  // result you have to go and find by hand. `?section=` says where to land, `?q=` says
+  // what was being looked for — so the rail opens on the same search rather than making
+  // the person type it a second time in the pad they were just sent to.
+  //
+  // It runs after the newest page has loaded, because jumpTo replaces that page: doing
+  // it first would fetch the history and then scroll away from it.
+  async function openDeepLink() {
+    const want = Number(ctx?.query?.section);
+    const q = (ctx?.query?.q || "").trim();
+    if (q) {
+      setRail("search");
+      void runPadSearch(q);
+    }
+    if (Number.isInteger(want) && want >= 1 && want <= pad.section_count) {
+      await jumpTo(want);
+    }
   }
 
   // The router can only title this page with the ref, because the ref is all the URL
@@ -370,6 +395,7 @@ export default function mount(outlet, ctx) {
     // Only now are the bodies in the document and measurable against the viewport.
     observeLazy();
     observeStuck();
+    observeToolbarHeight();
     // The bodies just changed height, so where the reading line falls has changed too.
     updateActive();
   }
@@ -515,6 +541,45 @@ export default function mount(outlet, ctx) {
     }
   }
 
+  // ── searching this pad ─────────────────────────────────────────────────────
+  //
+  // The same /api/search the store-wide page uses, narrowed to this ref. It is run here
+  // rather than in the component for the reason the task board is: the page owns what
+  // happens to the transcript, and a hit is only useful because it can jump into it.
+  let searchSeq = 0;
+
+  async function runPadSearch(query) {
+    const seq = ++searchSeq;
+    searchPanel.query = query;
+    if (!query) {
+      searchPanel.hits = [];
+      searchPanel.state = "idle";
+      searchPanel.stale = false;
+      return;
+    }
+    searchPanel.state = "loading";
+    searchPanel.stale = false;
+    try {
+      const res = await api.search(query, { ref, limit: 200 });
+      // Two searches in flight and the slower one landing last would show the answer to
+      // the question that was abandoned.
+      if (disposed || seq !== searchSeq) return;
+      searchPanel.hits = res.hits || [];
+      searchPanel.truncated = !!res.truncated;
+      searchPanel.state = "done";
+    } catch (err) {
+      if (disposed || seq !== searchSeq) return;
+      searchPanel.hits = [];
+      searchPanel.error = err.message;
+      searchPanel.state = "error";
+    }
+  }
+
+  searchPanel.addEventListener("search", (e) => { void runPadSearch(String(e.detail || "")); });
+  // A hit jumps the transcript to its section, exactly as an outline row does — and by
+  // the same route, so the two cannot land in different places.
+  searchPanel.addEventListener("pick", (e) => { void jumpTo(Number(e.detail)); });
+
   taskPanel.addEventListener("pick", (e) => { void selectTask(Number(e.detail) || 0); });
   taskPanel.addEventListener("open-only", (e) => {
     tasksOpenOnly = !!e.detail;
@@ -659,7 +724,10 @@ export default function mount(outlet, ctx) {
         : msgs.reduce((a, b) => (b.getBoundingClientRect().bottom > a.getBoundingClientRect().bottom ? b : a));
     }
     const n = Number(pick.dataset.section);
-    if (n && n !== outline.active) outline.active = n;
+    // Both indexes of the pad track the reading line, so whichever tab is showing marks
+    // where you are. Safe to push on every tick: a Reactive re-render writes a binding
+    // only when its value changed, so the search box's text is untouched by this.
+    if (n && n !== outline.active) { outline.active = n; searchPanel.active = n; }
   }
 
   // At most one recomputation per frame, however many events arrive in it.
@@ -935,6 +1003,35 @@ export default function mount(outlet, ctx) {
       bar.dataset.stuck = String(!e.isIntersecting);
     }, { root: scroller(), threshold: 0 });
     stuckObserver.observe(sentinel);
+  }
+
+  // ── how far down the rail has to start ─────────────────────────────────────
+  //
+  // The rail is sticky under the sticky toolbar, so it has to know how tall that bar
+  // is. It used to assume — a constant in the stylesheet — and the assumption is wrong
+  // whenever the toolbar WRAPS, which it does on a narrow window and again once it is
+  // stuck and takes on the pad's title and menu. The rail then started underneath the
+  // bar, and the bar covered its tab strip: the way to switch index disappeared exactly
+  // when someone had scrolled far enough to want it.
+  //
+  // So it is measured. The value is published as a CSS variable on the layout, and the
+  // stylesheet does the arithmetic — script decides the number, CSS decides the design.
+  let toolbarResize = null;
+
+  function observeToolbarHeight() {
+    toolbarResize?.disconnect();
+    toolbarResize = null;
+    if (!frame) return;
+    const write = () => {
+      // A toolbar that is not sticky scrolls away with the transcript and takes no room
+      // from the rail — the offset is then zero, not its height.
+      const h = prefs.stickyBar() ? frame.toolbar.getBoundingClientRect().height : 0;
+      layout.style.setProperty("--pad-toolbar-h", `${Math.round(h)}px`);
+    };
+    write();
+    if (typeof ResizeObserver !== "function") return;
+    toolbarResize = new ResizeObserver(write);
+    toolbarResize.observe(frame.toolbar);
   }
 
   // ── lazy markdown ──────────────────────────────────────────────────────────
@@ -1234,6 +1331,12 @@ export default function mount(outlet, ctx) {
     const added = pad.section_count - previous;
     if (added <= 0) { render(); return; }
 
+    // Whatever the rail is searching was found in the pad as it stood a moment ago. Say
+    // so instead of re-running it: a search here reads the whole pad file, and doing that
+    // unasked on every arriving section would turn a busy pad into a poll. It only
+    // matters if there are hits on screen to be wrong about.
+    if (searchPanel.state === "done") searchPanel.stale = true;
+
     // Reading history: do NOT move the viewport. Offer the jump instead.
     if (!showingLatest) {
       pendingNew += added;
@@ -1294,6 +1397,7 @@ export default function mount(outlet, ctx) {
     offPrefs();
     // The lazy elements disconnect their own observers as they leave the DOM.
     stuckObserver?.disconnect();
+    toolbarResize?.disconnect();
     holdStop?.();
     if (activeFrame) cancelAnimationFrame(activeFrame);
     sizeWatch?.disconnect();

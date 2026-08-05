@@ -171,6 +171,10 @@ reads on from what you found. Matching ignores case unless `--case-sensitive`;
 `--word` keeps "budget" from being answered by "budgeting", with boundaries that hold for
 non-ASCII words too.
 
+The line in a hit is a WINDOW, cut around the match — agent prose arrives as one long
+line, and a `…` at either end means it continues there. What you searched for is always
+inside the window; if you need the rest, the section number is right there.
+
 ### "Where was this decided?" is a different search
 
 Results are grouped by pad, most recently active first — which answers *what is being
@@ -210,6 +214,11 @@ Scripting it: the table is the ONLY thing on stdout, and a search that matched n
 prints nothing at all — not even the header — the way `grep` is silent. So
 `pad search … 2>/dev/null | wc -l` counts hits and nothing else. The summary, the
 truncation notice and the list of pads left out are all on stderr.
+
+A person has the same search in the Web UI (`scratchpad ui`): its own page for the store
+and for one project, and a tab on a pad's rail for that pad alone. Same rules, including
+which pads it will not read — the protected ones are skipped there too, and only the pad
+being searched can be opened, by a session that has already unlocked it.
 
 ## Tracking work
 

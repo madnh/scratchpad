@@ -583,14 +583,26 @@ pad-outline, .outline-pop, pad-tasks, .pad__people {
    and what scrolls internally when the pad has more sections than fit. The panel inside
    cannot own that: sticking the panel to a container of its own height gives it nowhere
    to travel, and leaves the tabs — and the close button in them — to scroll away. */
+/* How far down the rail starts is the toolbar's HEIGHT, which is measured and published
+   as --pad-toolbar-h (see observeToolbarHeight in pages/pad.js) rather than assumed here.
+   The toolbar wraps to a second line on a narrow window — and again once it is stuck and
+   takes on the pad's title and menu — so the constant this used to be was wrong exactly
+   when it mattered: the bar then covered the rail's tab strip, and the way to switch
+   index vanished at the moment someone had scrolled far enough to want it. The fallback
+   keeps the old value for the instant before the first measurement lands. */
 .pad__rail {
   display: flex; flex-direction: column; gap: .35rem;
-  position: sticky; top: 3.25rem;
-  min-height: 0; max-height: calc(100vh - 5rem);
+  position: sticky; top: calc(var(--pad-toolbar-h, 3.25rem) + .5rem);
+  min-height: 0; max-height: calc(100vh - var(--pad-toolbar-h, 3.25rem) - 2.25rem);
 }
-.pad__rail > pad-outline, .pad__rail > pad-tasks { min-height: 0; flex: 1 1 auto; }
-.pad__rail[data-rail="outline"] > pad-tasks { display: none; }
-.pad__rail[data-rail="tasks"] > pad-outline { display: none; }
+.pad__rail > pad-outline, .pad__rail > pad-tasks, .pad__rail > pad-search { min-height: 0; flex: 1 1 auto; }
+/* The rail holds three indexes of the same pad and shows one at a time. */
+.pad__rail[data-rail="outline"] > pad-tasks,
+.pad__rail[data-rail="outline"] > pad-search,
+.pad__rail[data-rail="tasks"] > pad-outline,
+.pad__rail[data-rail="tasks"] > pad-search,
+.pad__rail[data-rail="search"] > pad-outline,
+.pad__rail[data-rail="search"] > pad-tasks { display: none; }
 
 .rail__tabs { display: flex; align-items: stretch; gap: .15rem; padding: 0 .25rem; }
 .rail__tab {
@@ -793,3 +805,145 @@ button.chip:hover { color: var(--text); border-color: var(--text); }
 .stuck__row { display: flex; gap: .5rem; align-items: baseline; font-size: .82rem; padding: .2rem 0; }
 .stuck__what { color: var(--warning, #d29922); font-weight: 600; }
 .stuck__age { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* ── search ────────────────────────────────────────────────────────────────── */
+.search__form { margin: .5rem 0 1rem; display: flex; flex-direction: column; gap: .6rem; }
+/* The query and its button on one line: a search box that wraps away from its own
+   submit reads as two unrelated controls. */
+.search__row { display: flex; gap: .5rem; align-items: center; }
+.search__row puredashboard-input { flex: 1; min-width: 12rem; }
+
+.search__filters {
+  display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: flex-end;
+}
+.search__field { display: flex; flex-direction: column; gap: .2rem; }
+.search__label {
+  font-size: .7rem; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--muted);
+}
+.search__flags { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+
+/* The line that says how to read the number. It stays put whether or not anything
+   matched — "0 of 25 read" and "0 of 25 read, 3 skipped" are different answers. */
+.search__summary {
+  margin: 0 0 .4rem; font-size: .85rem; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.search__skipped, .search__warn { margin: .2rem 0; font-size: .8rem; color: var(--muted); }
+.search__warn { color: var(--warning, #d29922); }
+
+.hits { display: flex; flex-direction: column; gap: .9rem; }
+.hits__group { display: flex; flex-direction: column; gap: .1rem; }
+.hits__pad {
+  display: flex; gap: .5rem; align-items: baseline;
+  padding-bottom: .2rem; border-bottom: 1px solid var(--border);
+}
+/* Flat (oldest-first) has no per-pad heading, so its rows need the separation the
+   group heading was providing. */
+.hits--flat { gap: .25rem; }
+
+/* A hit is a link that behaves like a row. `display: block` rather than flex so the
+   excerpt inside it wraps as prose. */
+.hit {
+  display: block; padding: .35rem .5rem; border-radius: var(--radius, 6px);
+  color: inherit; text-decoration: none; border-left: 2px solid transparent;
+}
+.hit:hover { background: var(--panel-2, var(--panel)); border-left-color: var(--accent); }
+.hit__meta {
+  display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline;
+  font-size: .75rem; color: var(--muted);
+}
+.hit__sec { font-variant-numeric: tabular-nums; color: var(--accent); }
+.hit__where { font-variant-numeric: tabular-nums; }
+.hit__author { font-weight: 600; color: var(--text); }
+.hit__time { margin-left: auto; }
+.hit__title {
+  display: block; font-size: .8rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The matching line. It wraps rather than scrolling: the excerpt is already a window
+   the server cut, and a second horizontal scroller inside a list of them is unreadable.
+   `overflow-wrap` because an agent's line can be one long token (a path, a hash). */
+.hit__text {
+  display: block; font-size: .84rem; line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.hit__text mark {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: inherit; border-radius: 2px; padding: 0 .05em;
+}
+
+/* ── search inside a pad (the rail's third index) ──────────────────────────── */
+.padsearch__head { display: flex; gap: .35rem; padding: .3rem 0 .5rem; }
+.padsearch__input {
+  flex: 1; min-width: 0; font: inherit; font-size: .8rem;
+  padding: .25rem .45rem; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+}
+.padsearch__input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.padsearch__go {
+  background: transparent; border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius, 6px); padding: .2rem .5rem; font-size: .78rem; cursor: pointer;
+}
+.padsearch__go:hover { background: var(--panel-2, var(--panel)); }
+.padsearch__note { margin: .3rem 0; font-size: .76rem; color: var(--muted); }
+.padsearch__note--bad { color: var(--warning, #d29922); }
+/* Same shape as the other two panels: the component is the column, and only the LIST
+   inside it scrolls — so the query box stays put while the hits move under it. */
+pad-search { display: flex; flex-direction: column; overflow: hidden; }
+.padsearch__list { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+
+/* One hit in the rail. A button, not a link: it moves the transcript beside it rather
+   than navigating, which is the same thing an outline row does. */
+.padhit {
+  display: flex; flex-direction: column; gap: .1rem; width: 100%;
+  padding: .3rem .35rem; text-align: left; cursor: pointer;
+  background: transparent; border: 0; border-left: 2px solid transparent;
+  border-radius: var(--radius, 6px); color: inherit; font: inherit;
+}
+.padhit:hover { background: var(--panel-2, var(--panel)); border-left-color: var(--accent); }
+.padhit__head {
+  display: flex; gap: .4rem; align-items: baseline;
+  font-size: .7rem; color: var(--muted);
+}
+.padhit__sec { color: var(--accent); font-variant-numeric: tabular-nums; }
+.padhit__where { font-variant-numeric: tabular-nums; }
+.padhit__when { margin-left: auto; }
+.padhit__title {
+  font-size: .74rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Three lines of the matching text, then it stops: the rail is an index, and the
+   section itself is one click away in the column next to it. */
+.padhit__text {
+  font-size: .78rem; line-height: 1.35; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.padhit__text mark {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: inherit; border-radius: 2px;
+}
+/* The hit for the section the transcript is showing, marked the way the outline marks
+   its own row — same signal, whichever index you have open. */
+.padhit[aria-current="true"] { border-left-color: var(--accent); }
+.padhit[aria-current="true"] .padhit__sec { font-weight: 700; }
+
+/* Results that the store has moved on from. It sits ABOVE the hits, because it changes
+   how to read every row below it; and it is a notice with a button rather than an
+   automatic refresh, because repainting a result list reorders rows under whoever is
+   reading them. */
+.search__stale {
+  margin: 0 0 .5rem; padding: .35rem .5rem;
+  font-size: .8rem; border-radius: var(--radius, 6px);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  display: flex; gap: .5rem; align-items: center; flex-wrap: wrap;
+}
+.padsearch__note--stale { color: var(--accent); }
+.padsearch__again {
+  background: transparent; border: 1px solid var(--border); color: inherit;
+  border-radius: var(--radius, 6px); padding: .05rem .35rem;
+  font: inherit; font-size: .74rem; cursor: pointer;
+}
+.padsearch__again:hover { background: var(--panel-2, var(--panel)); }

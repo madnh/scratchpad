@@ -1020,9 +1020,9 @@ Notes:
   acknowledgements*, which are derivable, instead of *who is currently blocked in a
   wait*, which is not (see *Knowing whether work is moving*).
 - `pad search` is the one read that selects by **what was written** rather than by
-  position, and it is a CLI (and store) capability rather than an MCP tool for now — the
-  MCP surface stays append-only and small on purpose, and this can be added to it and to
-  the Web UI later from the same `store.Search`. Four decisions are load-bearing:
+  position. The CLI and the Web UI both spell it, from the one `store.Search`; it is
+  deliberately not an MCP tool, because that surface stays append-only and small — and
+  it can be added there later from the same call. Four decisions are load-bearing:
   - **No index.** It reads the pads it looks at. An index would be state living outside
     the pad files, and everything here derives from them precisely so that a person with
     `rm` or an editor cannot leave a stale second copy of the truth. `--project`, `--pad`
@@ -1048,6 +1048,21 @@ Notes:
   contract here: a lone header reads as one result to anything counting lines
   (`… 2>/dev/null | wc -l`), which is how a script concludes "found it" about a word that
   is not there. Everything a person needs to read the silence is on stderr.
+
+  A hit is **cut around its match, never from the front** (`SearchRequest.TextWidth`), and
+  carries the match's rune offsets. Agent prose arrives as one long line, so a window taken
+  from the start of it returned a row that did not contain the word being reported — a
+  wrong answer wearing the shape of a truncated one. The offsets are published rather than
+  recomputed per surface for the reason everything else here has one definition: a second
+  matcher disagrees, `--word` being spelled with Unicode classes that `\b` does not mean.
+
+  **The Web UI is the same search asked three ways**, not three features: no scope is the
+  whole store, `project` is one project, `ref` is one pad — the last being the only form
+  that carries a password, exactly as in the CLI. Over HTTP the password comes from the
+  session that already unlocked the pad, so it never travels in a URL; `limit` gains a
+  ceiling the CLI does not need, because `--limit 0` at a terminal is a person waiting for
+  their own command while over HTTP it is a request to serialise the store; and the
+  question lives in the URL, so a search is a link.
 - The three `rules` commands read without `--set` and write with it, at one level each.
   Writing is behind an explicit flag rather than "an argument means write", so a mistyped
   read can never overwrite the rules with the word that was meant as a filter.

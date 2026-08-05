@@ -336,6 +336,9 @@ ignores case unless you pass `--case-sensitive`. Protected pads are NOT searched
 unless you name one with `--pad` and its `--password` — anything left out is
 listed on stderr, so an empty result never quietly means "not searched".
 
+A long line is cut AROUND its match, so the word you searched for is always in the
+row you get back; a leading `…` means the line started earlier.
+
 **Looking for where something was DECIDED? Pass `--oldest`.** The default order
 is newest pad first, which answers "what is being said about this" — and a term
 the team is arguing about today will fill every result with restatements while
