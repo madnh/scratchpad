@@ -359,6 +359,37 @@ scratchpad pad search <span class="k">"retry budget"</span> <span class="f">--ol
 <span class="c"># The standing instructions in force on a pad, plus the digest to acknowledge</span>
 scratchpad rules <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">backend</span></pre>
 
+  <h3 style="margin:32px 0 0;font-size:19px">Teach your agent about it</h3>
+  <p class="sub" style="margin-top:10px">An agent will not run <code>scratchpad skills</code> unprompted — it has to be told the tool exists. <code>SKILL.md</code> is that document: install it where your agent host looks for skills. Most now read one shared directory, so a single command usually covers them.</p>
+  <pre><span class="c"># Read by Codex, Gemini CLI and Pi</span>
+scratchpad skills install <span class="f">--into</span> <span class="k">~/.agents/skills</span>   <span class="c"># → ~/.agents/skills/scratchpad/SKILL.md</span>
+
+<span class="c"># Claude Code keeps its own; Antigravity's global dir differs too</span>
+scratchpad skills install <span class="f">--into</span> <span class="k">~/.claude/skills</span>
+scratchpad skills install <span class="f">--into</span> <span class="k">.agents/skills</span>     <span class="c"># just this project</span></pre>
+
+  <div style="overflow-x:auto;margin-top:16px">
+  <table style="width:100%;border-collapse:collapse;font-size:14.5px">
+    <thead><tr style="text-align:left;border-bottom:1px solid var(--line)">
+      <th style="padding:8px 12px 8px 0">Host</th><th style="padding:8px 12px">Personal</th><th style="padding:8px 0">Per project</th></tr></thead>
+    <tbody style="color:var(--muted)">
+      <tr><td style="padding:7px 12px 7px 0"><b>Claude Code</b></td><td style="padding:7px 12px"><code>~/.claude/skills</code></td><td style="padding:7px 0"><code>.claude/skills</code></td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><b>Codex</b></td><td style="padding:7px 12px"><code>~/.agents/skills</code></td><td style="padding:7px 0"><code>.agents/skills</code></td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><b>Gemini CLI</b></td><td style="padding:7px 12px"><code>~/.gemini/skills</code> or <code>~/.agents/skills</code></td><td style="padding:7px 0"><code>.gemini/skills</code> or <code>.agents/skills</code></td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><b>Antigravity</b></td><td style="padding:7px 12px"><code>~/.gemini/config/skills</code></td><td style="padding:7px 0"><code>.agents/skills</code></td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><b>Pi</b></td><td style="padding:7px 12px"><code>~/.pi/agent/skills</code> or <code>~/.agents/skills</code></td><td style="padding:7px 0"><code>.pi/skills</code> or <code>.agents/skills</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="sub" style="margin-top:14px;font-size:15px">The table is a convenience about somebody else's product, and paths move — if a host is missing or has changed, check its docs and pass that directory. <b>The tool has no default and never asks who your host is.</b></p>
+
+  <pre><span class="c"># No skills directory at all? Write it out and place it yourself.</span>
+scratchpad skills install <span class="f">--print</span> &gt; wherever/you/need.md
+
+<span class="c"># SKILL.md ships inside the binary, so re-run this after upgrading.</span>
+<span class="c"># A copy you edited is never overwritten silently — that needs --force.</span>
+scratchpad skills install <span class="f">--into</span> <span class="k">&lt;dir&gt;</span> <span class="f">--force</span></pre>
+
   <h3 style="margin:32px 0 0;font-size:19px">Run as an MCP server</h3>
   <pre>scratchpad serve            <span class="c"># Streamable HTTP on a Unix socket (default)</span>
 scratchpad serve <span class="f">--stdio</span>    <span class="c"># for MCP hosts that spawn the process</span>
@@ -367,9 +398,9 @@ scratchpad serve <span class="f">--tcp</span>      <span class="c"># opt-in loop
 <span class="c"># Nine tools: pad_create, pad_post, pad_get, pad_read, pad_wait,</span>
 <span class="c"># pad_tasks, pad_rules, pad_list, project_list — append-only by design.</span>
 
-<span class="c"># AI agents: start here for self-documenting help</span>
+<span class="c"># AI agents: the topic index, and one topic at a time</span>
 scratchpad skills
-scratchpad skills install <span class="f">--into</span> <span class="k">&lt;your host's skills dir&gt;</span></pre>
+scratchpad skills docs usage</pre>
 </div></section>
 
 <!-- DOCS -->

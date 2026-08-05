@@ -142,6 +142,62 @@ and open tasks), records the link in both headers, and puts the post there. The 
 refuses further posts forever — two live ends would be two conversations that both look
 current. Set `limits.on_full` to `reject` if you would rather the post simply fail.
 
+## Teach your agent about it
+
+The binary is self-documenting, but an agent will not run `scratchpad skills` unprompted —
+it has to be told the tool exists and when to reach for it. That is what `SKILL.md` is: a
+short document your agent host loads so the agent knows to use scratchpad when it needs to
+ask another session something.
+
+Most hosts now read a **shared, host-neutral directory**, so one command usually covers
+them all:
+
+```sh
+scratchpad skills install --into ~/.agents/skills   # → ~/.agents/skills/scratchpad/SKILL.md
+```
+
+That is read by **Codex**, **Gemini CLI** and **Pi**. Two need their own path:
+
+| Host | Personal | Per project |
+|---|---|---|
+| **Claude Code** | `~/.claude/skills` | `.claude/skills` |
+| **Codex** | `~/.agents/skills` | `.agents/skills` |
+| **Gemini CLI** | `~/.gemini/skills` *or* `~/.agents/skills` | `.gemini/skills` *or* `.agents/skills` |
+| **Antigravity** | `~/.gemini/config/skills` | `.agents/skills` |
+| **Pi** | `~/.pi/agent/skills` *or* `~/.agents/skills` | `.pi/skills` *or* `.agents/skills` |
+
+```sh
+scratchpad skills install --into ~/.claude/skills     # Claude Code
+scratchpad skills install --into .agents/skills       # just this project
+export SCRATCHPAD_SKILLS_DIR=~/.agents/skills         # or set it once and drop --into
+```
+
+The layout the command writes — a `scratchpad/` folder holding `SKILL.md` — is what all of
+them expect.
+
+> The table is a convenience, and it is about somebody else's product: paths move. If a
+> host is missing here or the path has changed, check its documentation — the flag takes
+> any directory. **The tool itself has no default and never asks who your host is.**
+
+For a host with no skills directory at all, write the document out and place it however
+that host expects:
+
+```sh
+scratchpad skills install --print > wherever/you/need.md
+```
+
+An installed copy is **not** upgraded when you upgrade the binary — `SKILL.md` ships inside
+it, so re-run the install after upgrading:
+
+```sh
+scratchpad skills install --into <dir>            # "already current" if nothing changed
+scratchpad skills install --into <dir> --force    # replace a copy that differs
+```
+
+Without `--force` an existing file that differs is left alone and the command fails rather
+than overwriting it, so a copy you have edited is never lost silently. Diff it first if
+that is the case.
+
 ## Run as an MCP server
 
 For agents that can't spawn a CLI (the host only speaks MCP):
@@ -160,8 +216,8 @@ The surface is **append-only by design**: there is no `pad_delete` or `pad_updat
 `pad_tasks` is read-only — a task is opened and moved by `pad_post` carrying metadata.
 Deletion and cleanup stay in the CLI, where a person runs them.
 
-> **AI agents:** run `scratchpad skills` for self-documenting help — or install the skill
-> file into your host's skills directory with `scratchpad skills install --into <dir>`.
+> **AI agents:** run `scratchpad skills` for self-documenting help — and see
+> [Teach your agent about it](#teach-your-agent-about-it) for installing the skill file.
 
 ## Watch pads in a browser
 

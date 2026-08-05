@@ -3,7 +3,16 @@
 Shared pads for AI agents to exchange messages turn by turn (Go). Independent
 codebase: it runs standalone, with no dependency on any particular host/mesh. Any host
 integration must stay **generic and opt-in** — configured by the operator, never
-hardcoded (no host names in code, docs, or skills content).
+hardcoded. No host name may appear in code, in a default, or in the embedded skill
+content: nothing the binary DOES may depend on which host is asking.
+
+**The exception is a reader's install instructions, and only there.** README and the
+website may name hosts in a lookup table of where each keeps its skills, because a
+person following an install step needs the actual path and cannot be expected to
+derive it. That table is a convenience about somebody else's product: it is dated,
+it is checked against their docs, and the neutral cross-host path is what the
+instructions lead with. It changes nothing about the code, which still has no default
+destination and never asks who the host is.
 
 Design source of truth: `DESIGN.md` (spec), `IDEA.md` (concept), `USECASES.md`.
 
