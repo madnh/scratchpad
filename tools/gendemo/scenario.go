@@ -51,6 +51,20 @@ type event struct {
 	// the tool writes one, so the author is always pad.SystemAuthor.
 	Continued bool
 
+	// Notice makes this the section a rules change is ANNOUNCED with (`--notify`, or the
+	// checkbox in the UI's rules dialog). Like Continued it is the tool speaking, so the
+	// author is pad.SystemAuthor — and like it, it wakes every waiter regardless of their
+	// selectors. A demo needs one because it is the only kind that arrives in a pad from
+	// OUTSIDE the pad: nothing anyone said here caused it.
+	Notice bool
+
+	// Acked records the digest this section's author had read, which is what the read gate
+	// looks for under `rules.reack = on-change`. It is spelled out here rather than
+	// computed because a demo store is written straight to disk: there is no Post call to
+	// derive it, and a pad whose sections carry no receipt would show every agent as owing
+	// a read the moment anyone opens the store.
+	Acked string
+
 	// TaskNo pins a task to a number instead of allocating the next one. It exists for
 	// the sections a CONTINUATION carries over, where the number came from the pad before
 	// this one and keeping it is the entire point.
@@ -424,4 +438,77 @@ var scenarios = []scenario{
 					"continued across the pads rather than restarting."},
 		},
 	},
+
+	// ── A rules change that ARRIVED: the announcement, and the receipts around it ──
+	//
+	// This pad exists for the one thing no other scenario shows: a section that came from
+	// OUTSIDE the pad. Nobody here said anything to cause it — a person edited the STORE's
+	// rules, which live in a file two directories up, and ticked the box that announces it.
+	//
+	// The receipts (`acked`) are what make the story readable in the file itself. Before the
+	// notice both agents hold the old digest; after it, each one quotes the new one on its
+	// next post. An agent that has not yet is the one the gate would refuse, which is
+	// exactly what `docs` is doing at the end.
+	{
+		Project: "release", ID: "rules8k",
+		Note:   "a store rules change, announced into the pad — with the receipts on either side of it",
+		Opener: "pm",
+		Events: []event{
+			{Ago: 3 * day, Author: "pm", Acked: demoOldDigest, Label: "kickoff",
+				To:    []string{"docs", "qa"},
+				Title: "Release notes for 4.2",
+				Body: "Docs writes them, QA checks them against the fixed crashes.\n" +
+					"Everything else about the release is on the other pad."},
+			{Ago: 3*day - 40*minute, Author: "docs", Acked: demoOldDigest, Re: "kickoff",
+				Title: "Docs: starting on the notes",
+				Body:  "Draft by tomorrow. I will follow the crash pad for what actually shipped."},
+			{Ago: 2 * day, Author: "qa", Acked: demoOldDigest, Label: "checking",
+				To:    []string{"docs"},
+				Title: "QA: I will check them against the matrix",
+				Body:  "Send the draft when it is ready."},
+
+			// The announcement. Written by the tool because a person changed a FILE, and
+			// there is no other way for that to reach an agent parked in `pad wait`: the
+			// rules file is not a pad file, so nothing watches it on an agent's behalf.
+			// It takes no turn and wakes every waiter whatever their selectors say.
+			{Ago: 30 * hour, Author: pad.SystemAuthor, Notice: true,
+				Title: "Rules changed — read them before your next post",
+				Body: "The store rules changed just now, and they apply to this pad.\n\n" +
+					"Read them with `scratchpad pad rules <ref>`, or the pad_rules tool.\n\n" +
+					"Your next post is refused until it quotes the new digest, so read them now:\n" +
+					"the refusal carries the full text, but not before you have written a post it throws away."},
+
+			// qa read them and says so. The new digest on this section is the receipt: it
+			// is why qa is not asked again below.
+			{Ago: 29 * hour, Author: "qa", Acked: demoNewDigest, Label: "reread",
+				To:    []string{"docs"},
+				Title: "QA: read the new rules",
+				Body: "Detail goes on the task now, not into the thread. I will open one for\n" +
+					"the notes review rather than narrating it here."},
+			{Ago: 20 * hour, Author: "qa", Opens: "notesreview", To: []string{"qa"},
+				Title: "Review the 4.2 release notes",
+				Body:  "Opened under the new rules, which is what they ask for."},
+			{Ago: 6 * hour, Author: "qa", Task: "notesreview", Status: pad.StatusWIP,
+				Title: "QA: reviewing", Body: "Half the notes checked against the matrix."},
+
+			// …and docs has not posted since the change. It holds the OLD digest, so it is
+			// the agent `rules_unread` is waiting for — the state a demo store otherwise
+			// never has anyone in.
+		},
+	},
 }
+
+// The two digests the announcement scenario is written around: the rules in force before
+// the change it announces, and after.
+//
+// A demo pad is written straight to disk, so nothing calls Post and nothing derives these
+// on the way past. The NEW one is therefore computed from the very rules this build writes,
+// never typed: a receipt that quietly stopped matching would leave every agent in the demo
+// looking overdue for a read — the opposite of what this pad exists to show, and a failure
+// that would survive every test because the store would still be internally consistent.
+//
+// The OLD one only has to be something else. It stands for rules that are gone, and nothing
+// in the store hashes to it any more — which is precisely its job.
+const demoOldDigest = "5cb1f7a2"
+
+var demoNewDigest = pad.BuildRules(storeRules, false, "release", projectRules["release"], false, nil).Digest

@@ -49,6 +49,38 @@ func TestWakeForMeIgnoresOtherAgentsExchanges(t *testing.T) {
 	}
 }
 
+// TestRulesAndNoticesWakeEveryone is the exception the selectors must not be able to opt
+// out of. Narrowing a wait is a bandwidth decision — spare me traffic I have no part in —
+// and it must never turn into "spare me the rules I am about to be refused under".
+//
+// `me` is the one that mattered: it is answered by concernsAuthor, which counts a broadcast
+// only for a MESSAGE. A rules section is not a message, so before this the agents who had
+// narrowed their waits were exactly the ones that never heard the rules had moved.
+func TestRulesAndNoticesWakeEveryone(t *testing.T) {
+	p := build(
+		sec{"pm", "kickoff", Meta{}},
+		sec{"pm", "house rules", Meta{Kind: KindRules}},
+		sec{SystemAuthor, "rules changed", Meta{Kind: KindNotice}},
+	)
+	for _, spec := range [][]string{{"me"}, {"mine"}, {"tasks"}, {"task:1"}} {
+		wake, err := ParseWake(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sec := range p.Sections[1:] {
+			if !p.Wakes(sec, "ios", wake) {
+				t.Errorf("wake %v missed a %s section — no selector may opt out of the rules", spec, sec.Kind)
+			}
+		}
+	}
+	// Your own post is still not news to you, whatever its kind: the author of the rules
+	// is the one agent that certainly knows what they say.
+	wake, _ := ParseWake([]string{"me"})
+	if p.Wakes(p.Sections[1], "pm", wake) {
+		t.Error("pm wrote those rules; they are not news to pm")
+	}
+}
+
 func TestWakeForMeIncludesRepliesToMe(t *testing.T) {
 	p := wakePad()
 	wake, _ := ParseWake([]string{"me"})

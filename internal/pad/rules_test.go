@@ -36,6 +36,13 @@ func msg(author, body string) Section {
 	return Section{Author: author, Content: body, Meta: Meta{Kind: KindMessage}}
 }
 
+// ackedMsg is a message carrying the receipt a real post would have left: the digest its
+// author had read. It goes through RenderSection like every other fixture here, so these
+// tests also pin that `acked` survives the round trip through the file format.
+func ackedMsg(author, body, acked string) Section {
+	return Section{Author: author, Content: body, Meta: Meta{Kind: KindMessage, Acked: acked}}
+}
+
 // A rules section must survive a round trip through the on-disk format — including
 // `replace`, which is a key an older binary is expected to ignore rather than choke on.
 func TestRulesSectionRoundTrip(t *testing.T) {
@@ -143,8 +150,10 @@ func TestBuildRulesEmpty(t *testing.T) {
 	if !r.Empty() || len(r.Layers) != 0 {
 		t.Fatalf("blank rules must read as none: %+v", r)
 	}
-	if err := CheckAck(p, "anyone", "", r); err != nil {
-		t.Fatalf("a pad with no rules must never gate a post: %v", err)
+	for _, policy := range []ReackPolicy{ReackOnce, ReackOnChange} {
+		if err := CheckAck(p, "anyone", "", r, policy); err != nil {
+			t.Fatalf("a pad with no rules must never gate a post (%s): %v", policy, err)
+		}
 	}
 }
 
@@ -152,7 +161,7 @@ func TestCheckAck(t *testing.T) {
 	p := buildPad(t, msg("pm", "kickoff"), rulesSection("pm", "- be brief", false))
 	r := BuildRules("", false, "", "", false, p)
 
-	err := CheckAck(p, "ios", "", r)
+	err := CheckAck(p, "ios", "", r, ReackOnce)
 	if !HasCode(err, CodeRulesUnread) {
 		t.Fatalf("a first post without an ack must be refused: %v", err)
 	}
@@ -161,19 +170,56 @@ func TestCheckAck(t *testing.T) {
 	if msg := err.Error(); !strings.Contains(msg, r.Digest) || !strings.Contains(msg, "be brief") {
 		t.Fatalf("the error must carry the rules and the digest: %q", msg)
 	}
-	if err := CheckAck(p, "ios", r.Digest, r); err != nil {
+	if err := CheckAck(p, "ios", r.Digest, r, ReackOnce); err != nil {
 		t.Fatalf("the right digest must pass: %v", err)
 	}
-	if err := CheckAck(p, "ios", strings.ToUpper(r.Digest), r); err != nil {
+	if err := CheckAck(p, "ios", strings.ToUpper(r.Digest), r, ReackOnce); err != nil {
 		t.Fatalf("the digest comparison must not be case-sensitive: %v", err)
 	}
-	if err := CheckAck(p, "ios", "deadbeef", r); !HasCode(err, CodeRulesUnread) {
+	if err := CheckAck(p, "ios", "deadbeef", r, ReackOnce); !HasCode(err, CodeRulesUnread) {
 		t.Fatalf("a wrong digest must be refused: %v", err)
 	}
-	// Someone already on the pad is never gated — the rules are read on the way IN, and
-	// a mid-conversation gate is what would make agents route around them.
-	if err := CheckAck(p, "pm", "", r); err != nil {
+	// Under `once` someone already on the pad is never gated again: the rules are read on
+	// the way IN, and that is the whole of it.
+	if err := CheckAck(p, "pm", "", r, ReackOnce); err != nil {
 		t.Fatalf("an author who has posted here must not be gated: %v", err)
+	}
+}
+
+// TestCheckAckOnChange is the difference the two policies make, on the one author `once`
+// waves through: somebody who is already on the pad, whose rules have moved since.
+func TestCheckAckOnChange(t *testing.T) {
+	// pm opened the pad and has a receipt — for rules that no longer say what they said.
+	stale := "0000dead"
+	p := buildPad(t,
+		ackedMsg("pm", "kickoff", stale),
+		rulesSection("pm", "- be brief", false))
+	r := BuildRules("", false, "", "", false, p)
+	if r.Digest == stale {
+		t.Fatal("the fixture needs a receipt that does NOT match the rules in force")
+	}
+
+	err := CheckAck(p, "pm", "", r, ReackOnChange)
+	if !HasCode(err, CodeRulesUnread) {
+		t.Fatalf("a stale receipt must be refused under on-change: %v", err)
+	}
+	// The refusal must not claim pm is new here. It is the sentence a returning agent
+	// reads, and "you have not posted here before" sends it looking for the wrong bug.
+	if msg := err.Error(); !strings.Contains(msg, "CHANGED") {
+		t.Fatalf("the refusal must say what actually happened: %q", msg)
+	}
+	// Quoting the current digest passes, and so does a receipt that already names it.
+	if err := CheckAck(p, "pm", r.Digest, r, ReackOnChange); err != nil {
+		t.Fatalf("quoting the digest in force must pass: %v", err)
+	}
+	fresh := buildPad(t, ackedMsg("pm", "kickoff", r.Digest), rulesSection("pm", "- be brief", false))
+	if err := CheckAck(fresh, "pm", "", r, ReackOnChange); err != nil {
+		t.Fatalf("a receipt for the version in force must pass: %v", err)
+	}
+	// And the same pad under `once` is not gated at all — the policy is the only thing
+	// that differs between these two outcomes.
+	if err := CheckAck(p, "pm", "", r, ReackOnce); err != nil {
+		t.Fatalf("`once` must ignore a stale receipt: %v", err)
 	}
 }
 

@@ -116,18 +116,23 @@ export const api = {
     }),
 
   storeRules: () => request("/api/rules"),
-  setStoreRules: (text, replace, ifDigest) =>
+  setStoreRules: (text, replace, ifDigest, notify) =>
     request("/api/rules", {
       method: "PUT",
-      body: JSON.stringify({ text, replace: !!replace, if_digest: ifDigest || "" }),
+      body: JSON.stringify({ text, replace: !!replace, if_digest: ifDigest || "", notify: !!notify }),
     }),
 
   projectRules: (name) => request(`/api/projects/${projectSegment(name)}/rules`),
-  setProjectRules: (name, text, replace, ifDigest) =>
+  setProjectRules: (name, text, replace, ifDigest, notify) =>
     request(`/api/projects/${projectSegment(name)}/rules`, {
       method: "PUT",
-      body: JSON.stringify({ text, replace: !!replace, if_digest: ifDigest || "" }),
+      body: JSON.stringify({ text, replace: !!replace, if_digest: ifDigest || "", notify: !!notify }),
     }),
+
+  // How many pads an announcement at this level would reach. Read before anyone commits
+  // to it: a fan-out whose size only shows up afterwards is one people leave switched off.
+  rulesNotifyTargets: (name) =>
+    request(name ? `/api/projects/${projectSegment(name)}/rules/notify-targets` : "/api/rules/notify-targets"),
 
   // No GET counterpart: a pad's rules ride along with the pad view, because the header
   // has to know whether there ARE rules before the person opens them.

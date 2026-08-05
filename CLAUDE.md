@@ -75,9 +75,13 @@ two live ends are two conversations that both look current. `internal/store/cont
 holds all of it; the successor is written BEFORE the old pad is closed, so a failure can
 never leave a pad closed with nowhere to go.
 
-**`kind: continued` wakes every waiter, before any selector is consulted.** Selective waking
-spares an agent traffic it has no part in; it must never leave one parked on a pad that can
-no longer receive its answer.
+**`kind: continued`, `kind: rules` and `kind: notice` wake every waiter, before any selector
+is consulted.** Selective waking spares an agent traffic it has no part in; it must never
+spare it something that changes what it is ALLOWED to do next — a pad that can no longer
+receive its answer, or rules its next post will be refused under. Routing rules through the
+selectors looked right and was not: `me` is answered by `concernsAuthor`, which counts a
+broadcast only for a `message`, so the agents that had narrowed their waits were exactly the
+ones that never heard the rules had changed.
 
 **Turn state filters on `== KindMessage`, never `!= KindTask`.** Every stream added
 later is bookkeeping until proven otherwise; the negative form silently hands the turn
@@ -98,6 +102,33 @@ OF WHAT is a per-level version (`pad.LevelDigest`), quoted on every write; it is
 combined digest `--ack-rules` uses, because a pad-rules edit must not fail over a change
 to the store's. Both live in `internal/store`, never in a surface: a policy enforced in
 one command is a policy the next surface forgets.
+
+**The READ gate is repeatable, and its memory lives in the pad.** `rules.reack` decides when
+it fires again: `on-change` (default) re-asks whenever the rules in force move at ANY level,
+`once` is the old first-post-only behaviour. The proof is `acked` on the section metadata
+line — derived from the transcript like turn state and the roster, never a subscription list
+outside the files, and free to find because the append path already parses that line. Two
+edges are not optional: a section that WRITES rules records the digest that will be in force
+AFTER it lands (else every agent is refused by rules it just typed), and a post that lands in
+a successor pad always records one (the successor holds none of the transcript that would
+otherwise vouch for it). `pad.CheckAck` is the ONE place that answers "has this author read
+them" — `UnreadRules` exists so `pad get`/`pad wait`/MCP ask it rather than re-deriving.
+
+**Making a change ARRIVE is separate from making it bind, and can only be a section.**
+`_rules.md` is not a pad file, so `internal/watch` never reports it, and `Wait` counts news
+only when a new SECTION appears — a person editing rules reaches nobody. Hence `--notify` /
+the dialog's checkbox: a `kind: notice` from `pad.SystemAuthor` in each pad the level binds.
+Both surfaces default to ANNOUNCING (box ticked, flag true), because a version nobody hears
+about binds only whoever posts next while the agents already at work carry on under the old
+one. The default belongs to the surfaces and never to `store.NotifyRulesChanged`, whose
+parameter has none: the store must not write into live conversations on its own initiative.
+What is skipped is decided by whether a pad can USE the notice — continued, full, quiet —
+never by who may READ it: a PROTECTED pad is told, through `PostRequest.ToolNotice`, which
+bypasses the password gate and nothing else. A password keeps other agents out of a pad; it
+was never a reason to leave that pad blocked by rules nobody told it about. Keep it separate
+from `SystemPost` — that one is the UI's reserved identity, and the UI still unlocks a pad
+before writing content into it. Every skip is COUNTED and reported, on the same line as the
+total, because a fan-out that quietly did less than it said reads as "everyone knows".
 
 **A privilege is a FIELD the calling code sets, never a string an agent can send.**
 `PostRequest.SystemPost` and `store.RulesWriter` exist in that shape for one reason:

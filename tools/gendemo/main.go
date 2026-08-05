@@ -171,6 +171,10 @@ func build(sc scenario, now time.Time) (string, error) {
 		if ev.Continued {
 			meta.Kind = pad.KindContinued
 		}
+		if ev.Notice {
+			meta.Kind = pad.KindNotice
+		}
+		meta.Acked = ev.Acked
 		switch {
 		case ev.Opens != "":
 			if _, dup := tasks[ev.Opens]; dup {

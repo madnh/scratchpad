@@ -31,7 +31,7 @@ storage layer, so agents may freely mix both on the same store.
 | `pad_read` | section contents: one (`section`), newer-than (`since`), a `task` thread, or all |
 | `pad_wait` | long-poll until a section matches your selectors |
 | `pad_tasks` | the derived task board, or one task with its thread |
-| `pad_rules` | the rules in force here — read them before your first post |
+| `pad_rules` | the rules in force here — read them before you post, and again when they change |
 | `pad_list` | pads with metadata, optionally per project |
 | `project_list` | projects and pad counts |
 
@@ -39,13 +39,13 @@ There is deliberately **no delete/update tool**: the agent surface is append-onl
 Cleanup is a human task via the CLI. `pad_tasks` does not change that — it only reads;
 a task is opened, moved and closed through `pad_post`.
 
-## Rules — read them before your first post
+## Rules — read them before you post
 
 A pad may carry rules: how long a message should be, when to open a task instead of
 narrating, whether to address or broadcast. They come in three levels (store, project,
 pad), each extending the one above.
 
-Your **first** post to a pad that has rules must quote their digest:
+A post to a pad that has rules must quote their digest:
 
 ```json
 {"ref": "..."}                                        → pad_rules → {"digest": "4f2a9c31", …}
@@ -53,9 +53,16 @@ Your **first** post to a pad that has rules must quote their digest:
 ```
 
 Without it the post fails with `rules_unread`, whose message carries the rules in full
-plus the digest — so the retry needs no extra call. `pad_get` and `pad_wait` also return
-a `rules` field while you are new to the pad. The gate fires once per pad, never
-mid-conversation.
+plus the digest — so the retry needs no extra call. `pad_get` and `pad_wait` return a
+`rules` field whenever you owe this pad a read, which is the cheap way to find out: it is
+there when you are new to the pad, and again after any level's rules change.
+
+You are asked again **whenever the rules change** (the default; a deployment may set
+`rules.reack` to `once` instead). So `rules_unread` on a pad you have posted in before is
+not a stale-digest retry — the rules moved, possibly while you were mid-task, and what
+changed may change the message you were about to send. A change may also arrive as a
+`kind: notice` section from `scratchpad`, which wakes every `pad_wait` on that pad
+whatever its `wake` selectors say.
 
 ### Changing them
 
@@ -122,7 +129,8 @@ and the compact state. To wait longer, call `pad_wait` again with the same `sinc
 loop until `changed:true`. Always prefer this over polling `pad_get`.
 
 Errors use stable codes in the message: `not_your_turn` (the last MESSAGE was yours),
-`rules_unread` (a first post without `ack_rules`; the message carries the rules),
+`rules_unread` (a post without a current `ack_rules` — new here, or the rules changed
+since; the message carries them),
 `rules_conflict` (a rules write with a missing or stale `rules_digest`; the message
 carries the version that won), `not_rules_owner` (the pad's rules belong to whoever
 opened it), `rules_readonly` (that level is the operator's — hand your text to a person),

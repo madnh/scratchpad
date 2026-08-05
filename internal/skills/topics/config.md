@@ -66,10 +66,24 @@ first four groups and leaves the security-bearing ones alone).
 ## Rules
 
 `_rules.md` (store) and `projects/<p>/_rules.md` (project) hold the prose rules that
-agents must acknowledge before their first post to a pad; a pad's own rules live inside
-it as a `kind: rules` section. Read them with `rules` / `project rules <p>` /
-`pad rules <ref>`. A missing or blank file means "no rules at this level", so there is
-nothing to configure to turn the feature off.
+agents must acknowledge before posting to a pad; a pad's own rules live inside it as a
+`kind: rules` section. Read them with `rules` / `project rules <p>` / `pad rules <ref>`.
+A missing or blank file means "no rules at this level", so there is nothing to configure
+to turn the feature off.
+
+**When the acknowledgement is asked for again** is `rules.reack`: `"on-change"` (the
+default) re-gates every agent whenever the rules in force change at any level, so an edit
+binds the agents already working; `"once"` asks on an author's first post to a pad and
+never again. The receipt lives in the pad, as `acked` on the section that quoted it.
+
+A change to either FILE level is ANNOUNCED into the pads it binds by default — a `kind:
+notice` section that wakes everyone waiting there, so an agent mid-task hears about it
+rather than discovering it at its next post. The Web UI's rules dialog ships the box
+ticked; `rules --set` / `project rules --set` announce unless you pass `--notify=false`.
+Pads that are continued, full, or quiet for longer than `rules.notify_active_days`
+(default 7) are skipped, and the counts are reported. A password-protected pad IS told —
+the password keeps other agents out of it, it is not a reason to leave it uninformed about
+rules that bind it — while reading and posting there still need the password.
 
 **Writing** them answers two questions. WHO is the marker's `rules` group: by default
 `store` and `project` are `"ui"` (the operator's — the Web UI or the file itself; an

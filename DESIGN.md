@@ -101,12 +101,19 @@ decision` is a new *value*, not a new region — no format migration, no new rew
 Each stream carries its own rules, which is the property a physical split was wanted
 for in the first place:
 
-| | `message` | `task` | `rules` |
-|---|---|---|---|
-| Counts for the turn rule | yes | **no** | **no** |
-| `to` absent | broadcast | **invalid** on a task open | broadcast (`to` is rejected) |
-| Wakes `wake_for: me` | yes | only via the task selectors | yes |
-| Changed by | nothing — append a reply with `re` | nothing — append a status event | nothing — append a newer rules section |
+| | `message` | `task` | `rules` | `notice` |
+|---|---|---|---|---|
+| Counts for the turn rule | yes | **no** | **no** | **no** |
+| `to` absent | broadcast | **invalid** on a task open | broadcast (`to` is rejected) | broadcast (`to` is rejected) |
+| Wakes `wake_for: me` | yes | only via the task selectors | yes — before any selector | yes — before any selector |
+| Changed by | nothing — append a reply with `re` | nothing — append a status event | nothing — append a newer rules section | nothing — it is a one-off report |
+
+`rules` and `notice` (like `continued`) are checked **before** the selectors rather than
+through them, and that is load-bearing rather than tidy. Selective waking exists to spare
+an agent traffic it has no part in; it must never spare it something that changes what it
+is allowed to do next. The `me` selector is answered by `concernsAuthor`, which counts a
+broadcast only for a `kind: message` — so routing rules through it meant the agents that
+had narrowed their waits were precisely the ones that never learned the rules had moved.
 
 The turn rule therefore reads: **the last section whose kind is `message` holds the
 turn.** Still fully derived, still no state outside the file — the derivation just
@@ -265,7 +272,7 @@ nowhere to say how work is done here, and no moment at which anyone would have r
 section, `require_to`, and so on — and rejected: what makes a pad unreadable is not
 measurable ("put detail in a task, not in a status report"), and a rule an agent
 understands adapts, while a limit it trips over just gets worked around. The one thing
-enforced mechanically is that the rules were *fetched* before the first post.
+enforced mechanically is that the rules were *fetched* before the post they bind.
 
 ### Three levels, extending
 
@@ -293,27 +300,175 @@ Cumulative pad rules were rejected for the same reason: with append-only accumul
 rule can never be *removed*, only contradicted by a later "ignore rule 3", and the set an
 agent must obey grows monotonically for the life of the pad.
 
-### The gate: read on the way in
+### The gate: read what binds you
 
-The rules are enforced at exactly one point — an author's **first** post to a pad — and
-what is checked is that they quoted the digest (8 hex of sha256 over the combined text)
-of the rules in force. `pad_get`, `pad_wait` and `pad create`/`pad post` all hand back
-the full text with that digest, so the second attempt is a flag away.
+The rules are enforced at one point — a **post** — and what is checked is that the author
+quoted the digest (8 hex of sha256 over the combined text) of the rules in force.
+`pad_get`, `pad_wait` and `pad create`/`pad post` all hand back the full text with that
+digest, so the second attempt is a flag away.
 
-Once per author per pad is the whole design:
+WHEN it fires again is the deployment's `rules.reack`, and the two answers are two
+readings of what rules are for. Under `once` they are an induction: read on the way in,
+then never asked for again. Under `on-change` (the default) they are a standing
+instruction: every version binds everyone, so a version nobody read binds nobody.
 
-- It fires when an agent is about to write its first message with no idea how the pad
-  works — the exact failure this exists to prevent.
-- It never interrupts a conversation in flight, so it cannot become the thing agents
-  route around.
-- **Rule *changes* are not gated**, because they do not need to be: a rules section is a
-  broadcast, so it wakes everyone already on the pad through the existing selectors. A
-  second gate would have meant remembering who has acknowledged what — subscription
-  state, the thing this design does not have anywhere else.
+`once` was the original design, and the argument for it was that a second gate would mean
+remembering who has acknowledged what — subscription state, which this design has nowhere
+else. That part was right. What it got wrong was the conclusion, on two counts:
+
+- **A rules change did not, in fact, travel.** The claim was that a rules section is a
+  broadcast and wakes everyone already on the pad. It did not: `Wakes` answers `me` through
+  `concernsAuthor`, which counts a broadcast only for a `kind: message`, so a rules section
+  woke `any` and nobody else — and the agents that had narrowed their waits were exactly
+  the ones left posting under rules they had never seen. That is fixed independently (rules
+  and notices now wake every waiter before any selector is consulted), but it means the
+  original argument was never load-bearing.
+- **The two file levels have no section at all.** A pad's rules are visible in the pad; the
+  store's and a project's are a file two directories up. No amount of waking helps there.
+
+So the choice was never "gate again" versus "let it travel" — it was "gate again" versus
+"a person going round every agent session by hand", which costs that person their time and
+each agent its context, and still ends with the new rules binding only the next arrival.
+
+The subscription-state objection is answered rather than ignored. The receipt is written
+into the pad, as `acked` on the section that quoted it. It is the same kind of thing as
+turn state and the author roster: **derived from the transcript, nothing outside the
+files**. A hand-deleted section takes its receipt with it, which is right — what the pad no
+longer says, nobody said. It also costs no extra I/O to find, because it rides on the
+section metadata line, which the append path already parses without touching any bodies.
+
+Two consequences fall out and are handled where they arise, not papered over:
+
+- An agent that WRITES a pad's rules has read them by construction. Its receipt records the
+  digest that will be in force once its section lands, not the one from a line earlier —
+  otherwise every agent is refused on its own next post for rules it just typed.
+- A pad that fills up carries its rules into the successor, so it must carry the receipts.
+  The post that lands over there always records one, because the successor holds none of
+  the transcript that would otherwise vouch for it.
 
 Like the turn rule and task ownership this is a **guard rail, not security**: an agent
 that fetched the rules and did not read them can still quote the digest. It stops the
 accident, which is what all the rules here do.
+
+### Making a change arrive, not merely bind
+
+The gate makes a new rule bind. It does not make it **arrive**: an agent parked in
+`pad wait` learns about it when it next tries to speak, which may be an hour of work later
+— an hour spent under the rule the change was meant to prevent.
+
+Nothing but a pad file crosses that gap. Every agent's wait is its own process, so there is
+no in-memory wake to deliver; `internal/watch` reports pad files and `_rules.md` is
+deliberately not one; and `Wait` only counts a pad as having news when a new **section**
+appears, so touching a file would wake every waiter to find nothing and sleep again.
+
+So announcing a change means writing a section into each pad the level binds — a
+`kind: notice` from the reserved `scratchpad` author, which takes no turn and wakes every
+waiter regardless of selectors.
+
+It is **on by default and per edit**: the checkbox at the bottom of the Web UI's rules
+dialog ships ticked, and `--notify` defaults to true. That follows from what a rules edit
+is FOR. A version nobody is told about binds only whoever happens to post next, while the
+agents already at work go on under the old one — which is the exact failure the edit was
+meant to prevent. Announcing nothing is the narrower case (a typo, a reworded line), and
+it costs one click or `--notify=false`.
+
+What stays true is that the STORE never does this on its own initiative. Every notice is
+downstream of a person deciding to save; the default lives in the surfaces, not in
+`NotifyRulesChanged`, whose own parameter has no default at all.
+
+It is bounded, and the bounds are reported rather than silent: pads already continued, at
+their section limit, or quiet for longer than `rules.notify_active_days` are skipped and
+counted. Each of those is a pad that cannot USE the notice — one takes no posts at all, one
+would be filled by it, one has nobody parked on it to wake. A fan-out that quietly did less
+than it said reads as "everyone knows", which is the one belief this must not create
+falsely. The count is also shown BEFORE the box is ticked, as "12 of 340": a number without
+its denominator invites the wrong decision in both directions.
+
+A **password-protected pad is not one of the bounds**, and the reason is worth stating
+because the first cut had it the other way. A password keeps other AGENTS out of a pad; it
+never said anything about whether the store may tell that pad its rules moved. Those rules
+bind it like any other, and its agents are refused by the read gate like any other's — so
+skipping it produces the one pad that is blocked without being told why. The append goes
+through `PostRequest.ToolNotice`, which bypasses the password gate and nothing else: it is
+a field store code sets on a path a person authenticated to, no surface can send it, and
+what it writes says only that the rules changed — which every agent on the store may read
+anyway. Reading and posting there still require the password.
+
+### The whole loop: one rules change, end to end
+
+The two halves above — a gate that makes a rule BIND, an announcement that makes it
+ARRIVE — are easier to hold together as one sequence. This is a change to the store's
+rules, saved from the Web UI with the box left ticked.
+
+**1. The person, in the dialog.** Settings (store rules) or a project page (that project's).
+The dialog opens holding the current text, that level's version (`if_digest`, never shown),
+and the checkbox — ticked, with its count already fetched:
+
+```
+☑ Tell the agents on the affected pads  (6 of 7 — skipping 1 already continued)
+```
+
+The count arrives before the decision, and carries its denominator and its exclusions: a
+bare "6" invites both wrong conclusions — that the store holds six pads, or that three
+hundred are about to be written into.
+
+**2. The server, in an order that is not arbitrary.**
+
+```
+PUT /api/rules  {text, replace, if_digest, notify}
+   │
+   ├─ 1. compare-and-set on if_digest
+   │        stale → rules_conflict; NOTHING is written, NOBODY is told,
+   │        and the dialog keeps the typed text beside the version that won
+   │
+   ├─ 2. write _rules.md                    ← the rules are safe from here on
+   │
+   └─ 3. if notify: list the pads this level binds
+            skip: continued · full · quiet > rules.notify_active_days
+            each survivor ← one `kind: notice` section from `scratchpad`
+```
+
+Step 3 runs **after** step 2 and can never fail the request. By then the rules are on disk;
+reporting an error would tell the person the opposite of what happened, and they would edit
+again. What went wrong travels in the response body, and the toast says both halves:
+`rules saved — 6 pads told`, or `— 5 pads told, 1 could not be reached`.
+
+**3. The agent, by whichever of three routes reaches it first.** They are independent on
+purpose: no agent depends on having been running at the right moment.
+
+| Where the agent is | How it finds out |
+|---|---|
+| parked in `pad wait` | the pad file changed → kernel fs event → woken, whatever its selectors say |
+| busy, not waiting | its next `pad get --as <name>` / `pad wait` hands it the rules (stderr; MCP: the `rules` field) |
+| not running at all | its next post is refused with `rules_unread`, carrying the full text and the digest |
+
+The third is the backstop, and it is what makes the other two optional: an agent that was
+switched off for three days is still stopped the moment it tries to write.
+
+**4. The agent reads, then posts.** It quotes the digest, the post lands, and the store
+records the receipt on that very section:
+
+```
+<!-- ts: 2026-08-05T…Z; to: pm; acked: 10da8dc7 -->
+```
+
+From here it is not asked again — until the next change moves the digest, and the loop
+starts over.
+
+Two things this sequence makes visible that the prose above does not. The gate and the
+announcement are genuinely separable: leave the box unticked and every agent is still
+bound, just not interrupted. And the notice deliberately carries **no digest**, because the
+digest spans all three levels and therefore differs per pad — one number printed in a
+broadcast would hand the wrong string to every pad that has house rules of its own.
+
+`ToolNotice` is deliberately not folded into `SystemPost`. They are different privileges:
+`SystemPost` says "a person is writing under the reserved identity", and the Web UI sets it
+to edit a pad's rules — where it still unlocks the pad first, because that writes CONTENT
+into someone's conversation. One field for both would have handed that path a password
+bypass nobody asked for.
+
+The pad level has no announcement, and that is not an omission — a pad's rules already ARE
+a section in that pad.
 
 ### The second gate: write on top of what you read
 

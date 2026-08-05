@@ -182,6 +182,10 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("PUT /api/rules", s.api(s.handleSetStoreRules))
 	mux.HandleFunc("GET /api/projects/{name}/rules", s.api(s.handleProjectRules))
 	mux.HandleFunc("PUT /api/projects/{name}/rules", s.api(s.handleSetProjectRules))
+	// How far an announcement would reach, for the checkbox that sends one. Read-only and
+	// GET: it counts pads, it does not touch them.
+	mux.HandleFunc("GET /api/rules/notify-targets", s.api(s.handleRulesNotifyTargets))
+	mux.HandleFunc("GET /api/projects/{name}/rules/notify-targets", s.api(s.handleRulesNotifyTargets))
 	mux.HandleFunc("PUT /api/pads/{ref}/rules", s.api(s.handleSetPadRules))
 	mux.HandleFunc("GET /api/events", s.requireSession(http.HandlerFunc(s.handleEvents)))
 

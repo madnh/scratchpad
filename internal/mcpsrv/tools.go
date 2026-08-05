@@ -71,7 +71,7 @@ type postInput struct {
 	TaskOpen bool     `json:"task_open,omitempty" jsonschema:"open a NEW task: the server allocates its number and returns it. Requires 'to' — a task must have an owner"`
 	Task     int      `json:"task,omitempty" jsonschema:"the number of an EXISTING task this section concerns; combine with status to move it, or use it alone on a message that merely references the task"`
 	Status   string   `json:"status,omitempty" jsonschema:"move the task to open, wip, blocked, done or dropped. Setting this is what makes the section a task EVENT — exempt from the turn rule, part of the task's record, and the owner's answer for it. Only its owners (their own slice) or its opener (reassign/drop/force-close) may set it"`
-	AckRules string   `json:"ack_rules,omitempty" jsonschema:"the digest of the rules in force on this pad (see pad_rules). Required on your FIRST post to a pad that has rules; a rules_unread error carries them in full along with the digest to quote"`
+	AckRules string   `json:"ack_rules,omitempty" jsonschema:"the digest of the rules in force on this pad (see pad_rules). Required on your first post to a pad that has rules, and again after the rules change; a rules_unread error carries them in full along with the digest to quote"`
 	SetRules bool     `json:"set_rules,omitempty" jsonschema:"post this section as the pad's RULES rather than a message: how agents here are expected to work. It replaces the pad's previous rules (the old ones stay in the pad as history), takes no to/task/status, and does not take the turn. By default only the agent that OPENED the pad may do this"`
 	Replace  bool     `json:"replace,omitempty" jsonschema:"with set_rules: these rules REPLACE the project's and the store's instead of extending them"`
 
@@ -145,9 +145,9 @@ type getOutput struct {
 	Participants []pad.Participant `json:"participants"`
 	Inbox        *pad.Inbox        `json:"inbox,omitempty"`
 
-	// Rules is present only when `author` has never posted here and the pad has rules:
-	// the one moment they need reading, delivered before the first post rather than as
-	// the error that rejects it.
+	// Rules is present only when `author` still owes this pad a read — new here, or here
+	// all along and the rules have moved since. Delivered on the call the agent arrives
+	// with, rather than as the error that rejects the post it had already written.
 	Rules *pad.Rules `json:"rules,omitempty"`
 }
 
@@ -222,21 +222,23 @@ func (s *Server) padRules(_ context.Context, _ *mcp.CallToolRequest, in rulesInp
 	return nil, rulesOutput{Rules: rules}, nil
 }
 
-// rulesFor returns the rules an author must acknowledge before their first post here, and
-// nothing at all once they have posted. Attaching it to pad_get and pad_wait is what makes
-// the gate teachable rather than merely blocking: an agent meets the rules on the call it
-// uses to arrive at the pad, not in the error for the message it already wrote.
+// rulesFor returns the rules an author must acknowledge before it may post here, and
+// nothing at all once it has. Attaching it to pad_get and pad_wait is what makes the gate
+// teachable rather than merely blocking: an agent meets the rules on the call it uses to
+// arrive at the pad, not in the error for the message it already wrote.
+//
+// Which is exactly why the question is the store's to answer and not this file's. Under
+// reacking, "has this author read them" stops meaning "has it posted here" — and a surface
+// still asking the old question would go quiet at the very moment the rules moved, leaving
+// the agent to discover it by being refused.
 func (s *Server) rulesFor(p *store.Pad, author string) *pad.Rules {
-	if author == "" || p.HasPosted(author) {
-		return nil
-	}
 	// From the pad the caller already parsed: its password was checked when it was
 	// loaded, and reading it again would rebuild every section body for nothing.
-	rules, err := s.store.RulesOf(p)
-	if err != nil || rules.Empty() {
+	rules, err := s.store.UnreadRules(p, author)
+	if err != nil {
 		return nil
 	}
-	return &rules
+	return rules
 }
 
 // --- pad_read ---

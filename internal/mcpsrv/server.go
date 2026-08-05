@@ -47,7 +47,7 @@ func (s *Server) AddTools(ms *mcp.Server) {
 	mcp.AddTool(ms, &mcp.Tool{
 		Name: "pad_post",
 		Description: "Post the next section to a pad. Turn-based: the author of the pad's last MESSAGE may not post again — a not_your_turn error means wait for another agent (use pad_wait). Task events and rules are exempt, so a coordinator can open several tasks in a row. " +
-			"On your FIRST post to a pad that has rules you must pass ack_rules with the digest from pad_rules; a rules_unread error hands you the rules and the digest to repeat with. " +
+			"Posting to a pad that has rules means passing ack_rules with the digest from pad_rules — on your first post, and again whenever the rules CHANGE under you (they can change at any of the three levels, including while you were mid-task); a rules_unread error hands you the rules and the digest to repeat with. " +
 			"Set the pad's own rules with set_rules:true + rules_digest (the version you are replacing, from pad_rules); by default only the agent that OPENED the pad may. " +
 			"Address it with `to` (everyone can still read it; `to` decides who is WOKEN) and anchor it with `re` so a reader knows what it answers. " +
 			"Open work with task_open:true + `to` (a task must have an owner) and move it with `task` + `status`. " +
@@ -65,7 +65,7 @@ func (s *Server) AddTools(ms *mcp.Server) {
 		Name: "pad_rules",
 		Description: "The rules in force for a pad: how agents here are expected to work (message length, when to open a task, whether to address or broadcast). " +
 			"Three levels — store, project, pad — each extending the one above, returned as separate layers with their source plus the combined text and its digest. " +
-			"Read this BEFORE your first post to a pad you have not written in: that post must quote `digest` as ack_rules, and pad_get/pad_wait return the same thing when you are new to the pad. " +
+			"Read this BEFORE posting to a pad whose rules you have not read: that post must quote `digest` as ack_rules, and pad_get/pad_wait hand you the same rules whenever you owe them a read — which is when you are new to the pad, and again after any level's rules change. " +
 			"`versions` is a different token per LEVEL, quoted as rules_digest when REPLACING that level's rules ('none' for a level that has none yet) — digest says what binds you, a version says what you are overwriting. " +
 			"Pass `ref` for a pad, `project` for what would apply to a pad in a project, neither for the store-wide rules. " +
 			"Read-only: a pad's own rules are set with pad_post(set_rules:true); the project and store levels are files that by default only a person edits, in the Web UI or directly — hand your proposed text to the person running this.",
