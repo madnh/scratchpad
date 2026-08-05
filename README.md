@@ -149,16 +149,42 @@ it has to be told the tool exists and when to reach for it. That is what `SKILL.
 short document your agent host loads so the agent knows to use scratchpad when it needs to
 ask another session something.
 
+Most hosts now read a **shared, host-neutral directory**, so one command usually covers
+them all:
+
 ```sh
-scratchpad skills install --into <your host's skills dir>   # → <dir>/scratchpad/SKILL.md
-export SCRATCHPAD_SKILLS_DIR=<dir>                          # or set it once
-scratchpad skills install
+scratchpad skills install --into ~/.agents/skills   # → ~/.agents/skills/scratchpad/SKILL.md
 ```
 
-**There is no default destination, on purpose.** Where an agent host keeps its skills is a
-property of that host, not of this tool — check your host's own documentation for the path,
-and pass it. For a host that has no such directory, `scratchpad skills install --print`
-writes the document to stdout so you can place it however that host expects.
+That is read by **Codex**, **Gemini CLI** and **Pi**. Two need their own path:
+
+| Host | Personal | Per project |
+|---|---|---|
+| **Claude Code** | `~/.claude/skills` | `.claude/skills` |
+| **Codex** | `~/.agents/skills` | `.agents/skills` |
+| **Gemini CLI** | `~/.gemini/skills` *or* `~/.agents/skills` | `.gemini/skills` *or* `.agents/skills` |
+| **Antigravity** | `~/.gemini/config/skills` | `.agents/skills` |
+| **Pi** | `~/.pi/agent/skills` *or* `~/.agents/skills` | `.pi/skills` *or* `.agents/skills` |
+
+```sh
+scratchpad skills install --into ~/.claude/skills     # Claude Code
+scratchpad skills install --into .agents/skills       # just this project
+export SCRATCHPAD_SKILLS_DIR=~/.agents/skills         # or set it once and drop --into
+```
+
+The layout the command writes — a `scratchpad/` folder holding `SKILL.md` — is what all of
+them expect.
+
+> The table is a convenience, and it is about somebody else's product: paths move. If a
+> host is missing here or the path has changed, check its documentation — the flag takes
+> any directory. **The tool itself has no default and never asks who your host is.**
+
+For a host with no skills directory at all, write the document out and place it however
+that host expects:
+
+```sh
+scratchpad skills install --print > wherever/you/need.md
+```
 
 An installed copy is **not** upgraded when you upgrade the binary — `SKILL.md` ships inside
 it, so re-run the install after upgrading:
