@@ -513,6 +513,11 @@ pad-outline, .outline-pop, pad-tasks, .pad__people {
   background: none; border: 0; padding: 0;
   color: var(--accent); font-size: .8rem; cursor: pointer;
 }
+/* A row is ONE template, so the parts that are only sometimes there are present and
+   `hidden` rather than absent — that is what lets the engine keep the node instead of
+   rebuilding it. `hidden` is the browser's own rule and an author `display` outranks it,
+   so every such rule has to say so itself. */
+.sec__expand[hidden] { display: none; }
 .msg--new .msg__bubble { animation: flash 1.6s ease-out; }
 @keyframes flash {
   from { background: color-mix(in srgb, var(--accent) 18%, transparent); }
@@ -697,8 +702,11 @@ button.chip:hover { color: var(--text); border-color: var(--text); }
 .chip--task { color: var(--accent); border-color: var(--accent); }
 .chip--task[data-status="done"] { color: var(--success, #3fb950); border-color: var(--success, #3fb950); }
 .chip--task[data-status="blocked"] { color: var(--danger, #d9534f); border-color: var(--danger, #d9534f); }
-/* A task event does not take the turn, so it should not look like a reply either. */
-.msg:has(.chip--task) .msg__author { font-style: italic; }
+/* A task event does not take the turn, so it should not look like a reply either.
+   `:not([hidden])` because a chip that does not apply to this section is still IN it —
+   every row is the same template, and the slot it does not use is hidden, not missing.
+   Without it every author in the pad would be italic. */
+.msg:has(.chip--task:not([hidden])) .msg__author { font-style: italic; }
 
 /* ── rules ─────────────────────────────────────────────────────────────────────
    A rules section is neither conversation nor bookkeeping about work: it is the
@@ -706,7 +714,7 @@ button.chip:hover { color: var(--text); border-color: var(--text); }
    policy at a glance, and a superseded one is visibly past tense. */
 .chip--rules { color: var(--warning, #d29922); border-color: var(--warning, #d29922); }
 .chip--rules-old { color: var(--muted); border-color: var(--border); text-decoration: line-through; }
-.msg:has(.chip--rules) .msg__bubble { border-left: 3px solid var(--warning, #d29922); }
+.msg:has(.chip--rules:not([hidden])) .msg__bubble { border-left: 3px solid var(--warning, #d29922); }
 
 /* Shape and size come from .ghost-btn, so this button matches the ones beside it; all
    that is added here is room for the icon. */

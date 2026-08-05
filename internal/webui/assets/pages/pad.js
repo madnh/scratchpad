@@ -34,6 +34,8 @@ import "/components/pad-tasks.js";
 import "/components/pad-search.js";
 import { rulesChip, showRules } from "/components/rules-dialog.js";
 
+import { html, renderResult } from "/vendor/puredashboard/reactive.js";
+
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
@@ -442,8 +444,8 @@ export default function mount(outlet, ctx) {
 
     // The API hands back ascending sections; reverse them for a newest-first read.
     const ordered = newestFirst ? [...visible].reverse() : visible;
-    const chat = el("div", { class: "chat", dataset: { order } },
-      ordered.map((sec) => sectionNode(sec)));
+    const chat = el("div", { class: "chat", dataset: { order } });
+    renderResult(html`${ordered.map((sec) => sectionRow(sec))}`, chat);
     body.append(chat);
 
     if (!visible.length) {
@@ -1048,7 +1050,11 @@ export default function mount(outlet, ctx) {
   // component's own reflected state, so this stays true however it was rendered.
   const pendingLazy = () => body.querySelectorAll('puredashboard-lazy[data-state="pending"]');
 
-  function deferMarkdown(box, content, clamped) {
+  // lazyBody hands back the <puredashboard-lazy> for one section, as a NODE bound into
+  // the row's template rather than as markup inside it. The component is configured
+  // through properties and its content is built by a callback, neither of which a
+  // template can express.
+  function lazyBody(content, clamped) {
     const lz = el("puredashboard-lazy", { class: "sec__lazy" });
     lz.rootMargin = LAZY_MARGIN;
     // A guessed height keeps the scrollbar still while bodies materialise above the
@@ -1059,7 +1065,7 @@ export default function mount(outlet, ctx) {
       md.value = content;
       return md;
     };
-    box.replaceChildren(lz);
+    return lz;
   }
 
   // A clamped body is capped at the clamp height; an open one is guessed from its
@@ -1107,134 +1113,107 @@ export default function mount(outlet, ctx) {
     }, { timeout: 3000 });
   }
 
-  // sectionNode builds one message: the author's avatar, then a bubble holding the
+  // sectionRow builds one message: the author's avatar, then a bubble holding the
   // section's title and prose — clamped when it is long, so a 5000-word section does
   // not bury the messages around it.
   //
   // Every message sits on the same side. A pad is a group conversation between N
   // agents with no "me" to mirror against, so the left/right split of a two-party
   // chat has nothing to encode here; the avatar carries the identity instead, on a
-  // colour hashed from the author's name so an agent looks the same in every pad.
-  function sectionNode(sec) {
-    const long = sec.content.length > CLAMP_BYTES;
-    const clamped = long && !expandAll && sec.n !== pad.section_count;
-
-    const bodyBox = el("div", { class: "sec__body", dataset: { clamped: String(clamped) } });
-    deferMarkdown(bodyBox, sec.content, clamped);
-
-    const bubble = el("div", { class: "msg__bubble" },
-      sec.title ? el("div", { class: "msg__title", text: sec.title }) : null,
-      bodyBox,
-    );
-
-    if (long) {
-      const toggle = el("button", {
-        type: "button", class: "sec__expand",
-        text: clamped ? "Expand" : "Collapse",
-      });
-      toggle.addEventListener("click", () => {
-        // Expanding is a request to read this body NOW, so stop deferring it — the
-        // observer may not have reached it if the click came from a keyboard focus.
-        bodyBox.querySelector('puredashboard-lazy[data-state="pending"]')?.renderNow("manual");
-        const nowClamped = bodyBox.dataset.clamped !== "true";
-        bodyBox.dataset.clamped = String(nowClamped);
-        toggle.textContent = nowClamped ? "Expand" : "Collapse";
-      });
-      bubble.append(toggle);
-    }
-
-    // The avatar is written by hand rather than taken from the component library:
-    // that one derives initials from a PERSON's name (first + last word), which for
-    // a one-word handle like "backend" yields a bare "B". agentInitials knows what
-    // agent handles look like. It is aria-hidden — the author's name is right next
-    // to it, so a screen reader would only hear the same thing twice.
-    const avatar = el("span", {
-      class: "msg__avatar", text: agentInitials(sec.author),
-      title: sec.author, "aria-hidden": "true",
-    });
-    avatar.style.setProperty("--avatar-bg", `var(--avatar-c${agentColorIndex(sec.author)})`);
-
-    const node = el("article", {
-      class: justArrived.has(sec.n) ? "msg msg--new" : "msg",
-      dataset: { section: String(sec.n) },
-    },
-      avatar,
-      el("div", { class: "msg__col" },
-        el("div", { class: "msg__head" },
-          el("span", { class: "msg__author", text: sec.author }),
-          el("span", { class: "msg__n", text: `§${sec.n}` }),
-          el("span", { class: "msg__time", title: absTime(sec.ts), text: clockTime(sec.ts) }),
-          el("span", { text: bytes(sec.content.length) }),
-          ...routingChips(sec),
-        ),
-        bubble,
-      ),
-    );
-    // Placeholder height for `contain-intrinsic-size` while the message is off-screen
-    // and its rendering is skipped: the body's estimate plus the header, the title and
-    // the bubble's padding. The browser replaces it with the real height on first
-    // render and remembers that afterwards.
-    node.style.setProperty("--msg-est", `${(estimateRem(sec.content.length, clamped) + 4.5).toFixed(1)}rem`);
-    return node;
-  }
-
-  // Routing, shown where the section is. This is what turns a transcript into a
-  // conversation you can follow: who a section was for, what it answers, and whether it
-  // is a task event (which behaves differently — it does not take the turn).
+  // colour hashed from the author's name so an agent looks the same in every pad. The
+  // avatar is written by hand rather than taken from the component library: that one
+  // derives initials from a PERSON's name (first + last word), which for a one-word
+  // handle like "backend" yields a bare "B". agentInitials knows what agent handles look
+  // like. It is aria-hidden — the author's name is right next to it, so a screen reader
+  // would only hear the same thing twice.
   //
-  // All of it is free: /api/pads/{ref} already returns the pad's ENTIRE table of
-  // contents, so the reply links and the reply count come from data the page holds, with
-  // no extra request.
+  // It is ONE template literal, and that is the whole point of it. The engine keeps a
+  // node only while the template it came from is the same array of strings, so a row
+  // that picks between two shapes — `sec.title ? … : null`, a toggle appended only when
+  // the body is long, a routing strip assembled as an array — hands back a different
+  // template whenever the section it is describing differs from the last one, and the
+  // row is rebuilt. Every one of those is a BINDING here instead: `?hidden` for the
+  // parts that are sometimes absent, so the shape is fixed and only values move.
+  //
+  // The routing chips are part of that literal for the same reason. They are what turns
+  // a transcript into a conversation you can follow — who a section was for, what it
+  // answers, whether it is a task event (which does not take the turn) — and they are
+  // free: /api/pads/{ref} already returns the pad's ENTIRE table of contents, so the
+  // reply links and the reply count come from data the page holds.
   //
   // A broadcast draws no chip. Absent `to` already means everyone, and a chip on every
   // section written before addressing existed would be noise, not information.
-  function routingChips(sec) {
+  function sectionRow(sec) {
     const meta = pad.sections.find((s) => s.n === sec.n) || sec;
-    const out = [];
+    const long = sec.content.length > CLAMP_BYTES;
+    const clamped = long && !expandAll && sec.n !== pad.section_count;
     // A rules section is marked where it sits, because it behaves differently from the
     // prose around it: it does not take the turn, and only the LAST one is in force —
     // which is why an older one says so rather than looking like current policy.
-    if (meta.kind === "rules") {
-      const inForce = pad.rules?.layers?.find((l) => l.level === "pad")?.section === meta.n;
-      out.push(el("button", {
-        type: "button", class: "chip chip--rules" + (inForce ? "" : " chip--rules-old"),
-        text: inForce ? "RULES" : "RULES (superseded)",
-        title: inForce ? "The rules in force on this pad" : "An earlier version of the pad's rules",
-        onclick: () => showRules({ kind: "pad", ref, project: pad.project }, pad.rules, {
-          onSection: (n) => pickSection(n),
-          onChange: (rules) => { pad.rules = rules; rulesEntry?.repaint(); },
-        }),
-      }));
-    }
-    if (meta.task) {
-      const chip = el("button", {
-        type: "button", class: "chip chip--task", dataset: { status: meta.status || "" },
-        title: `Show only what concerns T${meta.task}`,
-        text: meta.status ? `T${meta.task} ${meta.status}` : `T${meta.task}`,
-        onclick: () => { void selectTask(taskFilter === meta.task ? 0 : meta.task); },
-      });
-      out.push(chip);
-    }
-    for (const target of meta.to || []) {
-      out.push(el("span", { class: "chip chip--to", text: `→ ${target}` }));
-    }
-    if (meta.re) {
-      out.push(el("button", {
-        type: "button", class: "chip chip--re", text: `↩ §${meta.re}`,
-        title: `Go to the section this answers`,
-        onclick: () => pickSection(meta.re),
-      }));
-    }
+    const isRules = meta.kind === "rules";
+    const inForce = isRules && pad.rules?.layers?.find((l) => l.level === "pad")?.section === meta.n;
     const replies = pad.sections.filter((s) => s.re === sec.n);
-    if (replies.length) {
-      out.push(el("button", {
-        type: "button", class: "chip chip--replies",
-        text: `${replies.length} ${replies.length === 1 ? "reply" : "replies"}`,
-        title: replies.map((r) => `§${r.n} ${r.author}: ${r.title}`).join("\n"),
-        onclick: () => pickSection(replies[0].n),
-      }));
-    }
-    return out;
+
+    return html`
+      <article class="msg ${justArrived.has(sec.n) ? "msg--new" : ""}" data-section=${sec.n}
+               style=${`--msg-est: ${(estimateRem(sec.content.length, clamped) + 4.5).toFixed(1)}rem`}>
+        <span class="msg__avatar" title=${sec.author} aria-hidden="true"
+              style="--avatar-bg: var(--avatar-c${agentColorIndex(sec.author)})"
+        >${agentInitials(sec.author)}</span>
+        <div class="msg__col">
+          <div class="msg__head">
+            <span class="msg__author">${sec.author}</span>
+            <span class="msg__n">§${sec.n}</span>
+            <span class="msg__time" title=${absTime(sec.ts)}>${clockTime(sec.ts)}</span>
+            <span>${bytes(sec.content.length)}</span>
+            <button type="button" class="chip chip--rules ${inForce ? "" : "chip--rules-old"}"
+                    ?hidden=${!isRules}
+                    title=${inForce ? "The rules in force on this pad" : "An earlier version of the pad's rules"}
+                    @click=${() => showRules({ kind: "pad", ref, project: pad.project }, pad.rules, {
+                      onSection: (n) => pickSection(n),
+                      onChange: (rules) => { pad.rules = rules; rulesEntry?.repaint(); },
+                    })}
+            >${inForce ? "RULES" : "RULES (superseded)"}</button>
+            <button type="button" class="chip chip--task" data-status=${meta.status || ""}
+                    ?hidden=${!meta.task}
+                    title=${`Show only what concerns T${meta.task}`}
+                    @click=${() => { void selectTask(taskFilter === meta.task ? 0 : meta.task); }}
+            >${meta.status ? `T${meta.task} ${meta.status}` : `T${meta.task}`}</button>
+            ${toChips(meta.to)}
+            <button type="button" class="chip chip--re" ?hidden=${!meta.re}
+                    title="Go to the section this answers"
+                    @click=${() => pickSection(meta.re)}
+            >↩ §${meta.re || ""}</button>
+            <button type="button" class="chip chip--replies" ?hidden=${!replies.length}
+                    title=${replies.map((r) => `§${r.n} ${r.author}: ${r.title}`).join("\n")}
+                    @click=${() => pickSection(replies[0]?.n)}
+            >${replies.length} ${replies.length === 1 ? "reply" : "replies"}</button>
+          </div>
+          <div class="msg__bubble">
+            <div class="msg__title" ?hidden=${!sec.title}>${sec.title || ""}</div>
+            <div class="sec__body" data-clamped=${String(clamped)}>${lazyBody(sec.content, clamped)}</div>
+            <button type="button" class="sec__expand" ?hidden=${!long}
+                    @click=${(e) => toggleClamp(e.currentTarget)}
+            >${clamped ? "Expand" : "Collapse"}</button>
+          </div>
+        </div>
+      </article>`;
+  }
+
+  // The addressees are the one genuinely variable-length part of a row, so they are the
+  // one part that stays a list. Everything else in the strip has a fixed slot.
+  function toChips(list) {
+    return (list || []).map((target) => html`<span class="chip chip--to">→ ${target}</span>`);
+  }
+
+  function toggleClamp(toggle) {
+    const bodyBox = toggle.parentElement.querySelector(".sec__body");
+    // Expanding is a request to read this body NOW, so stop deferring it — the
+    // observer may not have reached it if the click came from a keyboard focus.
+    bodyBox.querySelector('puredashboard-lazy[data-state="pending"]')?.renderNow("manual");
+    const nowClamped = bodyBox.dataset.clamped !== "true";
+    bodyBox.dataset.clamped = String(nowClamped);
+    toggle.textContent = nowClamped ? "Expand" : "Collapse";
   }
 
   // The pad's page is the ONLY place a pad can be deleted. A destructive action
