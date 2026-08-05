@@ -106,7 +106,7 @@ export function cutChars(s, max) {
 // a readable slice of the handle.
 //
 // Keys are matched against the normalised handle and against each of its words, so
-// "backend", "Backend-2", "farmi_backend" and "backend agent" all land on BE.
+// "backend", "Backend-2", "acme_backend" and "backend agent" all land on BE.
 //
 // Null-prototype: handles are written by agents, i.e. untrusted, and a plain object
 // literal would resolve an author named "constructor" through Object.prototype and

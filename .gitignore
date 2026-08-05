@@ -5,3 +5,6 @@ dist/
 # this repo expects) — that is the whole point of it, so it is not ignored. Personal
 # overrides belong in settings.local.json, which is.
 .claude/settings.local.json
+# Nested git worktrees live here. They are full checkouts of this same repo, so a
+# stray `git add .` would try to commit a second copy of the tree.
+.claude/worktrees/
