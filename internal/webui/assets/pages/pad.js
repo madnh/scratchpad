@@ -249,15 +249,24 @@ export default function mount(outlet, ctx) {
   async function loadOlder() {
     if (!loaded.length || loadingOlder) return;
     // The button is part of a template now, so it is not rebuilt between clicks and
-    // cannot be disabled by hand — the flag is what it reads, and what clears it.
+    // cannot be disabled by hand — the flag is what it reads. Which also means NOTHING
+    // ELSE will ever put it back: when this used to disable the node itself, the next
+    // render rebuilt the button and the control healed by accident. Now a failed fetch
+    // that does not re-render leaves a dead control on the page, and a swallowed
+    // rejection leaves the reader with no idea why.
     loadingOlder = true;
     renderTranscript();
     let page;
     try {
       page = await api.sections(ref, { before: loaded[0].n, limit: PAGE });
-    } finally {
+    } catch (err) {
       loadingOlder = false;
+      if (disposed) return;
+      renderTranscript();
+      toast(`Could not load older sections: ${err.message}`, { type: "error" });
+      return;
     }
+    loadingOlder = false;
     if (disposed) return;
     loaded = [...page.sections, ...loaded];
     hasOlder = page.has_older;
@@ -465,13 +474,6 @@ export default function mount(outlet, ctx) {
     const ordered = newestFirst ? [...visible].reverse() : visible;
     pruneLazy();
 
-    // data-order on the transcript itself, because the EDGE — where the history
-    // continues, and where the pad begins — is one element that swaps ends with the
-    // reading order. "Older" is always AWAY from the newest section. It is placed by CSS
-    // rather than by rendering it twice: two "Load older" buttons in the page, one of
-    // them hidden, is a control the reader can click and a control they cannot, chosen
-    // by whichever the code guessed.
-    body.dataset.order = order;
     renderResult(html`
       <button class="newpill" type="button" ?hidden=${pendingNew === 0} @click=${() => loadLatest()}
       >${pendingNew} new section${pendingNew === 1 ? "" : "s"} ${newestFirst ? "↑" : "↓"}</button>
@@ -486,6 +488,27 @@ export default function mount(outlet, ctx) {
       </div>
       <p class="muted pad__empty" ?hidden=${visible.length > 0}>No sections match this filter.</p>`,
       body);
+
+    // The edge — where the history continues, and where the pad begins — is ONE element
+    // that swaps ends with the reading order: "older" is always AWAY from the newest
+    // section. It MOVES IN THE DOM rather than being placed by CSS `order`, and that is
+    // not a preference. `order` moves the paint and nothing else: focus order and the
+    // accessibility tree still follow the DOM, so reading newest-first the "load older"
+    // button was announced ahead of the entire transcript and tabbed into twenty screens
+    // above where it is drawn. Rendering it at both ends and hiding one is worse again —
+    // one copy is a control the reader can click and one is not, chosen by whichever the
+    // code guessed.
+    //
+    // Moving the container does not disturb the template: the engine holds its parts by
+    // node, and they travel inside it. The guards keep it to the render where the order
+    // actually changed.
+    const edge = body.querySelector(".pad__edge");
+    const chat = body.querySelector(".chat");
+    if (newestFirst) {
+      if (edge.nextElementSibling) body.append(edge);
+    } else if (edge.nextElementSibling !== chat) {
+      body.insertBefore(edge, chat);
+    }
   }
 
   // mountFrame builds everything that is NOT the transcript, exactly once.
@@ -1102,7 +1125,16 @@ export default function mount(outlet, ctx) {
 
   function lazyFor(sec, clamped) {
     const have = lazyNodes.get(sec.n);
-    if (have) return have;
+    if (have) {
+      // The node is kept, but the height it RESERVES is a guess about a clamp that can
+      // change before the body is ever parsed: expand an off-screen long section and the
+      // placeholder would still hold back the clamped 15rem, then jump by the difference
+      // when it finally renders — dragging whatever the reader was anchored to with it.
+      // Only while it is still pending; after that the component holds the real height
+      // and re-applying a guess would put a floor under it.
+      if (have.dataset.state === "pending") have.height = estimateHeight(sec.content.length, clamped);
+      return have;
+    }
     const lz = el("puredashboard-lazy", { class: "sec__lazy" });
     lz.rootMargin = LAZY_MARGIN;
     // A guessed height keeps the scrollbar still while bodies materialise above the

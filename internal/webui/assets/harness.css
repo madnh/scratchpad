@@ -70,10 +70,15 @@
    reader's place shifting, in a run where nothing about the transcript moved at all. It
    caught itself doing exactly that (352px, the height this box grows to when the first
    report lands). The report checks for it too, but a harness whose own chrome trips its
-   own guard on every run is a harness that teaches people to ignore the guard. */
+   own guard on every run is a harness that teaches people to ignore the guard.
+
+   The height has to be FIXED, but it must not be a lid: four verdict lines already come
+   to about the height of the box, and the "not trustworthy" branch writes a line long
+   enough to wrap — so `overflow: hidden` quietly cut off the last PASS/FAIL. Scroll it
+   instead. A verdict a reader cannot see is the same as a verdict that was not written. */
 .hx__verdict {
   display: grid; gap: .2rem; margin-bottom: .6rem;
-  height: 5.4rem; overflow: hidden;
+  height: 5.4rem; overflow: auto;
 }
 .hx__line { font-size: .82rem; }
 .hx__line b { font-family: var(--mono, ui-monospace, monospace); }

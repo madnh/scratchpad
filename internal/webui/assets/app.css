@@ -424,18 +424,6 @@ pad-outline, .outline-pop, pad-tasks, .pad__people {
   }
 }
 
-/* The transcript is a flex column so that ONE edge element — "load older" / "beginning
-   of the pad" — can sit at either end of it. Which end is not a choice: "older" is
-   always AWAY from the newest section, and which end that is swaps with the reading
-   order. Rendering the edge twice and hiding one copy would put two "Load older" buttons
-   in the page and leave the reader clicking whichever the code guessed. */
-.pad__transcript { display: flex; flex-direction: column; }
-.pad__transcript > .newpill { order: 0; }
-.pad__transcript > .chat { order: 2; }
-.pad__transcript > .pad__empty { order: 3; }
-.pad__transcript > .pad__edge { order: 4; }
-.pad__transcript[data-order="oldest"] > .pad__edge { order: 1; }
-
 /* ── Transcript as a chat ─────────────────────────────────────────────────────
    A pad is a conversation, so it reads as one: an avatar per author and the prose
    in a bubble beside it. Every message is on the same side — there is no "me" in a

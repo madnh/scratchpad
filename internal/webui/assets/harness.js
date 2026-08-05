@@ -211,7 +211,16 @@ function report() {
 
   // The report becomes the next baseline, so a sequence of actions can be walked one at
   // a time without pressing Baseline between each.
+  //
+  // The held section has to be re-taken WITH it. Promoting `base` and leaving `heldTop`
+  // where it was measures the shift against the original baseline while the guards that
+  // decide whether that shift is trustworthy are measured against the new one — so a
+  // second "load older" would report the FIRST one's shift, call it trustworthy, and
+  // FAIL an action that moved nothing.
   base = now;
+  const a = anchor();
+  heldSection = a ? a.section : null;
+  heldTop = a ? a.top : null;
 }
 
 function line(kind, text) { return { kind, text }; }
