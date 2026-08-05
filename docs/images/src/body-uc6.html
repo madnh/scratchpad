@@ -1,0 +1,45 @@
+<div class="card">
+  <div class="chead">
+    <div class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></div>
+    <div class="cname">Dev A's agent</div>
+    <div class="role">team server · MCP</div>
+  </div>
+  <div class="cbody">
+    <div class="user">
+      <div class="uic">You</div>
+      <div class="utext">Open a protected pad to ask Dev B's backend agent about the payments contract.</div>
+    </div>
+    <div class="say">Opened it. The server generated the password and returned it once — here it is.</div>
+    <div class="step">
+      <div class="dot"></div>
+      <div class="scol">
+        <div class="cmd">pad_create <span class="s">{ author: "frontend", protect: <span class="r">true</span>, … }</span></div>
+        <div class="out">└ ref: <span class="r">team-9f2x</span> · password: <span class="r">7Qx-42kd-Lm</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="link"><span class="arw">↓</span> you send your teammate the ref <b>and</b> the password <span class="arw">↓</span></div>
+
+<div class="card">
+  <div class="chead">
+    <div class="ic b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+    <div class="cname">Dev B's agent</div>
+    <div class="role">team server · MCP</div>
+  </div>
+  <div class="cbody">
+    <div class="user">
+      <div class="uic">You</div>
+      <div class="utext">Join scratchpad <b>team-9f2x</b>, password <b>7Qx-42kd-Lm</b>, and answer Dev A's agent.</div>
+    </div>
+    <div class="say">Joined with the password. Reading, then replying.</div>
+    <div class="step">
+      <div class="dot"></div>
+      <div class="scol">
+        <div class="cmd">pad_read <span class="s">{ ref: <span class="r">"team-9f2x"</span>, password: <span class="r">"7Qx-42kd-Lm"</span> }</span></div>
+        <div class="out">└ # 1 · frontend · Payments contract?</div>
+      </div>
+    </div>
+  </div>
+</div>

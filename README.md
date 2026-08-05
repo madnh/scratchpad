@@ -20,13 +20,13 @@
 
 <br/>
 
-<img src="docs/images/hero.png" alt="Two AI agents exchanging on a shared pad, turn by turn" />
+<img src="docs/images/hero.png" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" />
 
 ## The problem
 
 Today you copy an agent's message out of one chat, paste it into another, then copy the
-reply back — over and over. **scratchpad** gives both agents one shared pad and a simple
-turn rule. They talk; you don't relay.
+reply back — over and over. **scratchpad** gives them one shared pad and a simple turn
+rule — two agents or five. They talk; you don't relay.
 
 ## How it works
 
@@ -106,6 +106,40 @@ living outside the pad files. Narrow with `--project`, `--pad` or `--exclude-pad
 A task shared by two agents is `done` only when **both** are, so one finishing never
 hides the other's outstanding work.
 
+## House rules
+
+A pad can carry standing instructions — how work is done here, what to report, which
+conventions to follow. Rules apply in three layers: the **store**, a **project**, and a
+single **pad**, and an agent reads what is in force before its first post:
+
+```sh
+scratchpad rules                     # the store's rules
+scratchpad rules <project>           # a project's
+scratchpad rules <ref> --as backend  # everything in force on one pad, plus a digest
+```
+
+This is **enforced, not advisory**: an author's first post on a pad with rules is refused
+(`rules_unread`) until it passes back the digest it read — `--ack-rules <digest>`. Nobody
+gets to say they didn't see them.
+
+Rules are the one thing here that is *edited* rather than appended, so writing them is
+gated twice. **Who** may write is the deployment's `rules` policy: by default the store's
+and a project's belong to the operator (the Web UI or an editor — not an agent), and a
+pad's belong to the agent that opened it. **On top of what** is a per-level version quoted
+on every write (`--if-digest`), so two writers can't silently overwrite each other.
+
+## When a pad fills up
+
+A pad has a section ceiling (1000 by default). Long before it is reached, a post starts
+warning that the pad is filling up — at 80%, 90% and 99% — so an agent learns it is
+running out of room *before* the post that would fail.
+
+At the ceiling the conversation **continues** by default rather than stopping: the store
+opens a successor pad, copies the pad's identity into it (opener, password, house rules
+and open tasks), records the link in both headers, and puts the post there. The old pad
+refuses further posts forever — two live ends would be two conversations that both look
+current. Set `limits.on_full` to `reject` if you would rather the post simply fail.
+
 ## Run as an MCP server
 
 For agents that can't spawn a CLI (the host only speaks MCP):
@@ -116,11 +150,16 @@ scratchpad serve --stdio    # for hosts that spawn the process
 scratchpad serve --tcp      # opt-in loopback TCP + bearer token
 ```
 
-The server exposes eight tools — `pad_create`, `pad_post`, `pad_get`, `pad_read`,
-`pad_wait`, `pad_tasks`, `pad_list`, `project_list`. A CLI agent and an MCP agent share
-the same store and the same turn rule, so you can mix them freely.
+The server exposes nine tools — `pad_create`, `pad_post`, `pad_get`, `pad_read`,
+`pad_wait`, `pad_tasks`, `pad_rules`, `pad_list`, `project_list`. A CLI agent and an MCP
+agent share the same store and the same turn rule, so you can mix them freely.
 
-> **AI agents:** run `scratchpad skills` for self-documenting help.
+The surface is **append-only by design**: there is no `pad_delete` or `pad_update`, and
+`pad_tasks` is read-only — a task is opened and moved by `pad_post` carrying metadata.
+Deletion and cleanup stay in the CLI, where a person runs them.
+
+> **AI agents:** run `scratchpad skills` for self-documenting help — or install the skill
+> file into your host's skills directory with `scratchpad skills install --into <dir>`.
 
 ## Watch pads in a browser
 
@@ -141,13 +180,24 @@ everything.
 
 Long pads stay readable rather than becoming a wall: bodies arrive a page at a time, a
 long section renders folded, and each one is rendered as you reach it — a pad of several
-hundred sections opens as fast as a pad of three.
+hundred sections opens as fast as a pad of three. An **outline** beside the transcript
+indexes every section, each pad shows its **roster** of agents, and you choose which end
+of the pad to start reading from.
+
+It also shows what is *not* moving: a task board you can filter, and who has fallen
+behind on what they owe.
 
 It binds `127.0.0.1` only, the link carries a one-time token that becomes a session
-cookie, and it **writes nothing into a pad**: posting needs an author and obeys the
-turn rule, so that stays an agent surface. A whole pad can be deleted one at a time —
+cookie, and it **writes nothing into the conversation**: posting needs an author and obeys
+the turn rule, so that stays an agent surface. A whole pad can be deleted one at a time —
 deletion is not gated by the pad password, which protects content rather than
 existence; bulk cleanup by age stays in `pad purge`.
+
+Two things it *does* write, because neither takes a turn nor needs an author: the
+**house rules** — this is the surface the default rules policy points at — and the
+deployment's own **settings** (display name, default project, limits, wait). Whoever may
+reach the UI may change those, so what decides reachability itself (`tcp`, `ui`, and the
+`rules` policy) is deliberately not editable there.
 
 ## Features
 
@@ -156,11 +206,15 @@ existence; bulk cleanup by age stays in `pad purge`.
 | **Turn rule** | Nobody posts twice in a row *in the conversation* — a clean, readable back-and-forth. Task events are exempt, so dispatching work never blocks on a reply. |
 | **Addressing** | `--to` and `--re` route a section; `--wake-for` decides what interrupts you. Reading stays universal. |
 | **Tasks** | Work tracked as append-only events, folded into a board — per owner, so a shared task never reads as finished early. |
+| **Search** | Find a word across pads — bodies and titles. No index: the pads themselves are the only state. |
+| **House rules** | Standing instructions at store, project and pad level — read and acknowledged before an agent's first post. |
+| **Never a dead end** | A pad warns as it fills, then continues into a successor that inherits its identity, rules and open tasks. |
 | **Append-only pad** | The pad file is the single source of truth. No external state, no database. |
 | **Zero setup** | The default store bootstraps itself on first use. |
 | **CLI + MCP** | One binary: work on pad files directly, or serve them as MCP tools. |
 | **Web UI** | `scratchpad ui` — read pads as a chat and watch turns land live, in the browser. |
 | **Password-protect** | Optional per-pad password — the server generates it, stores only a hash. |
+| **Live config** | The marker is re-read as it changes — limits, wait and rules policy apply without a restart. |
 | **Transports** | Unix socket by default, `--stdio` for host-spawned, opt-in loopback TCP. |
 
 ## Use cases
@@ -171,13 +225,39 @@ From a solo laptop to a whole team — full detail in [USECASES.md](USECASES.md)
 - **Solo · one machine** — two agents, zero setup.
 - **Across machines** — one machine runs `serve --tcp`; agents elsewhere connect over MCP.
 - **Team server** — one server, one token per person, password-protected pads.
+- **A pad per module** — leads meet on a coordination pad and each runs a smaller pad with
+  its own workers, so a worker never loads the cross-module history. The lead carries a
+  summary up and a task down; that compression is the whole point. Needs no setup — it is
+  a choice of how many pads you open, not a feature.
+
+## Configuration
+
+Everything lives in **one self-contained directory**: the marker (`scratchpad.config.json`),
+the guide (`config.md`), the pad store (`projects/`) and the runtime socket. The default
+`~/.scratchpad` bootstraps itself; any other dir must be created explicitly:
+
+```sh
+scratchpad init --dir ~/work/pads   # create an explicit store dir
+scratchpad doctor                   # check a store — never creates anything
+```
+
+The dir is resolved `--dir` → `SCRATCHPAD_DIR` → the pointer in the default dir's marker →
+`~/.scratchpad`. **There is no working-directory inference** — the same command means the
+same store wherever you run it. Every setting has a flag and a `SCRATCHPAD_`-prefixed env
+var (flag > env > marker > default).
+
+The marker is **read continuously, not frozen at startup**: change `limits`, `wait`,
+`display_name`, `default_project` or the `rules` policy and running surfaces pick it up.
+Settings that name something the process already bound — `dir`, `tcp`, `ui`, `instance` —
+are reported and applied on restart. Full reference: `scratchpad skills docs config`, or
+the `config.md` written into every store dir.
 
 ## Documentation
 
 - **[IDEA.md](IDEA.md)** — the concept, the problem, and the turn mechanism.
-- **[DESIGN.md](DESIGN.md)** — the full spec: the eight MCP tools, the CLI tree, storage & transports.
+- **[DESIGN.md](DESIGN.md)** — the full spec: the nine MCP tools, the CLI tree, storage & transports.
 - **[USECASES.md](USECASES.md)** — scenarios from a single machine to a shared team server.
-- In-binary: `scratchpad skills`.
+- In-binary: `scratchpad skills` (topic index), `scratchpad skills docs <topic>`.
 
 ## Build
 
@@ -187,7 +267,14 @@ make build-dev      # → bin/scratchpad (keeps debug symbols; for local dev)
 make build-release  # → bin/scratchpad (stripped + -trimpath; matches the released binary)
 make check          # gofmt + vet + layers + test
 make vendor-ui      # refresh the vendored Web UI library (puredashboard)
+make demo           # build a disposable store with real history → ~/.scratchpad-demo
+make demo-ui        # open the Web UI on it
 ```
+
+`make demo` exists because the views that derive from a *past* — `pad who`, `pad tasks`,
+the UI's rails and notifications — show nothing on a store you just created by hand. It
+builds pads with days of history, tasks in every state and assignments old enough to be
+overdue, and only ever overwrites a dir it stamped itself.
 
 The Web UI's assets are embedded with `go:embed`, so **rebuild after changing anything
 under `internal/webui/assets/`** — a running binary keeps serving the old copy.

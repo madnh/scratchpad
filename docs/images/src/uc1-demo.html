@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#ece8e2; --card:#fff; --head:#f7f6f4; --line:#e7e3dd;
+    --ink:#2f2b28; --muted:#9a938c; --accent:#e4643c;
+    --code-bg:#f6f5f3; --flag:#e4643c; --str:#4f8a4a; --ref:#d2542c;
+    --user-bg:#fdf3ef; --user-line:#f3d9cd;
+  }
+  html,body{width:940px;background:var(--bg)}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
+    color:var(--ink); padding:26px 30px;
+  }
+  .card{background:var(--card);border-radius:18px;overflow:hidden;box-shadow:0 6px 22px rgba(60,45,35,.07)}
+  .chead{display:flex;align-items:center;gap:11px;background:var(--head);border-bottom:1px solid var(--line);padding:13px 18px}
+  .ic{width:29px;height:29px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .ic svg{width:17px;height:17px}
+  .ic.a{background:#fdece5;color:#d2542c}
+  .ic.b{background:#e8eaf6;color:#4a55a8}
+  .cname{font-weight:700;font-size:16.5px;letter-spacing:-.1px}
+  .role{margin-left:auto;color:var(--muted);font-size:13.5px}
+  .cbody{padding:15px 18px 17px}
+
+  .user{display:flex;gap:9px;align-items:flex-start;background:var(--user-bg);border:1px solid var(--user-line);
+        border-radius:11px;padding:9px 12px;margin-bottom:12px}
+  .uic{padding:1px 8px 2px;border-radius:999px;background:var(--accent);color:#fff;flex:0 0 auto;
+       display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;
+       letter-spacing:.3px;text-transform:uppercase;margin-top:3px}
+  .utext{font-size:14.5px;line-height:1.45}
+  .utext b{font-weight:600}
+
+  .say{font-size:14.5px;line-height:1.5;margin-bottom:9px}
+  .step{display:flex;gap:9px;align-items:flex-start;margin-top:8px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:0 0 auto;margin-top:12px}
+  .scol{flex:1;min-width:0}
+  .cmd{background:var(--code-bg);border-radius:8px;padding:7px 11px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;line-height:1.4;white-space:nowrap;overflow:hidden}
+  .out{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:var(--muted);padding:4px 0 0 11px}
+  .f{color:var(--flag)} .s{color:var(--str)} .r{color:var(--ref);font-weight:600}
+  .out .r{color:var(--ref)}
+
+  .link{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted);
+        font-size:14px;padding:13px 0}
+  .link .r{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px}
+  .arw{color:var(--accent);font-size:15px}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="chead">
+    <div class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></div>
+    <div class="cname">Claude Code</div>
+    <div class="role">frontend session</div>
+  </div>
+  <div class="cbody">
+    <div class="user">
+      <div class="uic">You</div>
+      <div class="utext">Use scratchpad to open a pad and ask the backend agent how auth works.</div>
+    </div>
+    <div class="say">Opening a pad now — I'll hand you the ref to pass on.</div>
+    <div class="step">
+      <div class="dot"></div>
+      <div class="scol">
+        <div class="cmd">scratchpad pad create <span class="f">--as</span> frontend <span class="f">--title</span> <span class="s">"How does auth work?"</span></div>
+        <div class="out">└ ref: <span class="r">default-ab3k9x</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="link"><span class="arw">↓</span> you pass <span class="r">default-ab3k9x</span> to the other session <span class="arw">↓</span></div>
+
+<div class="card">
+  <div class="chead">
+    <div class="ic b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 10 3 2.5L7 15"/><path d="M13 15h4"/></svg></div>
+    <div class="cname">Codex</div>
+    <div class="role">backend session</div>
+  </div>
+  <div class="cbody">
+    <div class="user">
+      <div class="uic">You</div>
+      <div class="utext">Join scratchpad <b>default-ab3k9x</b> and work with the frontend agent there.</div>
+    </div>
+    <div class="say">Joined. Reading the question, then posting my answer.</div>
+    <div class="step">
+      <div class="dot"></div>
+      <div class="scol">
+        <div class="cmd">scratchpad pad read <span class="r">default-ab3k9x</span></div>
+        <div class="out">└ # 1 · frontend · How does auth work?</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="dot"></div>
+      <div class="scol">
+        <div class="cmd">scratchpad pad post <span class="r">default-ab3k9x</span> <span class="f">--as</span> backend <span class="f">--title</span> <span class="s">"Answer"</span></div>
+        <div class="out">└ section: 2</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

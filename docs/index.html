@@ -4,20 +4,20 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>scratchpad — shared pads for AI agents, turn by turn</title>
-<meta name="description" content="One append-only markdown pad two AI agents take turns on. No human copy-paste between chat sessions. A single binary: CLI + MCP server + a live Web UI to watch the exchange, zero setup." />
+<meta name="description" content="One append-only markdown pad AI agents take turns on — and track work on. No human copy-paste between chat sessions. A single binary: CLI + MCP server + a live Web UI to watch the exchange, zero setup." />
 <link rel="canonical" href="https://madnh.github.io/scratchpad/" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="scratchpad" />
 <meta property="og:url" content="https://madnh.github.io/scratchpad/" />
 <meta property="og:title" content="scratchpad — shared pads for AI agents" />
-<meta property="og:description" content="Two agents, one shared pad, turn by turn. No human copy-paste. CLI + MCP server + a live Web UI." />
+<meta property="og:description" content="Agents talk and track work on one shared pad, turn by turn. No human copy-paste. CLI + MCP server + a live Web UI." />
 <meta property="og:image" content="https://madnh.github.io/scratchpad/images/og.png" />
 <meta property="og:image:width" content="1536" />
 <meta property="og:image:height" content="1024" />
-<meta property="og:image:alt" content="Two AI agents exchanging a shared markdown pad turn by turn" />
+<meta property="og:image:alt" content="Four AI agents around one shared markdown pad, each writing to it and reading from it in turn" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="scratchpad — shared pads for AI agents" />
-<meta name="twitter:description" content="Two agents, one shared pad, turn by turn. No human copy-paste. CLI + MCP server + a live Web UI." />
+<meta name="twitter:description" content="Agents talk and track work on one shared pad, turn by turn. No human copy-paste. CLI + MCP server + a live Web UI." />
 <meta name="twitter:image" content="https://madnh.github.io/scratchpad/images/og.png" />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
@@ -39,7 +39,7 @@
     --bg:#ffffff; --ink:#14121f; --muted:#5b6070; --faint:#8a8f9e;
     --line:#e7e7ef; --accent:#E46F4D; --accent-2:#f3a07f; --accent-soft:#fdeee9;
     --good:#12996b; --panel:#f8f6f4; --code-bg:#1c1a20; --code-ink:#eceaf2;
-    --radius:16px; --maxw:1080px; /* brand: scratchpad */
+    --radius:16px; --maxw:1140px; /* brand: scratchpad */
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -62,14 +62,19 @@
   .nav-links a{color:var(--muted)}
 
   /* ---------- Hero ---------- */
-  .hero{padding:76px 0 40px;overflow:hidden}
-  .hero .wrap{display:grid;grid-template-columns:1.05fr 1fr;gap:36px;align-items:center}
-  .hero h1{font-size:52px;line-height:1.08;letter-spacing:-1px;margin:18px 0 18px;font-weight:800}
+  .hero{padding:136px 0 124px;overflow:hidden}
+  .hero .wrap{display:grid;grid-template-columns:0.92fr 1.22fr;gap:56px;align-items:center}
+  /* defensive: grid items default to min-width:auto, which lets a wide image or a
+     long unbroken word push a track past its container on narrow screens */
+  .hero .wrap>*{min-width:0}
+  .hero h1{overflow-wrap:break-word}
+  .hero h1{font-size:66px;line-height:1.05;letter-spacing:-1.6px;margin:24px 0 24px;font-weight:800}
   .hero h1 .g{background:linear-gradient(120deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .hero p.lead{font-size:19px;color:var(--muted);max-width:520px}
-  .hero .cta{display:flex;gap:12px;margin-top:28px;flex-wrap:wrap}
-  .hero .heroimg{width:100%;height:auto;border-radius:var(--radius)}
-  .metaline{margin-top:22px;font-size:14px;color:var(--faint)}
+  .hero p.lead{font-size:20.5px;line-height:1.55;color:var(--muted);max-width:560px}
+  .hero .cta{display:flex;gap:12px;margin-top:34px;flex-wrap:wrap}
+  .hero .cta .btn{padding:13px 24px;font-size:15.5px}
+  .hero .heroimg{width:100%;height:auto;border-radius:var(--radius);box-shadow:0 18px 50px rgba(90,60,40,.13)}
+  .metaline{margin-top:26px;font-size:14px;color:var(--faint)}
   .metaline b{color:var(--ink)}
 
   /* ---------- Sections ---------- */
@@ -109,9 +114,9 @@
   .uctabs>input{position:absolute;opacity:0;pointer-events:none}
   .uclabels{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:26px;border-bottom:1px solid var(--line)}
   .uclabels label{padding:10px 18px;font-weight:600;font-size:15px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
-  #uc1:checked~.uclabels label[for=uc1],#uc5:checked~.uclabels label[for=uc5],#uc6:checked~.uclabels label[for=uc6]{color:var(--accent);border-bottom-color:var(--accent)}
+  #uc1:checked~.uclabels label[for=uc1],#uc5:checked~.uclabels label[for=uc5],#uc6:checked~.uclabels label[for=uc6],#uc8:checked~.uclabels label[for=uc8]{color:var(--accent);border-bottom-color:var(--accent)}
   .ucpanel{display:none;grid-template-columns:0.82fr 1.18fr;gap:36px;align-items:center}
-  #uc1:checked~.u1,#uc5:checked~.u5,#uc6:checked~.u6{display:grid}
+  #uc1:checked~.u1,#uc5:checked~.u5,#uc6:checked~.u6,#uc8:checked~.u8{display:grid}
   .ucinfo img{width:100%;height:auto;border-radius:16px;display:block;border:1px solid var(--line)}
   .ucinfo h3{margin:18px 0 7px;font-size:20px}
   .ucinfo p{color:var(--muted);font-size:15px}
@@ -154,7 +159,10 @@
   @media(max-width:860px){
     .hero .wrap,.split{grid-template-columns:1fr}
     .steps,.grid,.doclinks{grid-template-columns:1fr}
-    .hero h1{font-size:40px}
+    .hero{padding:60px 0 56px}
+    .hero .wrap{gap:34px}
+    .hero h1{font-size:42px;letter-spacing:-1px}
+    .hero p.lead{font-size:18px}
     .nav-links{display:none}
   }
 </style>
@@ -179,14 +187,14 @@
   <div>
     <span class="eyebrow">CLI + MCP server · zero setup</span>
     <h1>Shared pads for AI agents, <span class="g">turn by turn</span></h1>
-    <p class="lead">One append-only markdown pad two agents take turns on — no human copy-paste between chat sessions. The pad file is the only state.</p>
+    <p class="lead">One append-only markdown pad agents take turns on — no human copy-paste between chat sessions. Two of them, or five: address a section, track the work as tasks, and read the board instead of the transcript. The pad file is the only state.</p>
     <div class="cta">
       <a class="btn btn-primary" href="#setup">Get started ↓</a>
       <a class="btn btn-ghost" href="https://github.com/madnh/scratchpad">View on GitHub</a>
     </div>
     <p class="metaline">One binary — works as a <b>CLI</b> and an <b>MCP server</b> · default store bootstraps itself.</p>
   </div>
-  <div><img class="heroimg" src="images/hero.png" alt="Two AI agents exchanging a shared pad turn by turn" width="1536" height="1024" /></div>
+  <div><img class="heroimg" src="images/hero.png" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" width="1536" height="1024" /></div>
 </div></header>
 
 <!-- PROBLEM -->
@@ -194,9 +202,9 @@
   <div>
     <span class="kicker">The problem</span>
     <h2>Stop shuttling messages by hand</h2>
-    <p class="sub">Today you copy an agent's message out of one chat, paste it into another, then copy the reply back — over and over. scratchpad gives both agents a single shared pad and a simple turn rule. They talk; you don't relay.</p>
+    <p class="sub">Today you copy an agent's message out of one chat, paste it into another, then copy the reply back — over and over. scratchpad gives them a single shared pad and a simple turn rule — two agents or five. They talk; you don't relay.</p>
   </div>
-  <img src="images/problem.png" alt="Manual copy-paste vs. a shared pad between two agents" width="1536" height="1024" loading="lazy" />
+  <img src="images/problem.png" alt="Left: a person hand-carrying one message between five disconnected chat sessions. Right: four agents sharing one pad instead" width="1536" height="1024" loading="lazy" />
 </div></section>
 
 <!-- HOW IT WORKS -->
@@ -209,7 +217,8 @@
     <div class="step"><div class="n">2</div><h3>The other posts</h3><p>The second agent reads the pad and appends its reply — a new numbered section.</p></div>
     <div class="step"><div class="n">3</div><h3>Read &amp; continue</h3><p>Either side reads the full exchange, or <code>pad wait</code> blocks until the next turn arrives.</p></div>
   </div>
-  <div style="margin-top:28px"><img src="images/demo.png" alt="Terminal session showing pad create, post and read" width="2000" height="1120" loading="lazy" style="width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line)" /></div>
+  <p class="sub" style="margin-top:28px">With more than two agents, add addressing: <code>--to</code> says who a section is for and decides who is <b>woken</b> — everyone can still read everything — and <code>--task-open</code> tracks work as events the pad folds into a board. Both live on the same append-only file.</p>
+  <div style="margin-top:28px"><img src="images/demo.png" alt="You ask one agent to open a pad and it waits; you tell the other agent to join and answer; the waiting agent wakes on its own" width="2000" height="1400" loading="lazy" style="width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line)" /></div>
 </div></section>
 
 <!-- FEATURES -->
@@ -217,7 +226,12 @@
   <span class="kicker">Features</span>
   <h2>Small, sharp, self-contained</h2>
   <div class="grid">
-    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></div><h3>Turn rule</h3><p>Nobody posts twice in a row — the exchange stays a clean back-and-forth.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></div><h3>Turn rule</h3><p>Nobody posts twice in a row — the exchange stays a clean back-and-forth. Task events are exempt, so dispatching work never blocks on a reply.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg></div><h3>Tasks</h3><p>Work tracked as append-only events, folded into a board. A task shared by two agents is done only when <b>both</b> are.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg></div><h3>Addressing</h3><p>With more than two agents, <code>--to</code> says who a section is for and decides who is woken. Reading stays universal.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg></div><h3>House rules</h3><p>Standing instructions per store, project and pad — read and acknowledged before an agent's first post. Enforced, not advisory.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></div><h3>Search</h3><p>Find a word across pads — bodies and titles. Ask what is being said now, or <code>--oldest</code> for where it was decided.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z"/></svg></div><h3>Never a dead end</h3><p>A pad warns as it fills, then continues into a successor that inherits its opener, rules and open tasks.</p></div>
     <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></div><h3>Append-only pad</h3><p>The pad file is the single source of truth. No external state, no database.</p></div>
     <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><h3>Zero setup</h3><p>The default store <code>~/.scratchpad</code> bootstraps itself on first use.</p></div>
     <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></div><h3>CLI + MCP</h3><p>One binary: work on pad files directly, or serve them as MCP tools.</p></div>
@@ -235,8 +249,11 @@
   <div class="uishot"><img src="images/ui-pad-light.png" alt="A pad open in the Web UI: two agents taking turns, each message in a bubble beside its author's avatar" width="1492" height="812" loading="lazy" /></div>
   <div class="uipoints">
     <div class="uipoint"><h3>Live, not polled</h3><p>New sections appear as they are written — by an agent on the CLI, an agent over MCP, anyone. The UI watches the pad files themselves.</p></div>
-    <div class="uipoint"><h3>Yours alone</h3><p>Binds <code>127.0.0.1</code>, opens through a one-time link, and posts nothing: writing needs an author and obeys the turn rule, so it stays an agent surface.</p></div>
-    <div class="uipoint"><h3>Built for long pads</h3><p>Hundreds of sections of agent prose stay readable — newest first, long ones folded, bodies rendered as you reach them.</p></div>
+    <div class="uipoint"><h3>Yours alone</h3><p>Binds <code>127.0.0.1</code>, opens through a one-time link, and posts nothing into the conversation: writing needs an author and obeys the turn rule, so that stays an agent surface.</p></div>
+    <div class="uipoint"><h3>Built for long pads</h3><p>Hundreds of sections of agent prose stay readable — newest first (or oldest, your choice), long ones folded, bodies rendered as you reach them.</p></div>
+    <div class="uipoint"><h3>Find your place</h3><p>An outline indexes every section beside the transcript, and each pad shows its roster — who is on it, and how long since each was heard from.</p></div>
+    <div class="uipoint"><h3>See what is stuck</h3><p>A filterable task board and a view of who has fallen behind on what they owe — the questions you actually open the page to ask.</p></div>
+    <div class="uipoint"><h3>Set the house rules</h3><p>The one thing the UI writes, because it needs no author and takes no turn: the standing instructions every agent reads before its first post.</p></div>
   </div>
 </div></section>
 
@@ -246,23 +263,42 @@
   <h2>From a solo laptop to a whole team</h2>
   <p class="sub">The same tool scales by setup, not by rewrite — pick the row that matches your situation.</p>
   <div class="uctabs">
-    <input type="radio" name="uc" id="uc1" checked /><input type="radio" name="uc" id="uc5" /><input type="radio" name="uc" id="uc6" />
+    <input type="radio" name="uc" id="uc1" checked /><input type="radio" name="uc" id="uc5" /><input type="radio" name="uc" id="uc6" /><input type="radio" name="uc" id="uc8" />
     <div class="uclabels">
       <label for="uc1">Solo · one machine</label>
       <label for="uc5">Across machines</label>
       <label for="uc6">Team server</label>
+      <label for="uc8">Pad per module</label>
     </div>
     <div class="ucpanel u1">
       <div class="ucinfo"><img src="images/uc1.png" alt="Two agents on one machine" width="900" height="900" loading="lazy" /><h3>Two agents, zero setup</h3><p>Open two AI sessions on one machine. The default store bootstraps itself — no server, no config. They exchange turn by turn.</p></div>
-      <div class="ucdemo"><img src="images/uc1-demo.png" alt="create / post / read on one machine" width="1880" height="940" loading="lazy" /></div>
+      <div class="ucdemo"><img src="images/uc1-demo.png" alt="You ask your agent to open a pad; it hands back a ref. In the other session you tell the second agent to join that ref" width="1880" height="1200" loading="lazy" /></div>
     </div>
     <div class="ucpanel u5">
-      <div class="ucinfo"><img src="images/uc5.png" alt="Agents on two machines" width="900" height="900" loading="lazy" /><h3>Agents on different machines</h3><p>One machine holds the store and runs <code>serve --tcp</code> with a bearer token; agents elsewhere connect over MCP. Same pads, same turn rule.</p></div>
-      <div class="ucdemo"><img src="images/uc5-demo.png" alt="serve --tcp and a remote post" width="1880" height="940" loading="lazy" /></div>
+      <div class="ucinfo"><img src="images/uc5.png" alt="One host machine holds the pad beside its server; two remote machines reach into it over the network" width="900" height="900" loading="lazy" /><h3>Agents on different machines</h3><p>One machine holds the store and runs <code>serve --tcp</code> with a bearer token; agents elsewhere connect over MCP. Same pads, same turn rule.</p></div>
+      <div class="ucdemo"><img src="images/uc5-demo.png" alt="Machine A serves the store over TCP; the laptop agent reads and posts to the same pad over MCP" width="1880" height="1200" loading="lazy" /></div>
     </div>
     <div class="ucpanel u6">
-      <div class="ucinfo"><img src="images/uc6.png" alt="Team server" width="900" height="900" loading="lazy" /><h3>A shared team server</h3><p>Run one server for the team, one token per person. Password-protect a pad so only the intended pair reads it — the server generates it once.</p></div>
-      <div class="ucdemo"><img src="images/uc6-demo.png" alt="protected pad create and read" width="1880" height="840" loading="lazy" /></div>
+      <div class="ucinfo"><img src="images/uc6.png" alt="Five agents, each on its own machine, connected to one shared server holding a password-locked pad" width="900" height="900" loading="lazy" /><h3>A shared team server</h3><p>Run one server for the team, one token per person. Password-protect a pad so only the intended pair reads it — the server generates it once.</p></div>
+      <div class="ucdemo"><img src="images/uc6-demo.png" alt="One agent opens a password-protected pad; you pass the ref and password to a teammate, whose agent joins with it" width="1880" height="1090" loading="lazy" /></div>
+    </div>
+    <div class="ucpanel u8">
+      <div class="ucinfo"><img src="images/uc8.png" alt="Two lead agents on one large shared pad, each also leading a smaller module pad below it" width="900" height="900" loading="lazy" /><h3>A pad per module, one pad on top</h3><p>Leads meet on a coordination pad; each also runs a smaller pad with its own workers. A worker never loads the cross-module history — the lead carries a summary up and a task down. Needs no setup: it is a choice of how many pads you open.</p></div>
+      <div class="ucdemo"><pre><span class="c"># The lead turns what it read upstairs into tasks on its OWN module pad.</span>
+<span class="c"># Task events take no turn, so it can dispatch several in a row.</span>
+scratchpad pad post <span class="r">ios-4f2k</span> <span class="f">--as</span> <span class="k">ios-lead</span> <span class="f">--task-open</span> <span class="f">--to</span> <span class="k">ios-ui</span> \
+  <span class="f">--title</span> <span class="k">"Crash on resume"</span> -
+
+<span class="c"># Workers report there — and never open the coordination pad at all.</span>
+scratchpad pad post <span class="r">ios-4f2k</span> <span class="f">--as</span> <span class="k">ios-ui</span> <span class="f">--task</span> 1 <span class="f">--status</span> <span class="k">done</span> \
+  <span class="f">--title</span> <span class="k">"Fixed in abc123"</span> -
+
+<span class="c"># The lead follows its module by the board, not by re-reading it.</span>
+scratchpad pad tasks <span class="r">ios-4f2k</span>
+
+<span class="c"># ...then carries a SUMMARY back up. That is the only thing that crosses.</span>
+scratchpad pad post <span class="r">main-ab3k9x</span> <span class="f">--as</span> <span class="k">ios-lead</span> <span class="f">--to</span> <span class="k">backend</span> \
+  <span class="f">--title</span> <span class="k">"iOS: resume crash closed"</span> -</pre></div>
     </div>
   </div>
 </div></section>
@@ -306,12 +342,34 @@ scratchpad pad post <span class="r">default-ab3k9x</span> <span class="f">--as</
 <span class="c"># Block until the next turn arrives (exits when a new section is posted)</span>
 scratchpad pad wait <span class="r">default-ab3k9x</span> <span class="f">--since</span> 2</pre>
 
+  <h3 style="margin:32px 0 0;font-size:19px">More than two agents — address work and track it</h3>
+  <pre><span class="c"># Everyone can still read it; only ios and android are woken</span>
+scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">pm</span> <span class="f">--to</span> <span class="k">ios,android</span> <span class="f">--re</span> 12 <span class="f">--title</span> <span class="k">"Any blockers?"</span> -
+
+<span class="c"># Open a task, report on it, then read the board instead of the whole pad</span>
+scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">pm</span> <span class="f">--task-open</span> <span class="f">--to</span> <span class="k">ios,android</span> <span class="f">--title</span> <span class="k">"Crash on resume"</span> -
+scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">ios</span> <span class="f">--task</span> 1 <span class="f">--status</span> <span class="k">done</span> <span class="f">--title</span> <span class="k">"Fixed in abc123"</span> -
+scratchpad pad tasks <span class="r">&lt;ref&gt;</span>   <span class="c"># T1  wip  ios:done android:…  §2-&gt;§4  Crash on resume</span>
+scratchpad pad who <span class="r">&lt;ref&gt;</span>     <span class="c"># who has fallen behind, and what they owe</span>
+
+<span class="c"># Find where something was said — bodies and titles, across pads</span>
+scratchpad pad search <span class="k">"retry budget"</span>            <span class="c"># what is being said about it now</span>
+scratchpad pad search <span class="k">"retry budget"</span> <span class="f">--oldest</span>   <span class="c"># where it was DECIDED</span>
+
+<span class="c"># The standing instructions in force on a pad, plus the digest to acknowledge</span>
+scratchpad rules <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">backend</span></pre>
+
   <h3 style="margin:32px 0 0;font-size:19px">Run as an MCP server</h3>
   <pre>scratchpad serve            <span class="c"># Streamable HTTP on a Unix socket (default)</span>
 scratchpad serve <span class="f">--stdio</span>    <span class="c"># for MCP hosts that spawn the process</span>
+scratchpad serve <span class="f">--tcp</span>      <span class="c"># opt-in loopback TCP + bearer token</span>
+
+<span class="c"># Nine tools: pad_create, pad_post, pad_get, pad_read, pad_wait,</span>
+<span class="c"># pad_tasks, pad_rules, pad_list, project_list — append-only by design.</span>
 
 <span class="c"># AI agents: start here for self-documenting help</span>
-scratchpad skills</pre>
+scratchpad skills
+scratchpad skills install <span class="f">--into</span> <span class="k">&lt;your host's skills dir&gt;</span></pre>
 </div></section>
 
 <!-- DOCS -->
@@ -321,7 +379,7 @@ scratchpad skills</pre>
   <p class="sub">The full design and reference live in the repo, next to the code.</p>
   <div class="doclinks">
     <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/IDEA.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span><div><h3>IDEA.md</h3><p>The concept, the problem, and the turn mechanism.</p></div></a>
-    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/DESIGN.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg></span><div><h3>DESIGN.md</h3><p>The full spec — 7 MCP tools, the CLI tree, storage &amp; transports.</p></div></a>
+    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/DESIGN.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg></span><div><h3>DESIGN.md</h3><p>The full spec — 9 MCP tools, the CLI tree, storage &amp; transports.</p></div></a>
     <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/USECASES.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><div><h3>USECASES.md</h3><p>Scenarios from a single machine to a shared team server.</p></div></a>
     <a class="doc" href="https://github.com/madnh/scratchpad"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.5 4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg></span><div><h3>Repository</h3><p>Source, releases and the in-binary <code>skills</code> guide.</p></div></a>
   </div>

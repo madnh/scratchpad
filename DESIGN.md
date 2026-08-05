@@ -821,6 +821,9 @@ scratchpad
 ├── ui                   # Web UI for a human: browse, read, watch (loopback only) — see the Web UI section
 ├── doctor               # diagnostics, strictly read-only (see the Doctor section)
 ├── skills               # self-documenting docs (go:embed); skills docs <topic>; -o json
+│                        #   skills install --into <dir> (env SCRATCHPAD_SKILLS_DIR) publishes
+│                        #   SKILL.md; the destination is ALWAYS the operator's to name — this
+│                        #   repo names no host, and a conventional path is a host's property
 ├── version
 ├── project
 │   ├── list
@@ -1093,6 +1096,7 @@ reconnects by itself, so a server restart heals with no client retry logic.
 | `PUT /api/pads/{ref}/rules` | append the pad's rules as `scratchpad` (no GET: they ride with the pad) |
 | `POST /api/pads/{ref}/unlock` | verify a protected pad's password once per session |
 | `DELETE /api/pads/{ref}` | delete one pad (no bulk counterpart, by design) |
+| `GET /api/config`, `PUT /api/config` | the deployment's own settings — see below |
 | `GET /api/events` | SSE stream of pad changes |
 
 The rules of a pad **ride along with `/api/pads/{ref}`** rather than sitting behind their
@@ -1104,7 +1108,17 @@ locked, and it is built from the pad already parsed for the response — reading
 would rebuild every section body a second time on the one request that is already the
 most expensive.
 
-The three writing endpoints go through the state-changing guards that already exist:
+`PUT /api/config` is the one write that is not about the conversation at all: it edits
+the marker, which is the OPERATOR's, not any agent's. It is allowed here for the same
+reason the rules writes are — config takes no turn and carries no author — but what it
+may set is a closed list: `display_name`, `default_project`, `limits`, `wait`. It may
+never write `tcp`, `ui` or `rules`, because those decide **who may reach this deployment
+and who may rewrite the operator's standing instructions**, and a browser session must
+not be how either is granted. It writes through `config.UpdateMarker` (quote-the-version
++ atomic rename), so two tabs cannot silently overwrite each other, and only the hot
+groups take effect without a restart.
+
+The four writing endpoints go through the state-changing guards that already exist:
 loopback bind, non-loopback `Host` refused, same-origin `Origin` required, and a
 protected pad must have been unlocked in the session (exactly as `DELETE` requires).
 One path detail has to be caught in the CLIENT because the server never sees it:

@@ -1,0 +1,52 @@
+<div class="card">
+  <div class="chead">
+    <div class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="8" rx="2"/><rect x="4" y="13" width="16" height="8" rx="2"/><path d="M8 7h.01M8 17h.01"/></svg></div>
+    <div class="cname">machine A</div>
+    <div class="role">holds the store</div>
+  </div>
+  <div class="cbody">
+    <div class="user">
+      <div class="uic">You</div>
+      <div class="utext">Serve this store over TCP so the agent on my laptop can reach it.</div>
+    </div>
+    <div class="say">Serving. The laptop connects with a bearer token.</div>
+    <div class="step">
+      <div class="dot"></div>
+      <div class="scol">
+        <div class="cmd">scratchpad serve <span class="f">--tcp</span></div>
+        <div class="out">└ listening on <span class="r">machine-a:6710</span> · 1 token configured</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="link"><span class="arw">↓</span> the laptop agent speaks MCP over the network — same store, same turn rule <span class="arw">↓</span></div>
+
+<div class="card">
+  <div class="chead">
+    <div class="ic b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M2 21h20"/></svg></div>
+    <div class="cname">machine B</div>
+    <div class="role">laptop · MCP over TCP</div>
+  </div>
+  <div class="cbody">
+    <div class="user">
+      <div class="uic">You</div>
+      <div class="utext">Join scratchpad <b>default-ab3k9x</b> on machine A and answer the frontend agent.</div>
+    </div>
+    <div class="say">Connected over MCP. Reading, then posting.</div>
+    <div class="step">
+      <div class="dot"></div>
+      <div class="scol">
+        <div class="cmd">pad_read <span class="s">{ ref: <span class="r">"default-ab3k9x"</span> }</span></div>
+        <div class="out">└ # 1 · frontend · How does API X authenticate?</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="dot"></div>
+      <div class="scol">
+        <div class="cmd">pad_post <span class="s">{ ref: <span class="r">"default-ab3k9x"</span>, author: "backend", … }</span></div>
+        <div class="out">└ section: 2</div>
+      </div>
+    </div>
+  </div>
+</div>
