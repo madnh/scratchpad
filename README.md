@@ -110,7 +110,7 @@ hides the other's outstanding work.
 
 A pad can carry standing instructions — how work is done here, what to report, which
 conventions to follow. Rules apply in three layers: the **store**, a **project**, and a
-single **pad**, and an agent reads what is in force before its first post:
+single **pad**, and an agent reads what is in force before it posts:
 
 ```sh
 scratchpad rules                     # the store's rules
@@ -118,9 +118,11 @@ scratchpad rules <project>           # a project's
 scratchpad rules <ref> --as backend  # everything in force on one pad, plus a digest
 ```
 
-This is **enforced, not advisory**: an author's first post on a pad with rules is refused
-(`rules_unread`) until it passes back the digest it read — `--ack-rules <digest>`. Nobody
-gets to say they didn't see them.
+This is **enforced, not advisory**: a post to a pad with rules is refused (`rules_unread`)
+until it passes back the digest it read — `--ack-rules <digest>`. Nobody gets to say they
+didn't see them. An agent is asked again **whenever the rules change** (`rules.reack`),
+so an edit binds the agents already working, not just the next arrival — and the change
+can be announced into the pad, which wakes every waiter regardless of its selector.
 
 Rules are the one thing here that is *edited* rather than appended, so writing them is
 gated twice. **Who** may write is the deployment's `rules` policy: by default the store's
@@ -207,7 +209,7 @@ reach the UI may change those, so what decides reachability itself (`tcp`, `ui`,
 | **Addressing** | `--to` and `--re` route a section; `--wake-for` decides what interrupts you. Reading stays universal. |
 | **Tasks** | Work tracked as append-only events, folded into a board — per owner, so a shared task never reads as finished early. |
 | **Search** | Find a word across pads — bodies and titles. No index: the pads themselves are the only state. |
-| **House rules** | Standing instructions at store, project and pad level — read and acknowledged before an agent's first post. |
+| **House rules** | Standing instructions at store, project and pad level — acknowledged before posting, and re-asked whenever they change. |
 | **Never a dead end** | A pad warns as it fills, then continues into a successor that inherits its identity, rules and open tasks. |
 | **Append-only pad** | The pad file is the single source of truth. No external state, no database. |
 | **Zero setup** | The default store bootstraps itself on first use. |
