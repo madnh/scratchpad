@@ -285,6 +285,14 @@ export default function mount(outlet, ctx) {
   // sections arriving above it start at an estimated height and grow to their real one
   // as they are parsed, so an offset computed once would be wrong a moment later.
   // Re-pinning on every height change holds the section still through all of it.
+  //
+  // Whether it is still EARNING its keep now that the rows above are moved rather than
+  // rebuilt is NOT MEASURED. Three samples in one engine — 0px held with it, ±1px
+  // without — sit inside the noise of the thing being measured and prove nothing either
+  // way; the browser's own scroll anchoring may be doing the work. It stays because
+  // nobody has disproved it, which is not the same as evidence that it is needed. To
+  // settle it, open assets/harness.html and take the "load older" number over many
+  // samples, in more than one engine, with bodies still unparsed above the viewport.
   function captureScroll() {
     const first = [...body.querySelectorAll(".msg")].find((m) => m.getBoundingClientRect().bottom > 0);
     const sec = first?.dataset.section;
@@ -1195,6 +1203,17 @@ export default function mount(outlet, ctx) {
   // template whenever the section it is describing differs from the last one, and the
   // row is rebuilt. Every one of those is a BINDING here instead: `?hidden` for the
   // parts that are sometimes absent, so the shape is fixed and only values move.
+  //
+  // IF YOU CONVERT ANOTHER PAGE THIS WAY, READ THIS FIRST. "Sometimes absent" becomes
+  // "always present, sometimes hidden", and every CSS rule that was keyed on the element
+  // EXISTING silently inverts: `.msg:has(.chip--task)` matched every row here, so every
+  // author went italic and every bubble took the rules border. The fix is
+  // `:has(.chip--task:not([hidden]))`, and it has to be looked for — nothing fails, the
+  // page just quietly says the wrong thing about every row. The same goes for `[hidden]`
+  // itself: it is the browser's own rule, so any author `display` outranks it, and each
+  // such selector needs to say `[hidden] { display: none }` for itself (`.sec__expand`,
+  // `.newpill`, `.loadmore` did; `.chip` and `.msg__title` declare no display, so they
+  // did not).
   //
   // The routing chips are part of that literal for the same reason. They are what turns
   // a transcript into a conversation you can follow — who a section was for, what it

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Transcript harness — Scratchpad</title>
+
+<!--
+  A MEASUREMENT HARNESS for the pad transcript. Not part of the app: nothing references
+  this page, no route reaches it, and the app does not know it exists. It is here so the
+  five browser-only numbers the transcript is judged on can be re-taken without building
+  the apparatus again.
+
+  It does NOT frame the app — the app sends `frame-ancestors 'none'`, and relaxing that
+  to make a harness convenient would be paying with the product's security. Instead it
+  imports the pad page's own module and mounts it here. Same code, same components, same
+  live stream; only the frame around it is missing.
+
+  WHY NOT A TEST RUNNER: every one of these numbers is about layout, node identity across
+  a real re-render, IntersectionObserver state and scroll geometry. A DOM shim can answer
+  one of the five. That is not worth an ecosystem, so this is the apparatus instead.
+-->
+
+<link rel="stylesheet" href="/vendor/puredashboard/theme/dashboard.css">
+<link rel="stylesheet" href="/vendor/puredashboard/components.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/harness.css">
+
+<script type="module" src="/harness.js"></script>
+</head>
+
+<body>
+<div class="hx">
+
+  <header class="hx__head">
+    <h1>Transcript harness</h1>
+    <p class="hx__lede">
+      Measures what happens to transcript rows when the page re-renders: whether a row is
+      kept or rebuilt, whether a parsed body stays parsed, whether an expanded section
+      stays expanded, and whether the reader's place moves.
+    </p>
+  </header>
+
+  <section class="hx__panel">
+    <h2>How to run it</h2>
+    <ol class="hx__steps">
+      <li>
+        Start the UI against a store with a pad worth reading — one with more than 20
+        sections, and at least one section over 1200 bytes, or nothing will be clamped
+        and criterion 3 has nothing to test:
+        <code>scratchpad ui --dir ~/.scratchpad-demo --no-auth</code>.
+        <br>Without <code>--no-auth</code>, open the app's one-time link first so this
+        page inherits the session cookie — it calls the same API.
+      </li>
+      <li>Open this page at <code>/harness.html?ref=&lt;project&gt;-&lt;padid&gt;</code>, or type the ref below and press <b>Mount</b>.</li>
+      <li>Press <b>Baseline</b>. That records every row's node identity, every body's parse identity, every lazy element's state, and where the topmost visible section sits.</li>
+      <li>
+        Do ONE thing, then read the report. The buttons below drive the app's own controls
+        and report themselves after a moment. The one thing they cannot do is post — the
+        UI is read-only for pad content, deliberately — so for the case that matters most,
+        post from a shell and then press <b>Report</b>:
+        <br><code>scratchpad pad post &lt;ref&gt; --as someone --title "x" "y"</code>
+      </li>
+    </ol>
+  </section>
+
+  <section class="hx__panel">
+    <h2>What a good result looks like</h2>
+    <table class="hx__table">
+      <thead>
+        <tr><th>After</th><th>rows rebuilt</th><th>lazy rendered→pending</th><th>bodies re-parsed</th><th>held section shift</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>a post arriving</td><td>0</td><td>0</td><td>0</td><td>see note</td></tr>
+        <tr><td>expand / collapse one section</td><td>0</td><td>0</td><td>0</td><td>—</td></tr>
+        <tr><td>Expand all / Collapse long</td><td>0</td><td>0</td><td>0</td><td>—</td></tr>
+        <tr><td>load older (oldest-first)</td><td>0</td><td>0</td><td>0</td><td>0 px</td></tr>
+        <tr><td>flip reading order</td><td>0</td><td>0</td><td><b>not 0 — expected</b></td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p class="hx__note">
+      <b>Re-parse on a flip is known and is not a regression.</b> Flipping the order MOVES
+      rows rather than rebuilding them, and moving a node reconnects it;
+      <code>&lt;puredashboard-markdown&gt;</code> re-renders in its
+      <code>connectedCallback</code>, so it parses again. Before this harness's subject
+      existed, a flip rebuilt every row instead. A non-zero count here means the move path,
+      not a broken keyed list — check <code>rows_rebuilt</code>, which should still be 0.
+    </p>
+    <p class="hx__note">
+      <b>The held-section shift is only meaningful for "load older".</b> Reading
+      newest-first, a section that arrives lands ABOVE what you are reading and is
+      supposed to push it down; the shift then measures the new section's height, not a
+      defect. Reading oldest-first, an older page also lands above — and there the number
+      must be 0, because the reader did not ask to move.
+      <br>It is also thrown off by anything that scrolls the page in between, including
+      clicking or focusing a control up here — the report says
+      <code>held_shift_trustworthy: false</code> when that happened, and you should
+      re-take it rather than read the number.
+    </p>
+    <p class="hx__note">
+      <b>Numbers are comparable between runs of this harness, not with the app's own
+      window.</b> There is no sidebar here, so the column is wider and every wrapped body
+      is shorter. Differences (shift, counts) carry over; absolute pixel heights do not.
+      Sample sizes are yours to choose: one run of anything near a noise floor — the
+      load-older shift especially — settles nothing.
+    </p>
+  </section>
+
+  <section class="hx__panel hx__controls">
+    <div class="hx__row">
+      <label>Pad ref <input id="hx-ref" type="text" placeholder="default-ab3k9x" size="22"></label>
+      <button type="button" id="hx-mount">Mount</button>
+      <span class="hx__sep"></span>
+      <button type="button" id="hx-baseline"><b>Baseline</b></button>
+      <button type="button" id="hx-report"><b>Report</b></button>
+    </div>
+    <div class="hx__row">
+      <span class="hx__label">drive the app:</span>
+      <button type="button" id="hx-older">load older</button>
+      <button type="button" id="hx-flip">flip reading order</button>
+      <button type="button" id="hx-expandall">Expand all / Collapse long</button>
+      <label>section <input id="hx-sec" type="number" min="1" size="5"></label>
+      <button type="button" id="hx-toggle">toggle that one</button>
+    </div>
+    <div class="hx__row">
+      <span class="hx__label">last action:</span> <span id="hx-action">none yet</span>
+    </div>
+  </section>
+
+  <section class="hx__panel">
+    <h2>Reports <button type="button" id="hx-clear" class="hx__small">clear</button></h2>
+    <div id="hx-verdict" class="hx__verdict"></div>
+    <pre id="hx-out" class="hx__out"></pre>
+  </section>
+
+  <section class="hx__panel">
+    <h2>The subject</h2>
+    <p class="hx__note">
+      The real pad page, mounted below. Interacting with it directly works too — the
+      harness reads the DOM, it does not intercept anything.
+    </p>
+  </section>
+
+</div>
+
+<!-- The app's content column, minus the header and the rail: `.page` is what gives the
+     pad page the padding and width it is written against. -->
+<puredashboard-layout>
+  <puredashboard-content>
+    <main id="hx-view" class="page"></main>
+  </puredashboard-content>
+</puredashboard-layout>
+
+</body>
+</html>
