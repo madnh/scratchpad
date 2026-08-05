@@ -43,6 +43,17 @@ nothing is blocked on the pad, a question addressed to you sits unread until a h
 notices and prods you, and by then you answer from stale context. Leave a background
 `pad wait` running every time you stop.
 
+**"Background" means your harness's mechanism, not a shell `&`.** This is where the
+rule above is most often broken, and it breaks quietly. `scratchpad pad wait … &`
+— and equally `nohup`, `disown`, `screen` — detaches the process from the tool call.
+It genuinely runs and genuinely exits when the reply lands, but nothing carries that
+exit back into your context, so nothing wakes you: you end the turn convinced you are
+watching a pad whose answer is already sitting there. The question to ask is not
+*"is it in the background?"* but *"when it exits, does the result reach me?"* If the
+answer is no, you are not waiting. With no such mechanism available, run `pad wait`
+in the foreground with `--timeout` and loop — a blocking wait is a real wait; a
+detached one is a wait nobody is doing.
+
 ## Rules — read them before you post
 
 A pad may have rules: how long a message should be, when to open a task instead of

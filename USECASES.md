@@ -22,6 +22,7 @@ Before finding your use case, answer 2 questions:
 | UC5 | Individual | Agents on 2+ machines | `serve --tcp` on the machine holding the store |
 | UC6 | Team | Standalone Scratchpad server for the team | Server + per-person token + TLS |
 | UC7 | Team | Multiple users sharing one dev server | `serve --tcp` loopback + token |
+| UC8 | Any | Many agents split by module: a coordination pad + one pad per module | None — a choice of pad topology |
 
 ---
 
@@ -140,6 +141,60 @@ The agent on machine B connects to the MCP endpoint `http://machine-a:6710` with
 **Problem:** The default store is per-user (`~/.scratchpad/`, permission 0700) — A's agent cannot read B's store. Sharing by pointing to a common path on the filesystem is not recommended (messy file permissions across uids), and the unix socket also blocks a different uid (peercred fail-closed).
 
 **Setup:** Like UC6 but leaner because it is the same machine: one user (or a service account) holds the store and runs `serve --tcp` **loopback** + token; other users' agents connect via MCP at `http://127.0.0.1:6710`. No TLS needed (it never leaves the machine).
+
+## UC8 — Any setup: one coordination pad, one pad per module
+
+**Context:** Work large enough to be split into modules, with several agents inside each
+module. Putting everyone in one pad *works* — the turn rule scales fine — but every agent
+then reads everything: the whole cross-module transcript enters every agent's context, and
+one pad absorbs every section from every module, so it reaches its ceiling far sooner.
+
+**Setup:** Nothing beyond whichever of UC1–UC7 you are already on. This is a question of
+how many pads you open and who joins which, not of configuration.
+
+**Structure:**
+
+- One **coordination pad**, whose members are the module **leads** (plus whoever is driving
+  the work overall).
+- One **module pad** per module, whose members are that module's lead and its workers.
+- A lead is the only agent that sits in both. It is the bridge, and nothing else crosses.
+
+**Flow:**
+
+1. The lead reads the coordination pad and learns what its module owes the others.
+2. On its own module pad it opens that work as tasks. Task events are exempt from the turn
+   rule, so it can dispatch several in a row without waiting for anyone:
+   ```sh
+   scratchpad pad post <module-ref> --as ios-lead --task-open --to ios-ui \
+     --title "Crash on resume" -
+   ```
+3. Workers report against the task on the module pad (`--task 1 --status wip`, later
+   `--status done`). They never open the coordination pad at all.
+4. The lead follows its module with `pad tasks <module-ref>` and `pad who <module-ref>`
+   rather than re-reading the transcript.
+5. The lead posts a **summary** — not a transcript — back up to the coordination pad. That
+   is where its turn is spent, and the summary is what the other modules read.
+
+**Why this keeps context small:**
+
+- A worker only ever loads its own module's pad. The coordination pad's history never
+  enters its context.
+- The lead is the only agent paying for both, and what it carries across is a compression:
+  a summary going up, a task going down.
+- Smaller pads also reach the section ceiling later, and when one does fill it continues
+  into a successor on its own, without disturbing the other modules.
+
+**Notes:**
+
+- Give each module its own `project` if you want `pad list` grouped that way; what agents
+  actually pass around is the ref.
+- On a module pad, workers can wait with `--wake-for me` so one module's traffic never
+  wakes an agent with no part in it.
+- **The bridge is a convention, not a mechanism.** Scratchpad does not link two pads: it
+  will not notice that a summary was never posted, and a task on one pad has no
+  relationship to any section on another. Whoever plays the lead has to actually do it —
+  consider writing that duty into the coordination pad's house rules, where it is read
+  before anyone's first post.
 
 ---
 

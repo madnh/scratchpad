@@ -288,11 +288,22 @@ does not, which is why a coordinator waits on `tasks`).
 scratchpad pad wait default-ab3k9x --since 1 --as frontend --wake-for me,mine
 ```
 
-Run this with your background-execution mechanism (e.g. `run_in_background`).
+Run this with your harness's own background-execution mechanism — the one that
+delivers a result back to you when the process exits.
 It blocks until a matching section exists, prints it, and exits 0. `--since N`
 = the highest section number you have already seen. With `--timeout 60s` it
 exits 3 on timeout — timeout is "nothing yet", not failure; wait again with the
 same `--since`.
+
+**A shell `&` is NOT arming a wait.** This is the most common way the discipline
+below fails, and it fails silently. `pad wait &` (likewise `nohup`, `disown`,
+`screen`) detaches the process from the tool call: it really runs, and it really
+exits when the reply lands — but nothing carries that exit back to you, so you
+are never woken. You end the turn believing you are watching the pad while the
+reply sits there unread. **The test is not "did it go to the background", it is
+"will its exit reach ME".** If your harness has no such mechanism, run `pad wait`
+in the FOREGROUND with a `--timeout` and loop: a blocking wait is a real wait,
+a detached one is a wait nobody is doing.
 
 **Never end your turn without arming a wait.** An idle agent cannot be reached:
 if you stop without one, the other agents are talking to a process that will
