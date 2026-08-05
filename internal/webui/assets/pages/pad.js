@@ -34,7 +34,7 @@ import "/components/pad-tasks.js";
 import "/components/pad-search.js";
 import { rulesChip, showRules } from "/components/rules-dialog.js";
 
-import { html, renderResult } from "/vendor/puredashboard/reactive.js";
+import { html, repeat, renderResult } from "/vendor/puredashboard/reactive.js";
 
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
@@ -78,7 +78,20 @@ export default function mount(outlet, ctx) {
   let tasks = [];
   let rail = prefs.rail();   // "outline" | "tasks"
   let tasksOpenOnly = false;
+  let loadingOlder = false;
   let expandAll = false;
+  // Which long sections the reader has opened or shut by hand, against whatever
+  // "Expand all" is currently saying. It is JS state rather than a flag on the DOM node
+  // — where it used to live — because a node is not a place to keep anything you expect
+  // back: rows are reused now, but a filter, a task thread or a jump still replaces them,
+  // and a section the reader deliberately opened would quietly shut on the way. Deriving
+  // the clamp from here means the row is a pure function of state, like everything else
+  // on this page.
+  //
+  // "Expand all" / "Collapse long" CLEARS it. Those two are one command about the whole
+  // transcript, and a global command that left a dozen rows disagreeing with it would be
+  // a button that visibly does not do what it says.
+  const expandOverride = new Map();   // section n → expanded?
   // Reading direction. Newest-first is the default — opening a pad to see what just
   // happened is the common visit — but a pad read from the start is a conversation,
   // and some people want it that way round. The choice is per person, not per pad, so
@@ -234,8 +247,17 @@ export default function mount(outlet, ctx) {
   }
 
   async function loadOlder() {
-    if (!loaded.length) return;
-    const page = await api.sections(ref, { before: loaded[0].n, limit: PAGE });
+    if (!loaded.length || loadingOlder) return;
+    // The button is part of a template now, so it is not rebuilt between clicks and
+    // cannot be disabled by hand — the flag is what it reads, and what clears it.
+    loadingOlder = true;
+    renderTranscript();
+    let page;
+    try {
+      page = await api.sections(ref, { before: loaded[0].n, limit: PAGE });
+    } finally {
+      loadingOlder = false;
+    }
     if (disposed) return;
     loaded = [...page.sections, ...loaded];
     hasOlder = page.has_older;
@@ -408,6 +430,20 @@ export default function mount(outlet, ctx) {
     return pad.sections.filter((s) => s.task === n).length;
   }
 
+  // renderTranscript is the whole transcript as ONE template, updated in place.
+  //
+  // It used to be `body.replaceChildren()` followed by a fresh node per section, and that
+  // cost the reader state it had put there by hand: a section they expanded shut itself
+  // the moment any agent posted, because the expanded flag lived on the node that was
+  // just thrown away — and the parsed markdown, the lazy element's "already done" and the
+  // height the browser had learned went with it. repeat() keyed by section number keeps
+  // the row that is already right: a new section inserts ONE row, a filter removes the
+  // rows it excludes, and flipping the reading order MOVES rows rather than rebuilding
+  // them.
+  //
+  // Nothing above the chat is conditional-shaped either. The pill, the edge and the
+  // "no matches" line are always present and bound `?hidden`, because a `${cond ? html`…`
+  // : ""}` swaps the template and takes the node with it.
   function renderTranscript() {
     // Two independent narrowings: by who is speaking, and by which piece of work is
     // being spoken about. The task one is matched against the TOC, because a section
@@ -417,41 +453,31 @@ export default function mount(outlet, ctx) {
     if (authorFilter) visible = visible.filter((s) => s.author === authorFilter);
     if (taskFilter) visible = visible.filter((s) => inTask.has(s.n));
     const newestFirst = order === "newest";
-
-    body.replaceChildren();
-
-    if (pendingNew > 0) {
-      body.append(el("button", {
-        class: "newpill", type: "button",
-        text: `${pendingNew} new section${pendingNew === 1 ? "" : "s"} ${newestFirst ? "↑" : "↓"}`,
-        onclick: () => loadLatest(),
-      }));
-    }
-
-    // Where the history continues, and where the pad begins, swap ends with the order:
-    // "older" is always AWAY from the newest section, so the control sits below the
-    // transcript reading newest-first and above it reading oldest-first.
-    const edge = el("div");
-    if (hasOlder) {
-      edge.append(el("button", {
-        class: "loadmore", type: "button", text: "Load 20 older sections",
-        onclick: (e) => { e.currentTarget.disabled = true; loadOlder(); },
-      }));
-    } else if (loaded.length) {
-      edge.append(el("p", { class: "muted", text: "Beginning of the pad." }));
-    }
-    if (!newestFirst) body.append(edge);
-
     // The API hands back ascending sections; reverse them for a newest-first read.
     const ordered = newestFirst ? [...visible].reverse() : visible;
-    const chat = el("div", { class: "chat", dataset: { order } });
-    renderResult(html`${ordered.map((sec) => sectionRow(sec))}`, chat);
-    body.append(chat);
+    pruneLazy();
 
-    if (!visible.length) {
-      body.append(el("p", { class: "muted", text: "No sections match this filter." }));
-    }
-    if (newestFirst) body.append(edge);
+    // data-order on the transcript itself, because the EDGE — where the history
+    // continues, and where the pad begins — is one element that swaps ends with the
+    // reading order. "Older" is always AWAY from the newest section. It is placed by CSS
+    // rather than by rendering it twice: two "Load older" buttons in the page, one of
+    // them hidden, is a control the reader can click and a control they cannot, chosen
+    // by whichever the code guessed.
+    body.dataset.order = order;
+    renderResult(html`
+      <button class="newpill" type="button" ?hidden=${pendingNew === 0} @click=${() => loadLatest()}
+      >${pendingNew} new section${pendingNew === 1 ? "" : "s"} ${newestFirst ? "↑" : "↓"}</button>
+      <div class="pad__edge">
+        <button class="loadmore" type="button" ?hidden=${!hasOlder} ?disabled=${loadingOlder}
+                @click=${() => { void loadOlder(); }}
+        >Load ${PAGE} older sections</button>
+        <p class="muted" ?hidden=${hasOlder || !loaded.length}>Beginning of the pad.</p>
+      </div>
+      <div class="chat" data-order=${order}>
+        ${repeat(ordered, (sec) => sec.n, (sec) => sectionRow(sec))}
+      </div>
+      <p class="muted pad__empty" ?hidden=${visible.length > 0}>No sections match this filter.</p>`,
+      body);
   }
 
   // mountFrame builds everything that is NOT the transcript, exactly once.
@@ -926,7 +952,9 @@ export default function mount(outlet, ctx) {
 
     const expandBtn = el("button", {
       type: "button", class: "ghost-btn",
-      onclick: () => { expandAll = !expandAll; render(); },
+      // One command about the whole transcript, so it drops the per-section decisions
+      // the reader made against the old setting — see expandOverride.
+      onclick: () => { expandAll = !expandAll; expandOverride.clear(); render(); },
     });
 
     const latestBtn = el("button", {
@@ -1050,22 +1078,55 @@ export default function mount(outlet, ctx) {
   // component's own reflected state, so this stays true however it was rendered.
   const pendingLazy = () => body.querySelectorAll('puredashboard-lazy[data-state="pending"]');
 
-  // lazyBody hands back the <puredashboard-lazy> for one section, as a NODE bound into
-  // the row's template rather than as markup inside it. The component is configured
-  // through properties and its content is built by a callback, neither of which a
-  // template can express.
-  function lazyBody(content, clamped) {
+  // lazyFor hands back the <puredashboard-lazy> for one section, as a NODE bound into the
+  // row's template rather than as markup inside it. The component is configured through
+  // properties and its content is built by a callback, neither of which a template can
+  // express — and, more importantly, it is the one thing on this page whose identity must
+  // survive a re-render: its whole value is that it has already parsed a body, and a
+  // rebuilt element has not.
+  //
+  // So there is one per section, kept. Binding the SAME node again is what makes the
+  // engine leave it alone: a child binding whose value is unchanged does nothing at all,
+  // where a freshly built element would be a new value and replace the live one. A
+  // section's content never changes — the pad is append-only — so a cached body is never
+  // stale.
+  const lazyNodes = new Map();   // section n → its <puredashboard-lazy>
+
+  function lazyFor(sec, clamped) {
+    const have = lazyNodes.get(sec.n);
+    if (have) return have;
     const lz = el("puredashboard-lazy", { class: "sec__lazy" });
     lz.rootMargin = LAZY_MARGIN;
     // A guessed height keeps the scrollbar still while bodies materialise above the
     // reader; the component swaps in the real height as soon as it renders.
-    lz.height = estimateHeight(content.length, clamped);
+    lz.height = estimateHeight(sec.content.length, clamped);
     lz.render = () => {
       const md = el("puredashboard-markdown", { class: "sec__content" });
-      md.value = content;
+      md.value = sec.content;
       return md;
     };
+    lazyNodes.set(sec.n, lz);
     return lz;
+  }
+
+  // Kept for what is PAGED IN, not for everything ever read: the cache exists to survive
+  // a re-render, and a section the page has moved off is not coming back without a fetch
+  // that rebuilds it anyway. Without this, reading back through a long pad would hold
+  // every parsed body of it in memory at once.
+  function pruneLazy() {
+    const keep = new Set(loaded.map((s) => s.n));
+    for (const n of lazyNodes.keys()) if (!keep.has(n)) lazyNodes.delete(n);
+  }
+
+  // Opening or shutting one long section. The clamp is derived, so this records the
+  // decision and re-renders rather than writing to the node — which is what lets it
+  // survive the next post, the next filter and the next jump.
+  function setExpanded(n, expanded) {
+    expandOverride.set(n, expanded);
+    // Expanding is a request to read this body NOW, so stop deferring it — the
+    // observer may not have reached it if the click came from a keyboard focus.
+    if (expanded) lazyNodes.get(n)?.renderNow("manual");
+    render();
   }
 
   // A clamped body is capped at the clamp height; an open one is guessed from its
@@ -1146,7 +1207,11 @@ export default function mount(outlet, ctx) {
   function sectionRow(sec) {
     const meta = pad.sections.find((s) => s.n === sec.n) || sec;
     const long = sec.content.length > CLAMP_BYTES;
-    const clamped = long && !expandAll && sec.n !== pad.section_count;
+    // The newest section is never clamped by default: it is what the reader came for.
+    const expanded = expandOverride.has(sec.n)
+      ? expandOverride.get(sec.n)
+      : (expandAll || sec.n === pad.section_count);
+    const clamped = long && !expanded;
     // A rules section is marked where it sits, because it behaves differently from the
     // prose around it: it does not take the turn, and only the LAST one is in force —
     // which is why an older one says so rather than looking like current policy.
@@ -1179,7 +1244,7 @@ export default function mount(outlet, ctx) {
                     title=${`Show only what concerns T${meta.task}`}
                     @click=${() => { void selectTask(taskFilter === meta.task ? 0 : meta.task); }}
             >${meta.status ? `T${meta.task} ${meta.status}` : `T${meta.task}`}</button>
-            ${toChips(meta.to)}
+            ${repeat(meta.to || [], (target) => target, (target) => html`<span class="chip chip--to">→ ${target}</span>`)}
             <button type="button" class="chip chip--re" ?hidden=${!meta.re}
                     title="Go to the section this answers"
                     @click=${() => pickSection(meta.re)}
@@ -1191,29 +1256,13 @@ export default function mount(outlet, ctx) {
           </div>
           <div class="msg__bubble">
             <div class="msg__title" ?hidden=${!sec.title}>${sec.title || ""}</div>
-            <div class="sec__body" data-clamped=${String(clamped)}>${lazyBody(sec.content, clamped)}</div>
+            <div class="sec__body" data-clamped=${String(clamped)}>${lazyFor(sec, clamped)}</div>
             <button type="button" class="sec__expand" ?hidden=${!long}
-                    @click=${(e) => toggleClamp(e.currentTarget)}
+                    @click=${() => setExpanded(sec.n, clamped)}
             >${clamped ? "Expand" : "Collapse"}</button>
           </div>
         </div>
       </article>`;
-  }
-
-  // The addressees are the one genuinely variable-length part of a row, so they are the
-  // one part that stays a list. Everything else in the strip has a fixed slot.
-  function toChips(list) {
-    return (list || []).map((target) => html`<span class="chip chip--to">→ ${target}</span>`);
-  }
-
-  function toggleClamp(toggle) {
-    const bodyBox = toggle.parentElement.querySelector(".sec__body");
-    // Expanding is a request to read this body NOW, so stop deferring it — the
-    // observer may not have reached it if the click came from a keyboard focus.
-    bodyBox.querySelector('puredashboard-lazy[data-state="pending"]')?.renderNow("manual");
-    const nowClamped = bodyBox.dataset.clamped !== "true";
-    bodyBox.dataset.clamped = String(nowClamped);
-    toggle.textContent = nowClamped ? "Expand" : "Collapse";
   }
 
   // The pad's page is the ONLY place a pad can be deleted. A destructive action
