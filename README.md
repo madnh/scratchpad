@@ -142,6 +142,36 @@ and open tasks), records the link in both headers, and puts the post there. The 
 refuses further posts forever — two live ends would be two conversations that both look
 current. Set `limits.on_full` to `reject` if you would rather the post simply fail.
 
+## Teach your agent about it
+
+The binary is self-documenting, but an agent will not run `scratchpad skills` unprompted —
+it has to be told the tool exists and when to reach for it. That is what `SKILL.md` is: a
+short document your agent host loads so the agent knows to use scratchpad when it needs to
+ask another session something.
+
+```sh
+scratchpad skills install --into <your host's skills dir>   # → <dir>/scratchpad/SKILL.md
+export SCRATCHPAD_SKILLS_DIR=<dir>                          # or set it once
+scratchpad skills install
+```
+
+**There is no default destination, on purpose.** Where an agent host keeps its skills is a
+property of that host, not of this tool — check your host's own documentation for the path,
+and pass it. For a host that has no such directory, `scratchpad skills install --print`
+writes the document to stdout so you can place it however that host expects.
+
+An installed copy is **not** upgraded when you upgrade the binary — `SKILL.md` ships inside
+it, so re-run the install after upgrading:
+
+```sh
+scratchpad skills install --into <dir>            # "already current" if nothing changed
+scratchpad skills install --into <dir> --force    # replace a copy that differs
+```
+
+Without `--force` an existing file that differs is left alone and the command fails rather
+than overwriting it, so a copy you have edited is never lost silently. Diff it first if
+that is the case.
+
 ## Run as an MCP server
 
 For agents that can't spawn a CLI (the host only speaks MCP):
@@ -160,8 +190,8 @@ The surface is **append-only by design**: there is no `pad_delete` or `pad_updat
 `pad_tasks` is read-only — a task is opened and moved by `pad_post` carrying metadata.
 Deletion and cleanup stay in the CLI, where a person runs them.
 
-> **AI agents:** run `scratchpad skills` for self-documenting help — or install the skill
-> file into your host's skills directory with `scratchpad skills install --into <dir>`.
+> **AI agents:** run `scratchpad skills` for self-documenting help — and see
+> [Teach your agent about it](#teach-your-agent-about-it) for installing the skill file.
 
 ## Watch pads in a browser
 

@@ -359,6 +359,19 @@ scratchpad pad search <span class="k">"retry budget"</span> <span class="f">--ol
 <span class="c"># The standing instructions in force on a pad, plus the digest to acknowledge</span>
 scratchpad rules <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">backend</span></pre>
 
+  <h3 style="margin:32px 0 0;font-size:19px">Teach your agent about it</h3>
+  <p class="sub" style="margin-top:10px">An agent will not run <code>scratchpad skills</code> unprompted — it has to be told the tool exists. <code>SKILL.md</code> is that document: install it where your agent host looks for skills.</p>
+  <pre>scratchpad skills install <span class="f">--into</span> <span class="k">&lt;your host's skills dir&gt;</span>   <span class="c"># → &lt;dir&gt;/scratchpad/SKILL.md</span>
+
+<span class="c"># No default destination on purpose: where a host keeps its skills belongs to</span>
+<span class="c"># that host, not to this tool. Check its docs for the path. For a host with no</span>
+<span class="c"># such directory, --print writes the document to stdout and you place it.</span>
+scratchpad skills install <span class="f">--print</span>
+
+<span class="c"># SKILL.md ships inside the binary, so re-run this after upgrading.</span>
+<span class="c"># A copy you edited is never overwritten silently — that needs --force.</span>
+scratchpad skills install <span class="f">--into</span> <span class="k">&lt;dir&gt;</span> <span class="f">--force</span></pre>
+
   <h3 style="margin:32px 0 0;font-size:19px">Run as an MCP server</h3>
   <pre>scratchpad serve            <span class="c"># Streamable HTTP on a Unix socket (default)</span>
 scratchpad serve <span class="f">--stdio</span>    <span class="c"># for MCP hosts that spawn the process</span>
@@ -367,9 +380,9 @@ scratchpad serve <span class="f">--tcp</span>      <span class="c"># opt-in loop
 <span class="c"># Nine tools: pad_create, pad_post, pad_get, pad_read, pad_wait,</span>
 <span class="c"># pad_tasks, pad_rules, pad_list, project_list — append-only by design.</span>
 
-<span class="c"># AI agents: start here for self-documenting help</span>
+<span class="c"># AI agents: the topic index, and one topic at a time</span>
 scratchpad skills
-scratchpad skills install <span class="f">--into</span> <span class="k">&lt;your host's skills dir&gt;</span></pre>
+scratchpad skills docs usage</pre>
 </div></section>
 
 <!-- DOCS -->
