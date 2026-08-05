@@ -299,9 +299,18 @@ export default function mount(outlet, ctx) {
   // rebuilt is NOT MEASURED. Three samples in one engine — 0px held with it, ±1px
   // without — sit inside the noise of the thing being measured and prove nothing either
   // way; the browser's own scroll anchoring may be doing the work. It stays because
-  // nobody has disproved it, which is not the same as evidence that it is needed. To
-  // settle it, open assets/harness.html and take the "load older" number over many
-  // samples, in more than one engine, with bodies still unparsed above the viewport.
+  // nobody has disproved it, which is not the same as evidence that it is needed.
+  //
+  // Settling it is NOT a matter of opening assets/harness.html and taking more samples,
+  // and that is about which tool fits which question rather than about the harness being
+  // shaky. It answers the questions that do not depend on layout — node identity, lazy
+  // state, clamp, re-parse counts — and answers them well. This is the one that DOES
+  // depend on layout, and the harness mounts this page without the app's rail, so its
+  // column is wider and every wrapped body is shorter: its geometry is not this page's,
+  // and no amount of sampling fixes that. The first step of the work is rebuilding the
+  // harness around a same-origin `window.open` instead, where the app lays itself out
+  // for real; THEN take the "load older" number over many samples, in more than one
+  // engine, with bodies still unparsed above the viewport.
   function captureScroll() {
     const first = [...body.querySelectorAll(".msg")].find((m) => m.getBoundingClientRect().bottom > 0);
     const sec = first?.dataset.section;
