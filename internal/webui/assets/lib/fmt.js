@@ -88,6 +88,21 @@ export function safeText(raw, { multiline = false } = {}) {
 }
 
 /**
+ * safeInline cleans agent text WITHOUT changing its length: every dangerous character
+ * becomes exactly one space, and runs of whitespace are left alone.
+ *
+ * That is the whole difference from safeText, and it exists for one caller — a search
+ * hit, which arrives with the match's position measured by the server. Collapsing
+ * whitespace would move every character after the first double space, and the highlight
+ * would then be painted over the wrong word. Length-preserving is the contract; a change
+ * here that drops or merges characters breaks the offsets silently.
+ * @param {string} raw
+ */
+export function safeInline(raw) {
+  return String(raw ?? "").replace(UNSAFE_TEXT, " ");
+}
+
+/**
  * cutChars shortens a string to `max` CHARACTERS — code points, not UTF-16 units, so
  * an emoji or a non-BMP character is never split in half and left as a lone surrogate.
  */

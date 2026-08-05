@@ -48,7 +48,7 @@ Almost every change belongs in `scenario.go`.
 
 ## What the demo currently contains
 
-Six pads across two projects. Section numbers below are stable across rebuilds —
+Seven pads across two projects. Section numbers below are stable across rebuilds —
 only the timestamps move — so they are safe to quote in a bug report, and they change
 the moment you edit the scenario.
 
@@ -105,6 +105,23 @@ the demo store is refused with `rules_readonly`), and `mobile-crash9x`'s own rul
 `frontend` and `backend`, question and answer, every section a reply to the one before.
 It is the control: a pad written before any of the routing/task machinery existed looks
 exactly like this, and nothing about it changed. Turn is held by `backend`.
+
+### `mobile-budget2v` — where a term was defined (3 sections, 5 weeks old)
+
+`backend` and `ios` settling what "retry budget" means, thirty-five days ago. It exists
+for **search**, and specifically for the two things search cannot demonstrate on a store
+built five minutes ago:
+
+- **`--oldest` (the UI's "Oldest first") does something.** The flagship restates the term
+  twice this week (§20 and §40), so the default order — newest pad first — puts the live
+  argument above the pad that DEFINED it. `--oldest` inverts that and the definition comes
+  first. Both pads are needed: one recent, one old, same words.
+- **A hit is cut AROUND its match.** §1's body carries one 380-character line with the term
+  first appearing about 250 characters in. Cut from the front, that row comes back without
+  the words that were searched for — which is what the CLI did before the window moved.
+  The result shows `…` at both ends.
+
+Turn is held by `backend`; no tasks, no rules of its own.
 
 ### `release-train42` — a coordinator dispatching (16 sections, 5 tasks)
 

@@ -3,6 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -663,6 +664,138 @@ func (s *Server) handleSetPadRules(r *http.Request, sess *session) (any, error) 
 		return nil, err
 	}
 	return s.store.PadRules(ref, password)
+}
+
+// Search bounds. The CLI's `--limit 0` means "no cap", which is safe at a terminal
+// where the person waits for their own command; over HTTP it is a way to ask the server
+// to serialise the whole store into one response, so this surface always has a ceiling.
+const (
+	defaultSearchLimit = 100
+	maxSearchLimit     = 500
+
+	// searchTextWidth is how much of a matching line travels, in runes. Wider than the
+	// CLI's 140 because a browser has room to wrap, still a window rather than the line:
+	// a hit is a place to go, not the section itself.
+	searchTextWidth = 320
+)
+
+// handleSearch is the one read here that selects by WHAT WAS WRITTEN. The three scopes a
+// person asks for are not three endpoints — they are which of `project` and `ref` is set:
+// neither is the whole store, `project` is one project, `ref` is one pad.
+//
+// A protected pad is reached exactly the way the CLI reaches one: by being NAMED, with
+// its password. The difference is only where the password comes from — the session that
+// already unlocked it, rather than a flag typed again. Without `ref` the store skips
+// every protected pad and says which, and this hands that list straight to the UI: an
+// empty result must never be readable as "the word is nowhere in the store".
+func (s *Server) handleSearch(r *http.Request, sess *session) (any, error) {
+	q := r.URL.Query()
+	query := strings.TrimSpace(q.Get("q"))
+	if query == "" {
+		return nil, badInput("q is required: there is nothing to search for")
+	}
+
+	limit, err := queryInt(q, "limit", defaultSearchLimit)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return nil, badInput("limit must be a positive integer")
+	}
+
+	before, err := queryInt64(q, "before", 0)
+	if err != nil {
+		return nil, err
+	}
+	after, err := queryInt64(q, "after", 0)
+	if err != nil {
+		return nil, err
+	}
+
+	flags := map[string]bool{}
+	for _, name := range []string{"oldest", "regexp", "word", "case"} {
+		v, err := queryBool(q, name)
+		if err != nil {
+			return nil, err
+		}
+		flags[name] = v
+	}
+
+	ref := q.Get("ref")
+	req := store.SearchRequest{
+		Query:   query,
+		Project: q.Get("project"),
+		Ref:     ref,
+		// Only a NAMED pad carries a password, which is the store's rule and not a
+		// simplification made here: a store-wide search that read through every pad this
+		// session happens to have unlocked would be a way to read one noun at a time.
+		Password:      sess.unlocked(ref),
+		ExcludePads:   q["exclude"],
+		Author:        q.Get("author"),
+		Kind:          q.Get("kind"),
+		Before:        before,
+		After:         after,
+		Oldest:        flags["oldest"],
+		Regexp:        flags["regexp"],
+		Word:          flags["word"],
+		CaseSensitive: flags["case"],
+		Limit:         min(limit, maxSearchLimit),
+		TextWidth:     searchTextWidth,
+	}
+
+	res, err := s.store.Search(req)
+	if err != nil {
+		return nil, err
+	}
+	if res.Hits == nil {
+		res.Hits = []store.Hit{}
+	}
+	return res, nil
+}
+
+// queryBool reads a flag written either way a URL spells one: `?word` on its own, or
+// `?word=true`. A value that is neither is refused rather than read as false — a
+// misspelled flag that silently turns a filter off returns a result to a question
+// nobody asked.
+func queryBool(q url.Values, name string) (bool, error) {
+	if !q.Has(name) {
+		return false, nil
+	}
+	v := q.Get(name)
+	if v == "" {
+		return true, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, badInput(name + " must be true or false")
+	}
+	return b, nil
+}
+
+func queryInt(q url.Values, name string, def int) (int, error) {
+	if q.Get(name) == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(q.Get(name))
+	if err != nil {
+		return 0, badInput(name + " must be an integer")
+	}
+	return n, nil
+}
+
+// queryInt64 reads a unix timestamp. Seconds, not "30d": the age spelling belongs to the
+// CLI, where a person types the bound themselves — a browser knows the clock and can
+// subtract, and a wire format that parses prose is one more place for the two surfaces
+// to disagree about what "a month ago" means.
+func queryInt64(q url.Values, name string, def int64) (int64, error) {
+	if q.Get(name) == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(q.Get(name), 10, 64)
+	if err != nil {
+		return 0, badInput(name + " must be a unix timestamp in seconds")
+	}
+	return n, nil
 }
 
 // badInput builds the store-shaped error for a malformed request parameter, so the

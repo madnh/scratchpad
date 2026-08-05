@@ -425,3 +425,121 @@ func TestSearchExcludePad(t *testing.T) {
 		t.Fatal("an unparsable --exclude-pad must be refused")
 	}
 }
+
+// A match is REPORTED WHERE IT IS, and the cut is taken around it. Agent prose arrives
+// as one long line, so a window applied to the front of it returned a row that did not
+// contain the word being reported — a wrong answer wearing the shape of a truncated one.
+func TestSearchExcerptIsCutAroundTheMatch(t *testing.T) {
+	s := testStore(t)
+	line := strings.Repeat("a", 500) + " needle " + strings.Repeat("b", 500)
+	ref := writePadAt(t, s, "projectx", "longline", "erp", "Long",
+		line+"\n", time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC))
+
+	res, err := s.Search(SearchRequest{Query: "needle", TextWidth: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("want one hit in %s, got %+v", ref, res.Hits)
+	}
+	h := res.Hits[0]
+	if !strings.Contains(h.Text, "needle") {
+		t.Fatalf("the excerpt does not contain the word it reports: %q", h.Text)
+	}
+	if n := len([]rune(h.Text)); n > 62 {
+		t.Errorf("excerpt is %d runes, want the 60-rune window plus at most two ellipses", n)
+	}
+	// The offsets must point at the word inside the text that is actually returned.
+	r := []rune(h.Text)
+	if h.MatchStart < 0 || h.MatchEnd > len(r) || string(r[h.MatchStart:h.MatchEnd]) != "needle" {
+		t.Fatalf("offsets %d..%d do not select the match in %q", h.MatchStart, h.MatchEnd, h.Text)
+	}
+	// Cut on both sides, so both ellipses are there.
+	if !strings.HasPrefix(h.Text, "…") || !strings.HasSuffix(h.Text, "…") {
+		t.Errorf("a line cut at both ends must say so: %q", h.Text)
+	}
+}
+
+// The offsets survive a multi-byte line: they are RUNE indices, and a Vietnamese pad is
+// the ordinary case here rather than the exotic one.
+func TestSearchOffsetsAreRunesNotBytes(t *testing.T) {
+	s := testStore(t)
+	writePadAt(t, s, "projectx", "nonascii", "erp", "Tiêu đề",
+		"phần điều tra về địa chỉ hai cấp\n", time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC))
+
+	res, err := s.Search(SearchRequest{Query: "địa chỉ"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("want one hit, got %+v", res.Hits)
+	}
+	h := res.Hits[0]
+	r := []rune(h.Text)
+	if got := string(r[h.MatchStart:h.MatchEnd]); got != "địa chỉ" {
+		t.Fatalf("offsets %d..%d gave %q, want %q", h.MatchStart, h.MatchEnd, got, "địa chỉ")
+	}
+}
+
+// --word's boundaries are consuming character classes (RE2 has no lookaround), so the
+// reported range must come from the submatch. Reporting the whole match would hand every
+// caller a range covering the space either side of the word.
+func TestSearchWordOffsetsExcludeTheBoundaries(t *testing.T) {
+	s := testStore(t)
+	writePadAt(t, s, "projectx", "wordy", "erp", "Word",
+		"the cache is warm\n", time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC))
+
+	res, err := s.Search(SearchRequest{Query: "cache", Word: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("want one hit, got %+v", res.Hits)
+	}
+	h := res.Hits[0]
+	r := []rune(h.Text)
+	if got := string(r[h.MatchStart:h.MatchEnd]); got != "cache" {
+		t.Fatalf("--word reported %q as the match; the boundaries must not be part of it", got)
+	}
+}
+
+// A title is never cut: it is one short line by rule and it is what a person scans the
+// result list by.
+func TestSearchTitleHitCarriesOffsetsAndIsNotCut(t *testing.T) {
+	s := testStore(t)
+	title := "Decision about the retry budget that runs on and on and on and on and on and on"
+	writePadAt(t, s, "projectx", "titled", "erp", title,
+		"body says nothing\n", time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC))
+
+	res, err := s.Search(SearchRequest{Query: "budget", TextWidth: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 || !res.Hits[0].InTitle {
+		t.Fatalf("want one title hit, got %+v", res.Hits)
+	}
+	h := res.Hits[0]
+	if h.Text != title {
+		t.Errorf("a title must not be cut by TextWidth, got %q", h.Text)
+	}
+	r := []rune(h.Text)
+	if string(r[h.MatchStart:h.MatchEnd]) != "budget" {
+		t.Errorf("offsets %d..%d do not select the match in the title", h.MatchStart, h.MatchEnd)
+	}
+}
+
+// TextWidth 0 is the whole line, which is what a caller with room asks for.
+func TestSearchTextWidthZeroKeepsTheWholeLine(t *testing.T) {
+	s := testStore(t)
+	line := strings.Repeat("a", 300) + " needle"
+	writePadAt(t, s, "projectx", "whole", "erp", "Long",
+		line+"\n", time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC))
+
+	res, err := s.Search(SearchRequest{Query: "needle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Text != line {
+		t.Fatalf("TextWidth 0 must keep the line intact, got %+v", res.Hits)
+	}
+}

@@ -186,9 +186,13 @@ var scenarios = []scenario{
 				Body: "Leaving T1 open until Android lands. One task, two owners, and it is not\n" +
 					"done until both are — that is the whole point of tracking it this way."},
 
+			// One of the two places this week's pad restates "retry budget" — the term
+			// mobile-budget2v defined five weeks ago. Between them they are what buries
+			// that definition under the live argument in a default-ordered search.
 			{Ago: 2 * day, Author: "backend", Task: "orderapi", Label: "draft", To: []string{"pm"},
 				Title: "Order payload, first draft",
-				Body:  "Fields: id, customer, lines[], totals, currency, placed_at. Nothing optional."},
+				Body: "Fields: id, customer, lines[], totals, currency, placed_at. Nothing optional.\n" +
+					"Checkout keeps its own retry budget on top of this — worth saying out loud."},
 			{Ago: 2*day - 30*minute, Author: "pm", Re: "draft", Label: "twoqs",
 				Title: "Two questions on the draft",
 				Body:  "Is currency per-order or per-line? And is placed_at server time?"},
@@ -245,7 +249,8 @@ var scenarios = []scenario{
 				Body:  "That is the task done — ios and android both reported. Nice work."},
 			{Ago: 8 * hour, Author: "backend", Task: "orderapi", Status: pad.StatusDone,
 				Title: "Order API contract shipped",
-				Body:  "Migration is live, schema is frozen, docs updated."},
+				Body: "Migration is live, schema is frozen, docs updated. The retry budget stays at\n" +
+					"three — same as it has been since we wrote it down."},
 			{Ago: 7 * hour, Author: "qa", Task: "flaky", Status: pad.StatusDone,
 				Title: "Fixture is good now", Body: "Suite is green again."},
 
@@ -304,6 +309,46 @@ var scenarios = []scenario{
 				Title: "Thanks — implemented", Body: "Shipped behind a flag."},
 			{Ago: day - 30*minute, Author: "backend", Re: "done",
 				Title: "Noted", Body: "I will keep the cap in the changelog."},
+		},
+	},
+
+	// ── Where a term was DEFINED: the pad `--oldest` exists to surface ──────────
+	//
+	// Search is the one read that selects by what was written, and its default order —
+	// newest pad first — answers "what is being said about this". The question people
+	// actually arrive with is the opposite one, and on a store built five minutes ago it
+	// cannot be demonstrated at all: every pad is equally recent, so every order looks
+	// the same and `--oldest` appears to do nothing.
+	//
+	// So this pad is FIVE WEEKS old and holds the definition of "retry budget", while
+	// the flagship goes on using the term this week. Searching the term the default way
+	// buries this pad under the live one; `--oldest` (the UI's "Oldest first") puts it
+	// first. That is the entire scenario, and it needs two pads separated in time to
+	// exist at all.
+	//
+	// §1's body also carries one very long line with the term late in it — the case a
+	// hit's excerpt is cut AROUND rather than from the front, which is invisible on
+	// short lines and is exactly how agents write.
+	{
+		Project: "mobile", ID: "budget2v",
+		Note: "five weeks old — where `retry budget` was defined; the pad --oldest is for",
+		Events: []event{
+			{Ago: 35 * day, Author: "backend", Label: "define",
+				Title: "Retry budget: one definition, so we stop meaning three things",
+				// The term appears for the first time ~250 characters in, deliberately: this
+				// is the line that shows a hit being cut AROUND its match. Cut from the
+				// front — which is what the CLI used to do — this row comes back without
+				// the words that were searched for in it.
+				Body: "We keep using the same two words for three different things and then arguing about which one broke, so here is the one we mean from now on: a per-REQUEST allowance, spent by the client, that survives no process restart and is never refilled by a redirect. A retry budget is the number of attempts one logical request may cost the backend, not the number a screen may cost the user.\n" +
+					"\n" +
+					"Three attempts. Not per screen, not per session."},
+			{Ago: 35*day - 20*minute, Author: "ios", Re: "define", Label: "askrefresh",
+				Title: "Does a token refresh spend one?",
+				Body:  "If the 401 comes back and we refresh, is the replay attempt 2 or a fresh 1?"},
+			{Ago: 34 * day, Author: "backend", Re: "askrefresh",
+				Title: "A refresh does not spend one",
+				Body: "A refresh is not an attempt: the request never reached the handler. The replay is\n" +
+					"still attempt 1. Anything that DID reach it — 5xx, timeout — spends one."},
 		},
 	},
 

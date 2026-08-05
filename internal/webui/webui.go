@@ -166,6 +166,9 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/pads/{ref}/sections/{n}/preview", s.api(s.handleSectionPreview))
 	mux.HandleFunc("GET /api/pads/{ref}/tasks", s.api(s.handleTasks))
 	mux.HandleFunc("GET /api/stuck", s.api(s.handleStuck))
+	// Content search. GET because it reads — which also makes a search a URL, and a URL
+	// is what lets a person send someone else the question rather than the answer.
+	mux.HandleFunc("GET /api/search", s.api(s.handleSearch))
 	mux.HandleFunc("POST /api/pads/{ref}/unlock", s.api(s.handleUnlock))
 	mux.HandleFunc("DELETE /api/pads/{ref}", s.api(s.handleDelete))
 

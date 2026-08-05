@@ -86,6 +86,39 @@ export const api = {
   stuck: (olderThanS) =>
     request("/api/stuck" + (olderThanS != null ? `?older_than_s=${olderThanS}` : "")),
 
+  // Content search — the one read that selects by what was WRITTEN rather than by
+  // position. The three scopes a person asks for are not three calls: no scope is the
+  // whole store, `project` narrows to one project, `ref` to one pad.
+  //
+  // A protected pad answers only when named by `ref`, and only if this session has
+  // already unlocked it — the server takes the password from the session, so it never
+  // travels in a URL that ends up in history or in a link someone copies out.
+  //
+  // `before`/`after` are unix SECONDS. The CLI's "30d" spelling stays at the terminal:
+  // a browser knows the clock and can subtract, and a wire format that parses prose is
+  // one more place for the two surfaces to disagree about what "a month ago" means.
+  search: (query, {
+    project, ref, exclude, author, kind, before, after,
+    oldest, regexp, word, matchCase, limit,
+  } = {}) => {
+    const q = new URLSearchParams();
+    q.set("q", query);
+    for (const [k, v] of Object.entries({ project, ref, author, kind })) {
+      if (v) q.set(k, v);
+    }
+    for (const [k, v] of Object.entries({ before, after, limit })) {
+      if (v != null && v !== "") q.set(k, String(v));
+    }
+    // Flags travel only when ON. Sending `word=false` would work, but a URL a person
+    // copies out of the address bar is better read when it lists what was asked for
+    // rather than everything that was not.
+    for (const [k, v] of Object.entries({ oldest, regexp, word, case: matchCase })) {
+      if (v) q.set(k, "true");
+    }
+    for (const r of exclude || []) q.append("exclude", r);
+    return request(`/api/search?${q.toString()}`);
+  },
+
   unlock: (ref, password) =>
     request(`/api/pads/${encodeURIComponent(ref)}/unlock`, {
       method: "POST",

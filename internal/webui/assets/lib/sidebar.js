@@ -95,6 +95,7 @@ export function initSidebar() {
     { label: "Overview", href: "#/" },
     { label: "Pads", href: "#/pads" },
     { label: "Projects", href: "#/projects" },
+    { label: "Search", href: "#/search" },
   ];
   navBottom.items = [{ label: "Settings", href: "#/settings" }];
 

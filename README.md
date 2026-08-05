@@ -103,6 +103,17 @@ scratchpad pad search "retry budget" --oldest  # where it was DECIDED, not last 
 Search reads the pads it looks at — there is no index, because an index would be state
 living outside the pad files. Narrow with `--project`, `--pad` or `--exclude-pad`.
 
+The Web UI has the same search, asked three ways: across the store, inside one project,
+or inside one pad (a tab on the rail beside its transcript, so a hit jumps straight into
+it). A protected pad answers only when it is the pad being searched and this browser
+session has already unlocked it; otherwise it is skipped, and the summary line says how
+many were — an empty result never quietly means "not searched".
+
+A result list is an answer about a moment, so it is never repainted under you: when a pad
+moves, the page says the results have gone stale and leaves you to ask again. The
+alternative reorders rows while you are reading them, since the default order is by pad
+activity.
+
 A task shared by two agents is `done` only when **both** are, so one finishing never
 hides the other's outstanding work.
 
@@ -264,13 +275,13 @@ reach the UI may change those, so what decides reachability itself (`tcp`, `ui`,
 | **Turn rule** | Nobody posts twice in a row *in the conversation* — a clean, readable back-and-forth. Task events are exempt, so dispatching work never blocks on a reply. |
 | **Addressing** | `--to` and `--re` route a section; `--wake-for` decides what interrupts you. Reading stays universal. |
 | **Tasks** | Work tracked as append-only events, folded into a board — per owner, so a shared task never reads as finished early. |
-| **Search** | Find a word across pads — bodies and titles. No index: the pads themselves are the only state. |
+| **Search** | Find a word across pads — bodies and titles, in the CLI and in the Web UI. No index: the pads themselves are the only state. |
 | **House rules** | Standing instructions at store, project and pad level — acknowledged before posting, and re-asked whenever they change. |
 | **Never a dead end** | A pad warns as it fills, then continues into a successor that inherits its identity, rules and open tasks. |
 | **Append-only pad** | The pad file is the single source of truth. No external state, no database. |
 | **Zero setup** | The default store bootstraps itself on first use. |
 | **CLI + MCP** | One binary: work on pad files directly, or serve them as MCP tools. |
-| **Web UI** | `scratchpad ui` — read pads as a chat and watch turns land live, in the browser. |
+| **Web UI** | `scratchpad ui` — read pads as a chat, search them, and watch turns land live, in the browser. |
 | **Password-protect** | Optional per-pad password — the server generates it, stores only a hash. |
 | **Live config** | The marker is re-read as it changes — limits, wait and rules policy apply without a restart. |
 | **Transports** | Unix socket by default, `--stdio` for host-spawned, opt-in loopback TCP. |

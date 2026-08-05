@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 
@@ -69,6 +70,13 @@ type SearchRequest struct {
 	// Limit caps the hits RETURNED, not the bytes read: a pad whose scan has begun is
 	// finished, and only the pads after it are skipped. Result.Truncated says the cap bound.
 	Limit int
+
+	// TextWidth caps a hit's line in RUNES, 0 for the whole line. The cut is taken AROUND
+	// the match rather than from the start of the line, which is the only cut that works
+	// on the prose this searches: an agent writes a paragraph as one line, and a word
+	// matched at character 500 is not in the first 140 of them. Cutting from the front
+	// therefore produced a result row that did not contain the word it was reporting.
+	TextWidth int
 }
 
 // Hit is one matching line, addressed the way the rest of the tool addresses things: by
@@ -89,6 +97,17 @@ type Hit struct {
 	// index a person reads a long pad by, so a search that ignored them would miss the
 	// most deliberate statement of what a section is about. Line is 0 for these.
 	InTitle bool `json:"in_title,omitempty"`
+
+	// MatchStart and MatchEnd locate the first match INSIDE Text, in runes, half-open.
+	// Both are -1 when the match could not be located there (see matcher.locate).
+	//
+	// They are published rather than left to each caller to recompute because
+	// recomputing means a SECOND matcher, and a second one disagrees: --word spells its
+	// boundaries with Unicode classes that \b does not mean, and case folding is on by
+	// default here and off in most regex dialects. A surface that highlighted its own
+	// idea of the match would draw a box around the wrong characters.
+	MatchStart int `json:"match_start"`
+	MatchEnd   int `json:"match_end"`
 }
 
 // SearchResult is what a search found, plus what it did NOT look at. Skipped and
@@ -112,6 +131,14 @@ type SearchResult struct {
 type matcher struct {
 	lit []byte
 	re  *regexp.Regexp
+
+	// group says the pattern was wrapped in a capturing group to carry --word's
+	// boundaries, so what MATCHED is submatch 1 rather than the whole match. The
+	// boundaries are consuming character classes (RE2 has no lookaround), and they were
+	// harmless while the result was only ever a boolean — the moment a caller highlights
+	// the range, reporting them as part of the match paints the space either side of the
+	// word.
+	group bool
 }
 
 func newMatcher(req SearchRequest) (matcher, error) {
@@ -126,10 +153,12 @@ func newMatcher(req SearchRequest) (matcher, error) {
 	if !req.Regexp {
 		expr = regexp.QuoteMeta(q)
 	}
+	group := false
 	if req.Word {
-		// No lookaround in RE2, so the boundaries are consuming character classes. That is
-		// harmless here: the result is only ever used as a boolean.
-		expr = `(?:^|[^\p{L}\p{N}_])(?:` + expr + `)(?:[^\p{L}\p{N}_]|$)`
+		// The capturing group opens BEFORE any group the caller's own pattern contains,
+		// so submatch 1 is always this one — never theirs.
+		expr = `(?:^|[^\p{L}\p{N}_])((?:` + expr + `))(?:[^\p{L}\p{N}_]|$)`
+		group = true
 	}
 	if !req.CaseSensitive {
 		expr = `(?i)` + expr
@@ -138,7 +167,7 @@ func newMatcher(req SearchRequest) (matcher, error) {
 	if err != nil {
 		return matcher{}, fmt.Errorf("bad search pattern: %w", err)
 	}
-	return matcher{re: re}, nil
+	return matcher{re: re, group: group}, nil
 }
 
 func (m matcher) match(b []byte) bool {
@@ -146,6 +175,52 @@ func (m matcher) match(b []byte) bool {
 		return m.re.Match(b)
 	}
 	return bytes.Contains(b, m.lit)
+}
+
+// find returns the byte range of the first match in b. It is kept apart from match
+// because match is the hot path — every line of every pad goes through it — while this
+// runs only for the lines that already matched.
+func (m matcher) find(b []byte) (start, end int, ok bool) {
+	if m.re == nil {
+		i := bytes.Index(b, m.lit)
+		if i < 0 {
+			return 0, 0, false
+		}
+		return i, i + len(m.lit), true
+	}
+	loc := m.re.FindSubmatchIndex(b)
+	if loc == nil {
+		return 0, 0, false
+	}
+	if m.group && len(loc) >= 4 && loc[2] >= 0 {
+		return loc[2], loc[3], true
+	}
+	return loc[0], loc[1], true
+}
+
+// locate returns the first match's RUNE range inside s, or (-1, -1).
+//
+// It runs against the CLEANED text rather than reusing an offset taken from the raw
+// line, because cleanLine rewrites the line: a tab becomes four spaces, which moves
+// every byte after it. Re-finding on the string the caller will actually display is
+// what keeps the two in step. It can legitimately fail — a pattern that matches a tab
+// no longer matches the spaces it became — and -1 then means "cannot say", not "no
+// match": the hit stands, only the highlight is dropped.
+func (m matcher) locate(s string) (int, int) {
+	bs, be, ok := m.find([]byte(s))
+	if !ok {
+		return -1, -1
+	}
+	return utf8.RuneCountInString(s[:bs]), utf8.RuneCountInString(s[:be])
+}
+
+// excerptOf turns a matching line into what a hit carries: the text to show and where
+// the match sits in it. Locating and cutting are one step because they are one decision
+// — the cut is taken around the match — and splitting them across the two call sites
+// below is how a title hit and a body hit would end up measured differently.
+func (m matcher) excerptOf(s string, width int) (string, int, int) {
+	start, end := m.locate(s)
+	return excerpt(s, start, end, width)
 }
 
 // padHits groups one pad's hits so the result can be ordered by the pad's last activity,
@@ -372,9 +447,11 @@ func (s *Store) searchPad(project, id string, req SearchRequest, m matcher) (pad
 		if !selects(sec) || !m.match(line) {
 			return
 		}
+		text, ms, me := m.excerptOf(cleanLine(line), req.TextWidth)
 		hits = append(hits, Hit{
 			Ref: ref, Section: sec.N, Author: sec.Author, Title: sec.Title,
-			Kind: sec.Kind, TS: sec.TS, Line: lineNo, Text: cleanLine(line),
+			Kind: sec.Kind, TS: sec.TS, Line: lineNo, Text: text,
+			MatchStart: ms, MatchEnd: me,
 		})
 	})
 	if err != nil {
@@ -394,9 +471,14 @@ func (s *Store) searchPad(project, id string, req SearchRequest, m matcher) (pad
 		if !selects(&sec) || !m.match([]byte(sec.Title)) {
 			continue
 		}
+		// A title is not cut. It is one short line by rule, and it is the thing a person
+		// scans a result list by — trimming it to a window would hide the very statement
+		// that made the section worth returning.
+		text, ms, me := m.excerptOf(sec.Title, 0)
 		hits = append(hits, Hit{
 			Ref: ref, Section: sec.N, Author: sec.Author, Title: sec.Title,
-			Kind: sec.Kind, TS: sec.TS, Text: sec.Title, InTitle: true,
+			Kind: sec.Kind, TS: sec.TS, Text: text, InTitle: true,
+			MatchStart: ms, MatchEnd: me,
 		})
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
@@ -412,4 +494,56 @@ func (s *Store) searchPad(project, id string, req SearchRequest, m matcher) (pad
 // output and a trailing carriage return would overwrite it.
 func cleanLine(line []byte) string {
 	return strings.TrimRight(strings.ReplaceAll(string(line), "\t", "    "), "\r")
+}
+
+// ellipsis marks an excerpt that starts or ends mid-line. One rune, so the offsets it
+// shifts move by exactly one.
+const ellipsis = "…"
+
+// excerpt cuts s down to width runes AROUND the match at [start, end), returning the
+// text and the match's range within it.
+//
+// Centring on the match is the whole point: an agent's paragraph arrives as a single
+// line, and the answer to "where was this said" is usually in the middle of it. A cut
+// taken from the front returns a row that does not contain the word being reported,
+// which reads as a wrong result rather than as a truncated one.
+//
+// A match that is itself wider than the window is shown from its start — cutting it in
+// half would be the same failure one level down. start < 0 means the match could not be
+// located, and the line is then cut from the front, since there is no better place.
+func excerpt(s string, start, end, width int) (string, int, int) {
+	if width <= 0 {
+		return s, start, end
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s, start, end
+	}
+	if start < 0 {
+		return string(r[:width]) + ellipsis, -1, -1
+	}
+
+	// Centre the window on the match, then push it back inside the line. The clamp order
+	// matters: pinning to the end first and to the start second keeps `from` at 0 for a
+	// line shorter than the window, which the length check above has already excluded but
+	// which a later change could reintroduce.
+	from := start - max(0, (width-(end-start))/2)
+	from = min(from, len(r)-width)
+	from = max(from, 0)
+	to := min(from+width, len(r))
+
+	out := string(r[from:to])
+	ns, ne := start-from, min(end, to)-from
+	if from > 0 {
+		out = ellipsis + out
+		ns++
+		ne++
+	}
+	if to < len(r) {
+		out += ellipsis
+	}
+	// A match running past the window is reported only as far as the text goes; the
+	// range must never point outside the string a caller is about to highlight.
+	ne = min(ne, len([]rune(out)))
+	return out, ns, max(ns, ne)
 }
