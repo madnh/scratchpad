@@ -67,7 +67,34 @@ func ParseMeta(project, id string, data []byte) (*Pad, error) {
 // bytes. It is what a listing wants: memory stays flat in the pad's size, so one enormous
 // pad no longer sets what walking the whole store costs.
 func ScanMeta(project, id string, r io.Reader) (*Pad, error) {
-	return scanLines(project, id, r)
+	return scanLines(project, id, r, nil)
+}
+
+// BodyLineFunc is shown each line of section BODY as it streams past, in file order,
+// immediately before the line is discarded. sec is the section the line belongs to, with
+// its number, author, title and metadata already parsed (they precede any body); lineNo
+// is 1-based within the FILE, the header line being 1.
+//
+// Two things are borrowed, not given: line points into the reader's buffer and sec into
+// the pad being built, so both are valid only for the duration of the call. A visitor
+// that keeps either must copy it.
+type BodyLineFunc func(sec *Section, lineNo int, line []byte)
+
+// ScanBodyLines is ScanMeta with a look at every body line on the way past — the path a
+// CONTENT search takes.
+//
+// Searching is the one read that has to touch every byte and wants to keep almost none
+// of them, so neither existing path fits: ScanMeta cannot see a body (it discards them
+// unseen) and Parse would hold the whole store's prose in memory to find one noun. This
+// is deliberately not a third parser — it is scanLines, which still decides alone what a
+// line MEANS, with a visitor spliced in where the body was already being thrown away.
+//
+// The visitor cannot stop the scan: a caller with a result limit stops COLLECTING, and
+// the file is still read to its end. Returning a half-parsed Pad to bound output would
+// make every derived view (turn, tasks) quietly wrong for the caller that asked for a
+// limit — and the I/O it would save is one file's tail.
+func ScanBodyLines(project, id string, r io.Reader, visit BodyLineFunc) (*Pad, error) {
+	return scanLines(project, id, r, visit)
 }
 
 // scan walks bytes already in hand, holding only offsets — the path taken when the
@@ -168,7 +195,8 @@ func scan(project, id string, data []byte, withContent bool) (*Pad, error) {
 }
 
 // scanLines walks the file line by line from a READER, keeping the header lines and
-// throwing every body away as it goes. It is the METADATA path.
+// throwing every body away as it goes (visit, when non-nil, is shown each body line
+// first — see ScanBodyLines). It is the METADATA path.
 //
 // This is what makes a listing cost the same on a 250 MiB pad as on a 10 KB one: measured,
 // `pad list` over a store holding one 244 MiB pad went from 605 MB peak RSS to 22 MB.
@@ -179,9 +207,12 @@ func scan(project, id string, data []byte, withContent bool) (*Pad, error) {
 // It deliberately never splits the file into a []string: pad content is written by
 // agents, and a file that is mostly newlines would turn into one 16-byte string header
 // per line — tens of times the file's size in live heap, for every read.
-func scanLines(project, id string, r io.Reader) (*Pad, error) {
+func scanLines(project, id string, r io.Reader, visit BodyLineFunc) (*Pad, error) {
 	br := bufio.NewReaderSize(r, 64*1024)
 
+	// The header is line 1, so every line read below is numbered from 2 — the numbering a
+	// person gets from an editor or `sed -n`, not an offset into the sections.
+	lineNo := 1
 	firstLine, more, err := readLine(br)
 	if err != nil {
 		return nil, err
@@ -214,6 +245,7 @@ func scanLines(project, id string, r io.Reader) (*Pad, error) {
 		if err != nil {
 			return nil, err
 		}
+		lineNo++
 		handled := false
 
 		if isSectionHeader(line) {
@@ -238,6 +270,9 @@ func scanLines(project, id string, r io.Reader) (*Pad, error) {
 			}
 			if !handled {
 				bodyStarted = true
+				if visit != nil {
+					visit(cur, lineNo, line)
+				}
 			}
 		}
 	}

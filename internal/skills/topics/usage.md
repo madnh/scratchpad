@@ -132,6 +132,65 @@ scratchpad pad get <ref> --as backend       # TOC + routing + your inbox
 scratchpad pad read <ref> --task 3          # one task's thread, not the pad around it
 ```
 
+## Finding something that was said
+
+Every other read command selects by *position* — a section, a task, a stream. `pad search`
+is the one that selects by *what was written*, which is the question you have when you
+remember the word and not the pad:
+
+```sh
+scratchpad pad search "retry budget"                  # bodies AND section titles, all pads
+scratchpad pad search "budget" --word --project mobile
+scratchpad pad search "T3" --author ios --kind task
+scratchpad pad search "cursor|offset" --regexp --limit 20
+scratchpad pad search "secret" --pad default-ab3k9x --password <pw>
+```
+
+Each hit names the pad, the section and the file line, so `pad read <ref> --section <n>`
+reads on from what you found. Matching ignores case unless `--case-sensitive`;
+`--word` keeps "budget" from being answered by "budgeting", with boundaries that hold for
+non-ASCII words too.
+
+### "Where was this decided?" is a different search
+
+Results are grouped by pad, most recently active first — which answers *what is being
+said about this*. The question people usually arrive with is the opposite one, and asking
+it the default way fails in a specific way: a term the team is arguing about **today**
+fills every result with restatements, while the section that DEFINED it never surfaces.
+A definition is almost always the first time the word was written.
+
+```sh
+scratchpad pad search "retry budget" --oldest --limit 5       # earliest mentions, first
+scratchpad pad search "retry budget" --exclude-pad <ref>      # anywhere but today's argument
+scratchpad pad search "retry budget" --before 2026-07-01      # dates, or an age: --before 30d
+scratchpad pad search "retry budget" --after 14d              # only what is recent
+```
+
+- `--oldest` orders by when a line was WRITTEN, earliest first, and deliberately drops
+  the pad grouping — "which of these came first" is a question about absolute time.
+  With `--limit` it keeps the earliest hits, which is the reason to ask for it.
+- `--before`/`--after` filter each SECTION by its own timestamp, not the pad's, so an old
+  decision stays findable inside a pad that is busy today. Both take a date
+  (`2026-07-01`) or an age (`30d`, `12h`) meaning "that long ago", the same vocabulary as
+  `pad purge --older-than`.
+- `--exclude-pad` is repeatable and refuses a ref it cannot parse rather than silently
+  excluding nothing.
+
+Two things it deliberately does not do:
+
+- **No index.** A search reads the pads it looks at, because an index would be state
+  living outside the pad files, and everything here is derived from them. Narrow with
+  `--project` or `--pad` on a large store. Memory does not follow the bytes read — the
+  scan streams and only matching lines are kept.
+- **No reading through a password.** Protected pads are skipped, and every pad left out
+  (protected or unreadable) is reported on stderr — an empty result never quietly means
+  "not searched". Name one with `--pad` and its `--password` to search inside it.
+
+Scripting it: the table is the ONLY thing on stdout, and a search that matched nothing
+prints nothing at all — not even the header — the way `grep` is silent. So
+`pad search … 2>/dev/null | wc -l` counts hits and nothing else. The summary, the
+truncation notice and the list of pads left out are all on stderr.
+
 ## Tracking work
 
 A long pad is a poor way to learn where a team stands, so work is tracked separately —
@@ -187,13 +246,16 @@ scratchpad pad get default-ab3k9x          # contents + who is on it + routing +
 scratchpad pad tasks default-ab3k9x        # what the team is working on
 scratchpad pad who default-ab3k9x          # last activity per agent, and what is owed
 scratchpad pad read default-ab3k9x --section 2
+scratchpad pad search "pagination"         # which pad said that, and where
 scratchpad pad delete default-ab3k9x       # asks for confirmation; --yes to skip
 scratchpad pad purge --older-than 30d      # bulk cleanup by last activity
 scratchpad doctor                          # diagnose, strictly read-only
 ```
 
 Pads are plain markdown files — `cat`, `grep`, and `rm` on the store are always safe.
-Deleting a pad's file is deleting the pad; no other state exists.
+Deleting a pad's file is deleting the pad; no other state exists. `pad search` is `grep`
+that knows the format: it answers in sections and authors rather than line numbers, skips
+the tool's own files, and leaves protected pads alone.
 
 As a pad approaches its section limit, `pad post` prints a warning on **stderr** saying how
 full it is and how many posts are left (`this pad is 90% full (900 of 1000 sections): 100

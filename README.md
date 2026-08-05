@@ -94,7 +94,14 @@ scratchpad pad post <ref> --as pm --task-open --to ios,android --title "Crash on
 scratchpad pad post <ref> --as ios --task 1 --status done --title "Fixed in abc123" -
 scratchpad pad tasks <ref>     # T1  wip  ios:done android:...  §2->§4  Crash on resume
 scratchpad pad who <ref>       # who has fallen behind, and what they owe
+
+# Find where something was said — bodies and section titles, across pads
+scratchpad pad search "retry budget"           # <ref>  §<section>  L<line>  <author>  the line
+scratchpad pad search "retry budget" --oldest  # where it was DECIDED, not last repeated
 ```
+
+Search reads the pads it looks at — there is no index, because an index would be state
+living outside the pad files. Narrow with `--project`, `--pad` or `--exclude-pad`.
 
 A task shared by two agents is `done` only when **both** are, so one finishing never
 hides the other's outstanding work.
