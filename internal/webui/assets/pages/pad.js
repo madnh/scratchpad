@@ -34,6 +34,8 @@ import "/components/pad-tasks.js";
 import "/components/pad-search.js";
 import { rulesChip, showRules } from "/components/rules-dialog.js";
 
+import { html, repeat, renderResult } from "/vendor/puredashboard/reactive.js";
+
 import { api } from "/lib/api.js";
 import { onPad } from "/lib/bus.js";
 import * as wl from "/lib/watchlist.js";
@@ -76,7 +78,20 @@ export default function mount(outlet, ctx) {
   let tasks = [];
   let rail = prefs.rail();   // "outline" | "tasks"
   let tasksOpenOnly = false;
+  let loadingOlder = false;
   let expandAll = false;
+  // Which long sections the reader has opened or shut by hand, against whatever
+  // "Expand all" is currently saying. It is JS state rather than a flag on the DOM node
+  // — where it used to live — because a node is not a place to keep anything you expect
+  // back: rows are reused now, but a filter, a task thread or a jump still replaces them,
+  // and a section the reader deliberately opened would quietly shut on the way. Deriving
+  // the clamp from here means the row is a pure function of state, like everything else
+  // on this page.
+  //
+  // "Expand all" / "Collapse long" CLEARS it. Those two are one command about the whole
+  // transcript, and a global command that left a dozen rows disagreeing with it would be
+  // a button that visibly does not do what it says.
+  const expandOverride = new Map();   // section n → expanded?
   // Reading direction. Newest-first is the default — opening a pad to see what just
   // happened is the common visit — but a pad read from the start is a conversation,
   // and some people want it that way round. The choice is per person, not per pad, so
@@ -232,8 +247,26 @@ export default function mount(outlet, ctx) {
   }
 
   async function loadOlder() {
-    if (!loaded.length) return;
-    const page = await api.sections(ref, { before: loaded[0].n, limit: PAGE });
+    if (!loaded.length || loadingOlder) return;
+    // The button is part of a template now, so it is not rebuilt between clicks and
+    // cannot be disabled by hand — the flag is what it reads. Which also means NOTHING
+    // ELSE will ever put it back: when this used to disable the node itself, the next
+    // render rebuilt the button and the control healed by accident. Now a failed fetch
+    // that does not re-render leaves a dead control on the page, and a swallowed
+    // rejection leaves the reader with no idea why.
+    loadingOlder = true;
+    renderTranscript();
+    let page;
+    try {
+      page = await api.sections(ref, { before: loaded[0].n, limit: PAGE });
+    } catch (err) {
+      loadingOlder = false;
+      if (disposed) return;
+      renderTranscript();
+      toast(`Could not load older sections: ${err.message}`, { type: "error" });
+      return;
+    }
+    loadingOlder = false;
     if (disposed) return;
     loaded = [...page.sections, ...loaded];
     hasOlder = page.has_older;
@@ -261,6 +294,23 @@ export default function mount(outlet, ctx) {
   // sections arriving above it start at an estimated height and grow to their real one
   // as they are parsed, so an offset computed once would be wrong a moment later.
   // Re-pinning on every height change holds the section still through all of it.
+  //
+  // Whether it is still EARNING its keep now that the rows above are moved rather than
+  // rebuilt is NOT MEASURED. Three samples in one engine — 0px held with it, ±1px
+  // without — sit inside the noise of the thing being measured and prove nothing either
+  // way; the browser's own scroll anchoring may be doing the work. It stays because
+  // nobody has disproved it, which is not the same as evidence that it is needed.
+  //
+  // Settling it is NOT a matter of opening assets/harness.html and taking more samples,
+  // and that is about which tool fits which question rather than about the harness being
+  // shaky. It answers the questions that do not depend on layout — node identity, lazy
+  // state, clamp, re-parse counts — and answers them well. This is the one that DOES
+  // depend on layout, and the harness mounts this page without the app's rail, so its
+  // column is wider and every wrapped body is shorter: its geometry is not this page's,
+  // and no amount of sampling fixes that. The first step of the work is rebuilding the
+  // harness around a same-origin `window.open` instead, where the app lays itself out
+  // for real; THEN take the "load older" number over many samples, in more than one
+  // engine, with bodies still unparsed above the viewport.
   function captureScroll() {
     const first = [...body.querySelectorAll(".msg")].find((m) => m.getBoundingClientRect().bottom > 0);
     const sec = first?.dataset.section;
@@ -406,6 +456,31 @@ export default function mount(outlet, ctx) {
     return pad.sections.filter((s) => s.task === n).length;
   }
 
+  // renderTranscript is the whole transcript as ONE template, updated in place.
+  //
+  // It used to be `body.replaceChildren()` followed by a fresh node per section, and that
+  // cost the reader state it had put there by hand: a section they expanded shut itself
+  // the moment any agent posted, because the expanded flag lived on the node that was
+  // just thrown away — and the parsed markdown, the lazy element's "already done" and the
+  // height the browser had learned went with it. repeat() keyed by section number keeps
+  // the row that is already right: a new section inserts ONE row, a filter removes the
+  // rows it excludes, and flipping the reading order MOVES rows rather than rebuilding
+  // them.
+  //
+  // KEPT IS NOT THE SAME AS UNTOUCHED, and the difference is the reason the expand state
+  // below lives in JS. A row that is not rebuilt can still be MOVED, and a move is
+  // `insertBefore` — which the DOM defines as remove-plus-insert, so anything the browser
+  // holds on the element goes with it. Focus is the one that bites: a row can survive a
+  // filter, keep its identity, and still hand focus back to <body>, throwing a keyboard
+  // reader to the top of the document. Which rows move is a property of the DIFF, not of
+  // the action — removing rows until the survivors are no longer adjacent relocates them
+  // exactly as a reorder does. So state you want back does not belong on the node, however
+  // well keyed the list is; `expandOverride` is that lesson, and focus is what it looks
+  // like when the state has nowhere else to live.
+  //
+  // Nothing above the chat is conditional-shaped either. The pill, the edge and the
+  // "no matches" line are always present and bound `?hidden`, because a `${cond ? html`…`
+  // : ""}` swaps the template and takes the node with it.
   function renderTranscript() {
     // Two independent narrowings: by who is speaking, and by which piece of work is
     // being spoken about. The task one is matched against the TOC, because a section
@@ -415,41 +490,45 @@ export default function mount(outlet, ctx) {
     if (authorFilter) visible = visible.filter((s) => s.author === authorFilter);
     if (taskFilter) visible = visible.filter((s) => inTask.has(s.n));
     const newestFirst = order === "newest";
-
-    body.replaceChildren();
-
-    if (pendingNew > 0) {
-      body.append(el("button", {
-        class: "newpill", type: "button",
-        text: `${pendingNew} new section${pendingNew === 1 ? "" : "s"} ${newestFirst ? "↑" : "↓"}`,
-        onclick: () => loadLatest(),
-      }));
-    }
-
-    // Where the history continues, and where the pad begins, swap ends with the order:
-    // "older" is always AWAY from the newest section, so the control sits below the
-    // transcript reading newest-first and above it reading oldest-first.
-    const edge = el("div");
-    if (hasOlder) {
-      edge.append(el("button", {
-        class: "loadmore", type: "button", text: "Load 20 older sections",
-        onclick: (e) => { e.currentTarget.disabled = true; loadOlder(); },
-      }));
-    } else if (loaded.length) {
-      edge.append(el("p", { class: "muted", text: "Beginning of the pad." }));
-    }
-    if (!newestFirst) body.append(edge);
-
     // The API hands back ascending sections; reverse them for a newest-first read.
     const ordered = newestFirst ? [...visible].reverse() : visible;
-    const chat = el("div", { class: "chat", dataset: { order } },
-      ordered.map((sec) => sectionNode(sec)));
-    body.append(chat);
+    pruneLazy();
 
-    if (!visible.length) {
-      body.append(el("p", { class: "muted", text: "No sections match this filter." }));
+    renderResult(html`
+      <button class="newpill" type="button" ?hidden=${pendingNew === 0} @click=${() => loadLatest()}
+      >${pendingNew} new section${pendingNew === 1 ? "" : "s"} ${newestFirst ? "↑" : "↓"}</button>
+      <div class="pad__edge">
+        <button class="loadmore" type="button" ?hidden=${!hasOlder} ?disabled=${loadingOlder}
+                @click=${() => { void loadOlder(); }}
+        >Load ${PAGE} older sections</button>
+        <p class="muted" ?hidden=${hasOlder || !loaded.length}>Beginning of the pad.</p>
+      </div>
+      <div class="chat" data-order=${order}>
+        ${repeat(ordered, (sec) => sec.n, (sec) => sectionRow(sec))}
+      </div>
+      <p class="muted pad__empty" ?hidden=${visible.length > 0}>No sections match this filter.</p>`,
+      body);
+
+    // The edge — where the history continues, and where the pad begins — is ONE element
+    // that swaps ends with the reading order: "older" is always AWAY from the newest
+    // section. It MOVES IN THE DOM rather than being placed by CSS `order`, and that is
+    // not a preference. `order` moves the paint and nothing else: focus order and the
+    // accessibility tree still follow the DOM, so reading newest-first the "load older"
+    // button was announced ahead of the entire transcript and tabbed into twenty screens
+    // above where it is drawn. Rendering it at both ends and hiding one is worse again —
+    // one copy is a control the reader can click and one is not, chosen by whichever the
+    // code guessed.
+    //
+    // Moving the container does not disturb the template: the engine holds its parts by
+    // node, and they travel inside it. The guards keep it to the render where the order
+    // actually changed.
+    const edge = body.querySelector(".pad__edge");
+    const chat = body.querySelector(".chat");
+    if (newestFirst) {
+      if (edge.nextElementSibling) body.append(edge);
+    } else if (edge.nextElementSibling !== chat) {
+      body.insertBefore(edge, chat);
     }
-    if (newestFirst) body.append(edge);
   }
 
   // mountFrame builds everything that is NOT the transcript, exactly once.
@@ -924,7 +1003,9 @@ export default function mount(outlet, ctx) {
 
     const expandBtn = el("button", {
       type: "button", class: "ghost-btn",
-      onclick: () => { expandAll = !expandAll; render(); },
+      // One command about the whole transcript, so it drops the per-section decisions
+      // the reader made against the old setting — see expandOverride.
+      onclick: () => { expandAll = !expandAll; expandOverride.clear(); render(); },
     });
 
     const latestBtn = el("button", {
@@ -1048,18 +1129,64 @@ export default function mount(outlet, ctx) {
   // component's own reflected state, so this stays true however it was rendered.
   const pendingLazy = () => body.querySelectorAll('puredashboard-lazy[data-state="pending"]');
 
-  function deferMarkdown(box, content, clamped) {
+  // lazyFor hands back the <puredashboard-lazy> for one section, as a NODE bound into the
+  // row's template rather than as markup inside it. The component is configured through
+  // properties and its content is built by a callback, neither of which a template can
+  // express — and, more importantly, it is the one thing on this page whose identity must
+  // survive a re-render: its whole value is that it has already parsed a body, and a
+  // rebuilt element has not.
+  //
+  // So there is one per section, kept. Binding the SAME node again is what makes the
+  // engine leave it alone: a child binding whose value is unchanged does nothing at all,
+  // where a freshly built element would be a new value and replace the live one. A
+  // section's content never changes — the pad is append-only — so a cached body is never
+  // stale.
+  const lazyNodes = new Map();   // section n → its <puredashboard-lazy>
+
+  function lazyFor(sec, clamped) {
+    const have = lazyNodes.get(sec.n);
+    if (have) {
+      // The node is kept, but the height it RESERVES is a guess about a clamp that can
+      // change before the body is ever parsed: expand an off-screen long section and the
+      // placeholder would still hold back the clamped 15rem, then jump by the difference
+      // when it finally renders — dragging whatever the reader was anchored to with it.
+      // Only while it is still pending; after that the component holds the real height
+      // and re-applying a guess would put a floor under it.
+      if (have.dataset.state === "pending") have.height = estimateHeight(sec.content.length, clamped);
+      return have;
+    }
     const lz = el("puredashboard-lazy", { class: "sec__lazy" });
     lz.rootMargin = LAZY_MARGIN;
     // A guessed height keeps the scrollbar still while bodies materialise above the
     // reader; the component swaps in the real height as soon as it renders.
-    lz.height = estimateHeight(content.length, clamped);
+    lz.height = estimateHeight(sec.content.length, clamped);
     lz.render = () => {
       const md = el("puredashboard-markdown", { class: "sec__content" });
-      md.value = content;
+      md.value = sec.content;
       return md;
     };
-    box.replaceChildren(lz);
+    lazyNodes.set(sec.n, lz);
+    return lz;
+  }
+
+  // Kept for what is PAGED IN, not for everything ever read: the cache exists to survive
+  // a re-render, and a section the page has moved off is not coming back without a fetch
+  // that rebuilds it anyway. Without this, reading back through a long pad would hold
+  // every parsed body of it in memory at once.
+  function pruneLazy() {
+    const keep = new Set(loaded.map((s) => s.n));
+    for (const n of lazyNodes.keys()) if (!keep.has(n)) lazyNodes.delete(n);
+  }
+
+  // Opening or shutting one long section. The clamp is derived, so this records the
+  // decision and re-renders rather than writing to the node — which is what lets it
+  // survive the next post, the next filter and the next jump.
+  function setExpanded(n, expanded) {
+    expandOverride.set(n, expanded);
+    // Expanding is a request to read this body NOW, so stop deferring it — the
+    // observer may not have reached it if the click came from a keyboard focus.
+    if (expanded) lazyNodes.get(n)?.renderNow("manual");
+    render();
   }
 
   // A clamped body is capped at the clamp height; an open one is guessed from its
@@ -1107,134 +1234,106 @@ export default function mount(outlet, ctx) {
     }, { timeout: 3000 });
   }
 
-  // sectionNode builds one message: the author's avatar, then a bubble holding the
+  // sectionRow builds one message: the author's avatar, then a bubble holding the
   // section's title and prose — clamped when it is long, so a 5000-word section does
   // not bury the messages around it.
   //
   // Every message sits on the same side. A pad is a group conversation between N
   // agents with no "me" to mirror against, so the left/right split of a two-party
   // chat has nothing to encode here; the avatar carries the identity instead, on a
-  // colour hashed from the author's name so an agent looks the same in every pad.
-  function sectionNode(sec) {
-    const long = sec.content.length > CLAMP_BYTES;
-    const clamped = long && !expandAll && sec.n !== pad.section_count;
-
-    const bodyBox = el("div", { class: "sec__body", dataset: { clamped: String(clamped) } });
-    deferMarkdown(bodyBox, sec.content, clamped);
-
-    const bubble = el("div", { class: "msg__bubble" },
-      sec.title ? el("div", { class: "msg__title", text: sec.title }) : null,
-      bodyBox,
-    );
-
-    if (long) {
-      const toggle = el("button", {
-        type: "button", class: "sec__expand",
-        text: clamped ? "Expand" : "Collapse",
-      });
-      toggle.addEventListener("click", () => {
-        // Expanding is a request to read this body NOW, so stop deferring it — the
-        // observer may not have reached it if the click came from a keyboard focus.
-        bodyBox.querySelector('puredashboard-lazy[data-state="pending"]')?.renderNow("manual");
-        const nowClamped = bodyBox.dataset.clamped !== "true";
-        bodyBox.dataset.clamped = String(nowClamped);
-        toggle.textContent = nowClamped ? "Expand" : "Collapse";
-      });
-      bubble.append(toggle);
-    }
-
-    // The avatar is written by hand rather than taken from the component library:
-    // that one derives initials from a PERSON's name (first + last word), which for
-    // a one-word handle like "backend" yields a bare "B". agentInitials knows what
-    // agent handles look like. It is aria-hidden — the author's name is right next
-    // to it, so a screen reader would only hear the same thing twice.
-    const avatar = el("span", {
-      class: "msg__avatar", text: agentInitials(sec.author),
-      title: sec.author, "aria-hidden": "true",
-    });
-    avatar.style.setProperty("--avatar-bg", `var(--avatar-c${agentColorIndex(sec.author)})`);
-
-    const node = el("article", {
-      class: justArrived.has(sec.n) ? "msg msg--new" : "msg",
-      dataset: { section: String(sec.n) },
-    },
-      avatar,
-      el("div", { class: "msg__col" },
-        el("div", { class: "msg__head" },
-          el("span", { class: "msg__author", text: sec.author }),
-          el("span", { class: "msg__n", text: `§${sec.n}` }),
-          el("span", { class: "msg__time", title: absTime(sec.ts), text: clockTime(sec.ts) }),
-          el("span", { text: bytes(sec.content.length) }),
-          ...routingChips(sec),
-        ),
-        bubble,
-      ),
-    );
-    // Placeholder height for `contain-intrinsic-size` while the message is off-screen
-    // and its rendering is skipped: the body's estimate plus the header, the title and
-    // the bubble's padding. The browser replaces it with the real height on first
-    // render and remembers that afterwards.
-    node.style.setProperty("--msg-est", `${(estimateRem(sec.content.length, clamped) + 4.5).toFixed(1)}rem`);
-    return node;
-  }
-
-  // Routing, shown where the section is. This is what turns a transcript into a
-  // conversation you can follow: who a section was for, what it answers, and whether it
-  // is a task event (which behaves differently — it does not take the turn).
+  // colour hashed from the author's name so an agent looks the same in every pad. The
+  // avatar is written by hand rather than taken from the component library: that one
+  // derives initials from a PERSON's name (first + last word), which for a one-word
+  // handle like "backend" yields a bare "B". agentInitials knows what agent handles look
+  // like. It is aria-hidden — the author's name is right next to it, so a screen reader
+  // would only hear the same thing twice.
   //
-  // All of it is free: /api/pads/{ref} already returns the pad's ENTIRE table of
-  // contents, so the reply links and the reply count come from data the page holds, with
-  // no extra request.
+  // It is ONE template literal, and that is the whole point of it. The engine keeps a
+  // node only while the template it came from is the same array of strings, so a row
+  // that picks between two shapes — `sec.title ? … : null`, a toggle appended only when
+  // the body is long, a routing strip assembled as an array — hands back a different
+  // template whenever the section it is describing differs from the last one, and the
+  // row is rebuilt. Every one of those is a BINDING here instead: `?hidden` for the
+  // parts that are sometimes absent, so the shape is fixed and only values move.
+  //
+  // IF YOU CONVERT ANOTHER PAGE THIS WAY, READ THIS FIRST. "Sometimes absent" becomes
+  // "always present, sometimes hidden", and every CSS rule that was keyed on the element
+  // EXISTING silently inverts: `.msg:has(.chip--task)` matched every row here, so every
+  // author went italic and every bubble took the rules border. The fix is
+  // `:has(.chip--task:not([hidden]))`, and it has to be looked for — nothing fails, the
+  // page just quietly says the wrong thing about every row. The same goes for `[hidden]`
+  // itself: it is the browser's own rule, so any author `display` outranks it, and each
+  // such selector needs to say `[hidden] { display: none }` for itself (`.sec__expand`,
+  // `.newpill`, `.loadmore` did; `.chip` and `.msg__title` declare no display, so they
+  // did not).
+  //
+  // The routing chips are part of that literal for the same reason. They are what turns
+  // a transcript into a conversation you can follow — who a section was for, what it
+  // answers, whether it is a task event (which does not take the turn) — and they are
+  // free: /api/pads/{ref} already returns the pad's ENTIRE table of contents, so the
+  // reply links and the reply count come from data the page holds.
   //
   // A broadcast draws no chip. Absent `to` already means everyone, and a chip on every
   // section written before addressing existed would be noise, not information.
-  function routingChips(sec) {
+  function sectionRow(sec) {
     const meta = pad.sections.find((s) => s.n === sec.n) || sec;
-    const out = [];
+    const long = sec.content.length > CLAMP_BYTES;
+    // The newest section is never clamped by default: it is what the reader came for.
+    const expanded = expandOverride.has(sec.n)
+      ? expandOverride.get(sec.n)
+      : (expandAll || sec.n === pad.section_count);
+    const clamped = long && !expanded;
     // A rules section is marked where it sits, because it behaves differently from the
     // prose around it: it does not take the turn, and only the LAST one is in force —
     // which is why an older one says so rather than looking like current policy.
-    if (meta.kind === "rules") {
-      const inForce = pad.rules?.layers?.find((l) => l.level === "pad")?.section === meta.n;
-      out.push(el("button", {
-        type: "button", class: "chip chip--rules" + (inForce ? "" : " chip--rules-old"),
-        text: inForce ? "RULES" : "RULES (superseded)",
-        title: inForce ? "The rules in force on this pad" : "An earlier version of the pad's rules",
-        onclick: () => showRules({ kind: "pad", ref, project: pad.project }, pad.rules, {
-          onSection: (n) => pickSection(n),
-          onChange: (rules) => { pad.rules = rules; rulesEntry?.repaint(); },
-        }),
-      }));
-    }
-    if (meta.task) {
-      const chip = el("button", {
-        type: "button", class: "chip chip--task", dataset: { status: meta.status || "" },
-        title: `Show only what concerns T${meta.task}`,
-        text: meta.status ? `T${meta.task} ${meta.status}` : `T${meta.task}`,
-        onclick: () => { void selectTask(taskFilter === meta.task ? 0 : meta.task); },
-      });
-      out.push(chip);
-    }
-    for (const target of meta.to || []) {
-      out.push(el("span", { class: "chip chip--to", text: `→ ${target}` }));
-    }
-    if (meta.re) {
-      out.push(el("button", {
-        type: "button", class: "chip chip--re", text: `↩ §${meta.re}`,
-        title: `Go to the section this answers`,
-        onclick: () => pickSection(meta.re),
-      }));
-    }
+    const isRules = meta.kind === "rules";
+    const inForce = isRules && pad.rules?.layers?.find((l) => l.level === "pad")?.section === meta.n;
     const replies = pad.sections.filter((s) => s.re === sec.n);
-    if (replies.length) {
-      out.push(el("button", {
-        type: "button", class: "chip chip--replies",
-        text: `${replies.length} ${replies.length === 1 ? "reply" : "replies"}`,
-        title: replies.map((r) => `§${r.n} ${r.author}: ${r.title}`).join("\n"),
-        onclick: () => pickSection(replies[0].n),
-      }));
-    }
-    return out;
+
+    return html`
+      <article class="msg ${justArrived.has(sec.n) ? "msg--new" : ""}" data-section=${sec.n}
+               style=${`--msg-est: ${(estimateRem(sec.content.length, clamped) + 4.5).toFixed(1)}rem`}>
+        <span class="msg__avatar" title=${sec.author} aria-hidden="true"
+              style="--avatar-bg: var(--avatar-c${agentColorIndex(sec.author)})"
+        >${agentInitials(sec.author)}</span>
+        <div class="msg__col">
+          <div class="msg__head">
+            <span class="msg__author">${sec.author}</span>
+            <span class="msg__n">§${sec.n}</span>
+            <span class="msg__time" title=${absTime(sec.ts)}>${clockTime(sec.ts)}</span>
+            <span>${bytes(sec.content.length)}</span>
+            <button type="button" class="chip chip--rules ${inForce ? "" : "chip--rules-old"}"
+                    ?hidden=${!isRules}
+                    title=${inForce ? "The rules in force on this pad" : "An earlier version of the pad's rules"}
+                    @click=${() => showRules({ kind: "pad", ref, project: pad.project }, pad.rules, {
+                      onSection: (n) => pickSection(n),
+                      onChange: (rules) => { pad.rules = rules; rulesEntry?.repaint(); },
+                    })}
+            >${inForce ? "RULES" : "RULES (superseded)"}</button>
+            <button type="button" class="chip chip--task" data-status=${meta.status || ""}
+                    ?hidden=${!meta.task}
+                    title=${`Show only what concerns T${meta.task}`}
+                    @click=${() => { void selectTask(taskFilter === meta.task ? 0 : meta.task); }}
+            >${meta.status ? `T${meta.task} ${meta.status}` : `T${meta.task}`}</button>
+            ${repeat(meta.to || [], (target) => target, (target) => html`<span class="chip chip--to">→ ${target}</span>`)}
+            <button type="button" class="chip chip--re" ?hidden=${!meta.re}
+                    title="Go to the section this answers"
+                    @click=${() => pickSection(meta.re)}
+            >↩ §${meta.re || ""}</button>
+            <button type="button" class="chip chip--replies" ?hidden=${!replies.length}
+                    title=${replies.map((r) => `§${r.n} ${r.author}: ${r.title}`).join("\n")}
+                    @click=${() => pickSection(replies[0]?.n)}
+            >${replies.length} ${replies.length === 1 ? "reply" : "replies"}</button>
+          </div>
+          <div class="msg__bubble">
+            <div class="msg__title" ?hidden=${!sec.title}>${sec.title || ""}</div>
+            <div class="sec__body" data-clamped=${String(clamped)}>${lazyFor(sec, clamped)}</div>
+            <button type="button" class="sec__expand" ?hidden=${!long}
+                    @click=${() => setExpanded(sec.n, clamped)}
+            >${clamped ? "Expand" : "Collapse"}</button>
+          </div>
+        </div>
+      </article>`;
   }
 
   // The pad's page is the ONLY place a pad can be deleted. A destructive action

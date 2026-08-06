@@ -1,0 +1,94 @@
+/* harness.css — styling for /harness.html only. Nothing in the app links this file.
+   It is a separate stylesheet rather than a <style> block because the app sends
+   `style-src 'self' 'unsafe-inline'` today and an inline block would work, but a harness
+   that quietly depends on the loosest clause of the product's CSP is a harness that
+   breaks the day someone tightens it. */
+
+.hx {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 0;
+  font-size: .9rem;
+}
+
+.hx__head h1 { margin: 0 0 .3rem; font-size: 1.4rem; }
+.hx__lede { margin: 0 0 1rem; color: var(--muted); }
+
+.hx__panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  padding: .8rem 1rem;
+  margin-bottom: .9rem;
+  background: var(--panel);
+}
+.hx__panel h2 { margin: 0 0 .5rem; font-size: .95rem; }
+
+.hx__steps { margin: 0; padding-left: 1.2rem; }
+.hx__steps li { margin-bottom: .5rem; }
+
+.hx code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: .82em;
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 .25rem;
+}
+
+.hx__table { border-collapse: collapse; width: 100%; font-size: .82rem; }
+.hx__table th, .hx__table td {
+  border: 1px solid var(--border);
+  padding: .25rem .5rem;
+  text-align: left;
+}
+.hx__table th { color: var(--muted); font-weight: 600; }
+
+.hx__note { margin: .6rem 0 0; color: var(--muted); font-size: .82rem; line-height: 1.5; }
+
+.hx__row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.hx__row:last-child { margin-bottom: 0; }
+.hx__label { color: var(--muted); font-size: .8rem; }
+.hx__sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 .3rem; }
+
+.hx__controls button {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text); border-radius: var(--radius, 6px);
+  padding: .25rem .6rem; font-size: .8rem; font-family: inherit; cursor: pointer;
+}
+.hx__controls button:hover { background: var(--panel-2, var(--panel)); }
+.hx__controls input {
+  background: var(--panel-2, var(--panel)); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius, 6px);
+  padding: .2rem .4rem; font: inherit; font-size: .8rem;
+}
+
+.hx__small { font-size: .72rem; font-weight: 400; margin-left: .4rem; }
+
+/* THESE TWO HAVE FIXED HEIGHTS ON PURPOSE, and it is not a style choice.
+   They sit ABOVE the subject, so anything that changes their height moves the whole
+   transcript down the page — and the harness would then report that movement as the
+   reader's place shifting, in a run where nothing about the transcript moved at all. It
+   caught itself doing exactly that (352px, the height this box grows to when the first
+   report lands). The report checks for it too, but a harness whose own chrome trips its
+   own guard on every run is a harness that teaches people to ignore the guard.
+
+   The height has to be FIXED, but it must not be a lid: four verdict lines already come
+   to about the height of the box, and the "not trustworthy" branch writes a line long
+   enough to wrap — so `overflow: hidden` quietly cut off the last PASS/FAIL. Scroll it
+   instead. A verdict a reader cannot see is the same as a verdict that was not written. */
+.hx__verdict {
+  display: grid; gap: .2rem; margin-bottom: .6rem;
+  height: 5.4rem; overflow: auto;
+}
+.hx__line { font-size: .82rem; }
+.hx__line b { font-family: var(--mono, ui-monospace, monospace); }
+.hx__pass { color: var(--green, #3fb950); }
+.hx__fail { color: var(--red, #f85149); }
+.hx__info { color: var(--muted); }
+
+.hx__out {
+  margin: 0; height: 22rem; overflow: auto;
+  font-family: var(--mono, ui-monospace, monospace); font-size: .72rem;
+  white-space: pre-wrap; word-break: break-word;
+  color: var(--muted);
+}

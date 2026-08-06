@@ -16,4 +16,13 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
+      # `make check` runs the Web UI's JS tests through `node --test`. The hosted Ubuntu
+      # image happens to ship a Node today, so this would pass without the step — which is
+      # the reason to have it: a build requirement that works by accident breaks the day
+      # the image changes or someone runs this on a different runner, and it breaks looking
+      # like a test failure. Nothing is installed here beyond Node itself: there is no
+      # package.json to install from and no lockfile.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
       - run: make check

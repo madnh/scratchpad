@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "//": "Not a Node project and never installed: there are no dependencies and there is no lockfile. This file exists to tell `node --test` that the .js under assets/ are ES modules, which is what they already are in the browser — without it Node parses `export` as CommonJS and fails. It sits HERE rather than in assets/ on purpose: assets/ is embedded into the binary by go:embed, and a package.json in there would be compiled in and served."
+}

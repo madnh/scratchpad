@@ -126,6 +126,16 @@ export function cutChars(s, max) {
 // Null-prototype: handles are written by agents, i.e. untrusted, and a plain object
 // literal would resolve an author named "constructor" through Object.prototype and
 // hand back a FUNCTION where a two-letter string was expected.
+//
+// EVERY VALUE HERE IS 2–3 CHARACTERS, and nothing enforces it. An avatar is a fixed disc;
+// a four-character value spills out of it. The test suite checks that the FALLBACK paths
+// stay within the limit — those take arbitrary input — but it cannot check this table,
+// because the table is module-private and exporting it to let a test read it would widen
+// the production surface so a test can exist. Deliberately not done: the first consumer
+// who imports it turns an internal lookup into a contract we have to keep, and the defect
+// it would catch is one slightly wide disc, visible by looking at it.
+//
+// So a new entry is checked by REVIEW. That is the whole enforcement; there is no other.
 const ROLES = Object.assign(Object.create(null), {
   backend: "BE", back: "BE", server: "BE", api: "API", srv: "BE",
   frontend: "FE", front: "FE", client: "FE", web: "FE", webapp: "FE", ui: "UI",

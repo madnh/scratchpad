@@ -213,9 +213,29 @@ default — this repo names no host, and a conventional path is a host's propert
 ## Build / test
 
 ```
-make check        # gofmt + vet + test
+make check        # gofmt + vet + layers + go test + test-ui
 go build ./...
 ```
+
+**`make check` now needs `node` on PATH.** `test-ui` runs the Web UI's JS tests through
+`node --test` — the runner that ships with Node: no `package.json` to install, no
+`node_modules`, no browser download, so the repo stays as self-contained as it was. A
+missing `node` FAILS the target rather than skipping it; a silent skip reads exactly like
+a pass.
+
+Those tests cover the layer that needs no DOM — `internal/webui/assets/lib/fmt.js` imports
+nothing and touches no document, so the most valuable thing to test is also the cheapest,
+and it belongs in the gate. **They live in `internal/webui/uitest/`, NOT under `assets/`,
+because `//go:embed all:assets` would compile any file under there into the binary and
+serve it.** `internal/webui/package.json` exists only to tell Node those files are ES
+modules, and sits outside `assets/` for the same reason.
+
+What needs a real browser — node identity across a re-render, `<puredashboard-lazy>`
+states, scroll geometry — is NOT here and must not be faked: a DOM shim answers one of
+those five questions and lies plausibly about the rest. That layer is
+`assets/harness.html`, a page nothing references, driven by hand. It measures; it does not
+assert, and nothing fails a build if the transcript regresses. That is a known cost, not
+an oversight.
 
 Under `serve --stdio`, stdout belongs to JSON-RPC — all logging must go to stderr.
 `scratchpad serve --stdio >/tmp/out 2>/tmp/err` must leave `/tmp/out` empty.
