@@ -71,6 +71,45 @@ test("safeInline neutralises the same characters safeText does", () => {
   assert.ok(!/[​‮]/.test(safeInline("x​y‮z")));
 });
 
+// EVERY character the source says it strips, not the two or three a test author happened
+// to think of. Sampling is what lets the character class shrink unnoticed: drop the
+// isolate range from it and the handful of sampled characters still pass, while U+2066
+// goes back to reordering whatever follows it.
+//
+// The ranges are copied from the comment above UNSAFE_TEXT in fmt.js. If that class is
+// deliberately narrowed, this list is the place the decision has to be repeated — which is
+// the point: narrowing it should cost a conversation, not go through silently.
+const UNSAFE_RANGES = [
+  [0x0000, 0x0008], [0x000b, 0x001f], [0x007f, 0x009f],
+  [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064],
+  [0x2066, 0x2069], [0xfeff, 0xfeff],
+];
+
+function unsafeChars() {
+  const out = [];
+  for (const [from, to] of UNSAFE_RANGES) {
+    for (let cp = from; cp <= to; cp++) out.push(String.fromCodePoint(cp));
+  }
+  return out;
+}
+
+test("safeText and safeInline neutralise every character in the documented ranges", () => {
+  for (const ch of unsafeChars()) {
+    const hex = ch.codePointAt(0).toString(16).padStart(4, "0");
+    assert.ok(!safeText(`a${ch}b`).includes(ch), `safeText let U+${hex} through`);
+    assert.ok(!safeInline(`a${ch}b`).includes(ch), `safeInline let U+${hex} through`);
+    assert.equal(safeInline(`a${ch}b`).length, 3, `safeInline changed length at U+${hex}`);
+  }
+});
+
+// The other half of that contract: \t and \n are deliberately OUTSIDE the class, "so a
+// multiline excerpt keeps its shape". Widening the class to swallow them would be just as
+// silent a change in the other direction.
+test("safeText keeps the line breaks a multiline excerpt is made of", () => {
+  assert.equal(safeText("first\nsecond", { multiline: true }), "first\nsecond");
+  assert.ok(safeInline("first\nsecond").includes("\n"));
+});
+
 // ── cutting text without breaking it ───────────────────────────────────────────
 
 test("cutChars never leaves half of a character behind", () => {
@@ -94,6 +133,28 @@ test("cutChars counts code points, not UTF-16 units", () => {
   // Four astral characters are 8 units long; a length-based cut would trim this and it
   // must not, because there are only 4 CHARACTERS.
   assert.equal(cutChars("👍👍👍👍", 4), "👍👍👍👍");
+});
+
+// The assertion the function's NAME makes and nothing was checking: "shortens a string to
+// `max` CHARACTERS". The ellipsis counts, which is the whole reason the slice is `max - 1`
+// — and changing it to `max` left all twenty tests green while cutChars("abcdefghij", 5)
+// handed back six characters.
+//
+// Found by choosing the probe from the contract rather than from the tests. A mutation
+// picked by reading the suite can only confirm the suite runs; it cannot find an assertion
+// nobody wrote.
+test("cutChars result is never longer than max — the ellipsis counts", () => {
+  for (const [text, max] of [
+    ["abcdefghij", 5],
+    ["abcdefghij", 2],
+    ["a".repeat(200), 48],
+    ["👍👍👍👍👍👍", 3],
+    ["mixed 👍 text that runs on", 10],
+  ]) {
+    // Code points, because that is the unit the contract is written in.
+    const got = Array.from(cutChars(text, max)).length;
+    assert.ok(got <= max, `cutChars(${JSON.stringify(text)}, ${max}) returned ${got} characters`);
+  }
 });
 
 test("cutChars leaves anything short enough alone", () => {
@@ -140,6 +201,31 @@ test("agentInitials falls back readably for handles it does not know", () => {
   assert.equal(agentInitials(""), "?");
   assert.equal(agentInitials(null), "?");
   assert.equal(agentInitials("!!!"), "?", "nothing word-like left after splitting");
+});
+
+// "maps an author handle onto the 2–3 characters shown in its avatar" — an avatar is a
+// fixed disc, so a longer string spills out of it. The handles that reach the fallback are
+// the arbitrary ones (anything not in the role table), which is precisely where a shape
+// nobody sampled can turn up.
+//
+// LIMIT, stated because it is the interesting half: this cannot check the role table
+// itself. ROLES is module-private, so a new entry with a four-character value would sail
+// past every assertion here. Enforcing that from outside would mean exporting the table
+// only for the test, and a test that changes the module's surface to make itself possible
+// is a trade I am not taking on my own.
+test("agentInitials stays inside the avatar for handles it has never seen", () => {
+  const handles = [
+    "zephyr", "alpha beta", "a b c d e", "skb", "x", "xy", "xyz", "wxyz",
+    "aVeryLongCamelCaseHandleIndeed", "dash-separated-handle", "dot.separated.handle",
+    "under_scored_handle", "handle/with/slashes", "  spaced  out  ", "123456",
+    "ÅÄÖ", "handle9000", "a".repeat(64), "!!!", "constructor", "__proto__",
+  ];
+  for (const h of handles) {
+    const out = agentInitials(h);
+    assert.equal(typeof out, "string", `${JSON.stringify(h)} did not produce a string`);
+    assert.ok(out.length >= 1 && out.length <= 3,
+      `${JSON.stringify(h)} produced ${JSON.stringify(out)} (${out.length} chars)`);
+  }
 });
 
 test("agentColorIndex is stable and inside the palette", () => {
