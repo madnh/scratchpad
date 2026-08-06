@@ -62,6 +62,12 @@
         it": it declines rather than reporting a clean focus result it did not earn, but it
         looks like a run that checked focus unless you read the line.
       </li>
+      <li>
+        <b>Scroll the controls fully into view before clicking them.</b> The mounted page
+        has a sticky toolbar of its own, and it can sit on top of these buttons: a click
+        aimed at <b>Baseline</b> then lands on the toolbar and does NOTHING — no error, no
+        console message, just an empty report box. Both of us hit it.
+      </li>
       <li>Press <b>Baseline</b>. That records every row's node identity, every body's parse identity, every lazy element's state, where the topmost visible section sits, and what is focused.</li>
       <li>
         Do ONE thing, then read the report. The buttons below drive the app's own controls
@@ -71,6 +77,20 @@
         <br><code>scratchpad pad post &lt;ref&gt; --as someone --title "x" "y"</code>
       </li>
     </ol>
+  </section>
+
+  <section class="hx__panel">
+    <h2>The two ways to get a wrong answer from this page</h2>
+    <p class="hx__note">
+      Both steps above are the same failure in different clothes, and it is worth naming
+      because this harness exists to catch exactly this shape: <b>an operator error that
+      produces a plausible-looking empty result instead of an error.</b> Setting focus after
+      Baseline gives "nothing in the transcript was focused" — true, and easy to read as a
+      focus check that passed. Clicking a control the sticky toolbar is covering gives an
+      empty report box — and nothing anywhere says the click missed.
+      <br>Neither throws. Neither logs. If a run tells you less than you expected, suspect
+      the run before you believe the page.
+    </p>
   </section>
 
   <section class="hx__panel">
