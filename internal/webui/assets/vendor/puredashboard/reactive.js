@@ -54,8 +54,25 @@ export const isResult = (x) => !!(x && x[RESULT]);
 
 // repeat(items, keyFn, tmplFn) — keyed list directive (like lit's repeat). Use as a
 // child binding: ${repeat(rows, (r) => r.id, (r, i) => html`...`)}. On update, rows
-// whose key persists keep their existing DOM node (and any focus/scroll inside) and
-// are MOVED, not rebuilt; only added/removed/changed rows touch the DOM.
+// whose key persists keep their existing DOM node and are MOVED, not rebuilt; only
+// added/removed/changed rows touch the DOM.
+//
+// What "keeps its node" does and does NOT buy you. A row left where it is keeps
+// everything: focus, scroll, and any state you hung on the node. A row the reconciler
+// RELOCATES keeps only the node — relocation goes through insertBefore, which the DOM
+// defines as a remove plus an insert, so focus is lost, an inner scroll container resets
+// to 0, and a custom element inside the row is disconnected and reconnected (its
+// connectedCallback runs again). Selection offsets do survive: after the move
+// selectionStart still reads what it did, it is the focus that is gone.
+//
+// WHICH rows get relocated is a property of the diff, not of what you called the update.
+// Measured (Chrome and jsdom agree): reversing [1,2,3] relocates the focused row and
+// focus is lost; rotating it to [2,3,1] relocates a different one and focus survives; a
+// removal leaving the survivors non-adjacent ([1,2,3,4,5] → [1,3,5]) relocates rows just
+// as a reorder does, while an append, a prepend, and a head/tail/contiguous removal
+// relocate nothing. So "reorders are lossy, edits are free" is the wrong summary. The
+// right one: node identity is NOT a proxy for state surviving an update — if a row holds
+// focus or scroll you care about, check that, not the node.
 export function repeat(items, keyFn, tmplFn) { return { [REPEAT]: true, items, keyFn, tmplFn }; }
 const isRepeat = (x) => !!(x && x[REPEAT]);
 
@@ -108,8 +125,19 @@ function safeUrlAttr(name, val) {
 }
 
 // Row — one keyed item inside a repeat: its own anchor comment plus the nodes before
-// it. update() re-binds in place when the template matches (keeping the live nodes,
-// so focus survives); moveBefore() relocates the whole row in one shot.
+// it. update() re-binds in place when the template matches (keeping the live nodes, so
+// focus survives); moveBefore() relocates the whole row in one shot.
+//
+// NOTE the method below is ours and is built on insertBefore — it is not the native
+// moveBefore(), whose name it shares. That one lives on Element (and Document /
+// DocumentFragment), NOT on Node: it is called as parent.moveBefore(node, ref) and
+// feature-detected as `"moveBefore" in Element.prototype`. It performs a state-preserving
+// atomic move — focus and inner scroll both survive (measured in Chrome) — but it is
+// Chrome/Edge 133+ and Firefox 144+ only, with no Safari, so adopting it would be a
+// feature-detected enhancement rather than a swap. It also only skips
+// disconnected/connectedCallback for custom elements that OPT IN by defining
+// connectedMoveCallback(); one that does not still gets the old pair, so it would not on
+// its own spare a component inside a row from re-running its connect logic.
 class Row {
   constructor(key) { this.key = key; this.anchor = document.createComment("row"); this.nodes = []; this.inst = null; }
   firstNode() { return this.nodes.length ? this.nodes[0] : this.anchor; }

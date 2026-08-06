@@ -54,7 +54,15 @@
         page inherits the session cookie — it calls the same API.
       </li>
       <li>Open this page at <code>/harness.html?ref=&lt;project&gt;-&lt;padid&gt;</code>, or type the ref below and press <b>Mount</b>.</li>
-      <li>Press <b>Baseline</b>. That records every row's node identity, every body's parse identity, every lazy element's state, and where the topmost visible section sits.</li>
+      <li>
+        <b>If you care about focus, click or tab to something in the transcript FIRST</b> —
+        a chip, an expand toggle — before pressing Baseline. Focus is recorded at Baseline
+        and there is nothing to record if it is set afterwards. Get the order wrong and the
+        verdict says "nothing in the transcript was focused, so this run says nothing about
+        it": it declines rather than reporting a clean focus result it did not earn, but it
+        looks like a run that checked focus unless you read the line.
+      </li>
+      <li>Press <b>Baseline</b>. That records every row's node identity, every body's parse identity, every lazy element's state, where the topmost visible section sits, and what is focused.</li>
       <li>
         Do ONE thing, then read the report. The buttons below drive the app's own controls
         and report themselves after a moment. The one thing they cannot do is post — the
@@ -76,7 +84,7 @@
         <tr><td>expand / collapse one section</td><td>0</td><td>0</td><td>0</td><td>—</td></tr>
         <tr><td>Expand all / Collapse long</td><td>0</td><td>0</td><td>0</td><td>—</td></tr>
         <tr><td>load older (oldest-first)</td><td>0</td><td>0</td><td>0</td><td>0 px</td></tr>
-        <tr><td>flip reading order</td><td>0</td><td>0</td><td><b>not 0 — expected</b></td><td>—</td></tr>
+        <tr><td>flip reading order</td><td>0</td><td>0</td><td>0</td><td>—</td></tr>
       </tbody>
     </table>
     <p class="hx__note">
@@ -95,12 +103,14 @@
       deliberately moved out of the DOM into JS, not because the node was kept.
     </p>
     <p class="hx__note">
-      <b>Re-parse on a flip is known and is not a regression.</b> Flipping the order MOVES
-      rows rather than rebuilding them, and moving a node reconnects it;
-      <code>&lt;puredashboard-markdown&gt;</code> re-renders in its
-      <code>connectedCallback</code>, so it parses again. Before this harness's subject
-      existed, a flip rebuilt every row instead. A non-zero count here means the move path,
-      not a broken keyed list — check <code>rows_rebuilt</code>, which should still be 0.
+      <b>A flip used to cost a full re-parse, and no longer does.</b> Flipping the order
+      MOVES rows rather than rebuilding them, and moving a node reconnects it — and
+      <code>&lt;puredashboard-markdown&gt;</code> used to re-render on every connect, so 19
+      of 20 bodies were parsed a second time for a reordering that changed no text. The
+      vendored component now repaints only when its value actually changed, measured here
+      at <b>0</b>. So 0 is the expected answer for every action in the table, this one
+      included; a non-zero count is a finding, not a known cost, and the first thing to
+      check is the vendored <code>md.js</code>.
     </p>
     <p class="hx__note">
       <b>The held-section shift is only meaningful for "load older".</b> Reading

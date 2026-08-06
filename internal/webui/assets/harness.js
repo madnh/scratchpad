@@ -239,10 +239,15 @@ function report() {
                : `focus LOST from ${heldFocus.what} in §${heldFocus.section} — the row can be kept and still be MOVED, and a move is remove-plus-insert`),
     line(lazyBack.length === 0 ? "pass" : "fail",
          `lazy rendered → pending: ${lazyBack.length}${lazyBack.length ? ` (${lazyBack.join(", ")})` : ""}`),
-    flipped
-      ? line(reparsed.length ? "info" : "info",
-             `bodies re-parsed: ${reparsed.length} — expected after a flip, the move reconnects the node`)
-      : line(reparsed.length === 0 ? "pass" : "fail", `bodies re-parsed: ${reparsed.length}`),
+    // A flip used to cost a full re-parse: moving a node reconnects it, and the markdown
+    // component re-rendered on every connect. It now repaints only when its value actually
+    // changed, so 0 is the expected answer HERE TOO — and a non-zero count is worth
+    // reporting rather than shrugging at, which is what the old "expected after a flip"
+    // wording taught the reader to do.
+    line(reparsed.length === 0 ? "pass" : "fail",
+         reparsed.length === 0
+           ? `bodies re-parsed: 0${flipped ? " (a flip no longer costs a re-parse)" : ""}`
+           : `bodies re-parsed: ${reparsed.length}${flipped ? " — a flip should no longer cost this; check the vendored md.js" : ""}`),
     shift === null
       ? line("info", "held section is gone — no shift to report")
       : !shiftTrustworthy

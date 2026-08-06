@@ -467,6 +467,17 @@ export default function mount(outlet, ctx) {
   // rows it excludes, and flipping the reading order MOVES rows rather than rebuilding
   // them.
   //
+  // KEPT IS NOT THE SAME AS UNTOUCHED, and the difference is the reason the expand state
+  // below lives in JS. A row that is not rebuilt can still be MOVED, and a move is
+  // `insertBefore` — which the DOM defines as remove-plus-insert, so anything the browser
+  // holds on the element goes with it. Focus is the one that bites: a row can survive a
+  // filter, keep its identity, and still hand focus back to <body>, throwing a keyboard
+  // reader to the top of the document. Which rows move is a property of the DIFF, not of
+  // the action — removing rows until the survivors are no longer adjacent relocates them
+  // exactly as a reorder does. So state you want back does not belong on the node, however
+  // well keyed the list is; `expandOverride` is that lesson, and focus is what it looks
+  // like when the state has nowhere else to live.
+  //
   // Nothing above the chat is conditional-shaped either. The pill, the edge and the
   // "no matches" line are always present and bound `?hidden`, because a `${cond ? html`…`
   // : ""}` swaps the template and takes the node with it.
