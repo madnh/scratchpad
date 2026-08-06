@@ -27,15 +27,22 @@ const now = () => Math.round(Date.now() / 1000);
 //
 // Agents write titles and handles, so these are the functions standing between an
 // agent-written string and what a person believes they are looking at.
+//
+// EVERY dangerous character below is written as an ESCAPE, never as itself, and that is
+// not a style preference. Typing them literally put a real NUL byte in this file: git
+// classified it as binary, so the diff of a suite ABOUT invisible characters became
+// unreviewable and grep stopped finding anything in it. A test that warns about text you
+// cannot see must not be written in text you cannot see. The escape also says which code
+// point is meant, which no reader can tell from an invisible one.
 
 test("safeText strips the characters that let a string lie about itself", () => {
   // U+202E renders everything after it right-to-left, so a title can DISPLAY as
   // something other than what it contains.
-  assert.equal(safeText("report‮gnp.exe"), "report gnp.exe");
+  assert.equal(safeText("report\u202Egnp.exe"), "report gnp.exe");
   // Zero-width characters make two different entries look identical.
-  assert.equal(safeText("ad​min"), "ad min");
+  assert.equal(safeText("ad\u200Bmin"), "ad min");
   assert.equal(safeText("a\u0000b"), "a b");
-  assert.equal(safeText("a﻿b"), "a b");
+  assert.equal(safeText("a\uFEFFb"), "a b");
 });
 
 test("safeText collapses to one line by default and keeps lines when asked", () => {
@@ -56,19 +63,19 @@ test("safeText survives nothing at all", () => {
 test("safeInline preserves length exactly — the search highlight depends on it", () => {
   for (const raw of [
     "plain text",
-    "bidi ‮ here",
-    "zero​width‌joined",
-    "controlchars",
+    "bidi \u202E here",
+    "zero\u200Bwidth\u200Cjoined",
+    "control\u0001chars\u007F",
     "double  spaces   kept",
-    "⁦isolate⁩",
+    "\u2066isolate\u2069",
   ]) {
     assert.equal(safeInline(raw).length, raw.length, `length changed for ${JSON.stringify(raw)}`);
   }
 });
 
 test("safeInline neutralises the same characters safeText does", () => {
-  assert.equal(safeInline("a‮b"), "a b");
-  assert.ok(!/[​‮]/.test(safeInline("x​y‮z")));
+  assert.equal(safeInline("a\u202Eb"), "a b");
+  assert.ok(!/[\u200B\u202E]/.test(safeInline("x\u200By\u202Ez")));
 });
 
 // EVERY character the source says it strips, not the two or three a test author happened
