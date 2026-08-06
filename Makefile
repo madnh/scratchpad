@@ -30,7 +30,7 @@ GOPLS_VERSION ?= latest
 # chính nó tạo, nên gõ nhầm --dir sang store thật sẽ bị từ chối chứ không mất dữ liệu.
 DEMO_DIR ?= $(HOME)/.scratchpad-demo
 
-.PHONY: help build-dev build-release install run ui demo demo-ui test fmt fmt-check vet layers tidy check clean vendor-ui tools
+.PHONY: help build-dev build-release install run ui demo demo-ui test test-ui fmt fmt-check vet layers tidy check clean vendor-ui tools
 
 help: ## In danh sách lệnh (mặc định)
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -73,6 +73,25 @@ vendor-ui: ## Cập nhật thư viện UI đã vendor từ puredashboard (PD_REF
 
 test: ## Chạy toàn bộ test
 	go test ./...
+
+# Test cho JS của Web UI. Chạy bằng `node --test` — bộ chạy có sẵn trong Node, KHÔNG
+# package.json để cài, KHÔNG node_modules, KHÔNG tải browser: repo vẫn tự chứa như trước,
+# chỉ thêm yêu cầu có `node` trên PATH.
+#
+# Phạm vi là lớp KHÔNG cần DOM: fmt.js không import gì và không đụng document, nên thứ
+# đáng test nhất ở đây cũng là thứ rẻ nhất, và nó nằm được trong `make check` mà không
+# làm cổng kiểm tra bấp bênh. Những gì cần trình duyệt thật — node identity qua một lần
+# re-render, trạng thái lazy, hình học cuộn — vẫn thuộc về assets/harness.html; một DOM
+# giả trả lời được đúng một trong năm tiêu chí đó, nên ở đây không có cái nào.
+#
+# Test nằm NGOÀI assets/ vì `//go:embed all:assets` sẽ nhúng mọi thứ dưới đó vào binary
+# và đem phục vụ. internal/webui/package.json chỉ để nói với Node rằng đây là ES module.
+#
+# Thiếu node thì FAIL chứ không bỏ qua: một lần skip im lặng đọc y hệt một lần pass.
+test-ui: ## Chạy test JS của Web UI (node --test, không cần cài gì)
+	@command -v node >/dev/null 2>&1 || { \
+		echo "cần node trên PATH để chạy test JS của Web UI (make check bao gồm nó)"; exit 1; }
+	node --test internal/webui/uitest/*.test.js
 
 fmt: ## Định dạng lại code (gofmt -w)
 	gofmt -w .
@@ -119,7 +138,7 @@ tools: ## Cài công cụ phát triển (gopls) — idempotent, chạy lại bao
 tidy: ## Dọn go.mod/go.sum
 	go mod tidy
 
-check: fmt-check vet layers test ## Cổng kiểm tra trước khi commit (fmt-check + vet + layers + test)
+check: fmt-check vet layers test test-ui ## Cổng kiểm tra trước khi commit (fmt-check + vet + layers + test + test-ui)
 
 clean: ## Xoá artifact build
 	rm -rf $(BIN_DIR)
