@@ -226,9 +226,17 @@ a pass.
 Those tests cover the layer that needs no DOM — `internal/webui/assets/lib/fmt.js` imports
 nothing and touches no document, so the most valuable thing to test is also the cheapest,
 and it belongs in the gate. **They live in `internal/webui/uitest/`, NOT under `assets/`,
-because `//go:embed all:assets` would compile any file under there into the binary and
-serve it.** `internal/webui/package.json` exists only to tell Node those files are ES
-modules, and sits outside `assets/` for the same reason.
+because `go:embed` compiles what is under there into the binary and serves it.**
+`internal/webui/package.json` exists only to tell Node those files are ES modules, and
+sits outside `assets/` for the same reason.
+
+A leading underscore is the ONE exception, and it is a rule about the whole directory:
+`assets.go` embeds `assets` without the `all:` prefix, so go:embed skips
+underscore-named files. That is upstream's own convention for what a consumer must not
+ship, and it is what lets `vendor-ui` take puredashboard's `_agents.md` and
+`_components.jsonl` — the library's documentation, which we read and the browser never
+sees. The cost: an asset that must genuinely be SERVED can never be named that way here,
+because it would vanish silently.
 
 What needs a real browser — node identity across a re-render, `<puredashboard-lazy>`
 states, scroll geometry — is NOT here and must not be faked: a DOM shim answers one of
