@@ -80,6 +80,21 @@
       </tbody>
     </table>
     <p class="hx__note">
+      <b>"Rows rebuilt: 0" does NOT mean the reader's state survived.</b> It means the engine
+      did not rebuild the node. It says nothing about whether the node was MOVED — and a
+      move is <code>insertBefore</code>, which the DOM defines as remove-plus-insert, so
+      anything the browser keeps on the element goes with it. Focus is the case that bites:
+      a row can survive a filter, keep its identity, and still lose focus to
+      <code>&lt;body&gt;</code>, throwing a keyboard reader to the top of the document while
+      every count on this page reads clean. Which rows get moved is a property of the DIFF,
+      not of the action — removing rows so the survivors are no longer adjacent relocates
+      them exactly as a reorder does.
+      <br>That is why focus is measured separately below, and why a run where nothing was
+      focused says so instead of staying quiet: an absent FAIL must not read as a PASS. The
+      state that DOES survive here — whether a section is expanded — survives because it was
+      deliberately moved out of the DOM into JS, not because the node was kept.
+    </p>
+    <p class="hx__note">
       <b>Re-parse on a flip is known and is not a regression.</b> Flipping the order MOVES
       rows rather than rebuilding them, and moving a node reconnects it;
       <code>&lt;puredashboard-markdown&gt;</code> re-renders in its

@@ -98,6 +98,32 @@ let base = null;
 let heldSection = null;
 let heldTop = null;
 
+// FOCUS, tracked separately and on purpose.
+//
+// The instrument used to report "rows kept 20/20, rebuilt 0" and stop there, and that
+// number was read — by me, in three reports — as "the reader's state survived". It does not
+// mean that. Keeping a node means the engine did not REBUILD it; it says nothing about
+// whether the node was MOVED, and a move is `insertBefore`, which the DOM defines as
+// remove-plus-insert. Focus does not survive that. Which rows get moved is a property of
+// the diff, not of the action: removing rows so the survivors are no longer adjacent
+// relocates them exactly as a reorder does, so an ordinary filter can throw a keyboard
+// reader back to the top of the document while every count here reads clean.
+//
+// So the harness now watches the one piece of reader state that still lives in the DOM,
+// and says so even when there is nothing to watch — an absent FAIL must not read as a PASS.
+let heldFocus = null;
+
+function focusInTranscript() {
+  const a = document.activeElement;
+  if (!a || typeof a.closest !== "function") return null;
+  const row = a.closest(".chat > .msg");
+  if (!row) return null;
+  return {
+    section: row.dataset.section,
+    what: `${a.localName}${a.className ? `.${String(a.className).trim().split(/\s+/).join(".")}` : ""}`,
+  };
+}
+
 function tally(map) {
   const out = {};
   for (const v of map.values()) out[v] = (out[v] || 0) + 1;
@@ -111,6 +137,7 @@ function baseline() {
   const a = anchor();
   heldSection = a ? a.section : null;
   heldTop = a ? a.top : null;
+  heldFocus = focusInTranscript();
   emit({
     what: "baseline",
     rows_on_screen: base.nodes.size,
@@ -119,8 +146,9 @@ function baseline() {
     clamp: Object.fromEntries(base.clamp),
     held: heldSection,
     held_top: heldTop,
+    focused: heldFocus,
     scroll: base.scroll,
-  }, []);
+  }, heldFocus ? [] : [line("info", "nothing in the transcript is focused — click or tab to a chip first if you want the focus check to mean anything")]);
 }
 
 function report() {
@@ -163,6 +191,11 @@ function report() {
   // "load older" is the one action for which both legitimately move: the page grew above
   // the reader, and the page's own anchoring adjusted scrollTop precisely to keep them
   // still. That is the thing being measured, so the guard steps aside for it.
+  const nowFocus = focusInTranscript();
+  const focusKept = heldFocus
+    ? !!(nowFocus && nowFocus.section === heldFocus.section && nowFocus.what === heldFocus.what)
+    : null;
+
   const scrolled = now.scroll.scrollTop - base.scroll.scrollTop;
   const subjectMoved = now.subjectTop != null && base.subjectTop != null
     ? now.subjectTop - base.subjectTop : null;
@@ -189,12 +222,21 @@ function report() {
     page_scrolled_px: scrolled,
     subject_moved_px: subjectMoved,
     held_shift_trustworthy: shiftTrustworthy,
+    focused_before: heldFocus,
+    focus_kept: focusKept,
+    focus_now: nowFocus,
     scroll: now.scroll,
   }, [
     carried === 0
       ? line("info", "no section from the baseline is still on screen — identity says nothing here")
       : line(rebuilt.length === 0 ? "pass" : "fail",
-             `rows kept ${kept}/${carried}, rebuilt ${rebuilt.length}`),
+             `rows kept ${kept}/${carried}, rebuilt ${rebuilt.length} — NOT rebuilt, which is not the same as state survived`),
+    heldFocus === null
+      ? line("info", "focus: nothing in the transcript was focused, so this run says nothing about it")
+      : line(focusKept ? "pass" : "fail",
+             focusKept
+               ? `focus stayed on ${heldFocus.what} in §${heldFocus.section}`
+               : `focus LOST from ${heldFocus.what} in §${heldFocus.section} — the row can be kept and still be MOVED, and a move is remove-plus-insert`),
     line(lazyBack.length === 0 ? "pass" : "fail",
          `lazy rendered → pending: ${lazyBack.length}${lazyBack.length ? ` (${lazyBack.join(", ")})` : ""}`),
     flipped
@@ -221,6 +263,7 @@ function report() {
   const a = anchor();
   heldSection = a ? a.section : null;
   heldTop = a ? a.top : null;
+  heldFocus = nowFocus;
 }
 
 function line(kind, text) { return { kind, text }; }
@@ -295,6 +338,20 @@ function mount() {
   url.searchParams.set("ref", ref);
   history.replaceState(null, "", url);
 }
+
+// The harness's own BUTTONS must not take focus, or the focus measurement is impossible by
+// construction: pressing "Baseline" would move the active element off the transcript and
+// record `focused: null` every single time — which reads as "nothing was focused" rather
+// than "the instrument just destroyed the reading". preventDefault on mousedown suppresses
+// the focus without suppressing the click. Text inputs are excluded, obviously; they are
+// meant to be typed into, and focusing one is a deliberate act by the person, not a side
+// effect of asking for a measurement.
+//
+// Same rule as the fixed panel heights above: nothing this page does may change the thing
+// it is measuring.
+document.querySelector(".hx__controls").addEventListener("mousedown", (e) => {
+  if (e.target.closest("button")) e.preventDefault();
+});
 
 document.getElementById("hx-mount").addEventListener("click", mount);
 document.getElementById("hx-baseline").addEventListener("click", baseline);
