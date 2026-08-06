@@ -8,11 +8,19 @@ import (
 )
 
 // assetsFS holds the whole front end — the app shell, its page modules, and the
-// vendored puredashboard library — compiled into the binary. `all:` is needed for the
-// vendor tree; without it go:embed would skip nothing here today, but the prefix
-// keeps a future underscore-named asset from silently disappearing.
+// vendored puredashboard library — compiled into the binary.
 //
-//go:embed all:assets
+// NO `all:` prefix, and that is now load-bearing: without it go:embed skips anything
+// named with a leading underscore, which is exactly the convention puredashboard uses
+// to mark the files a consumer should NOT ship. `_agents.md` says so in its own first
+// paragraph. We vendor those files because they are the library's documentation and we
+// read them; they have no business inside the binary or on the wire.
+//
+// So the rule for this directory is the upstream one: a leading underscore means "for
+// the repository, not for the browser". An asset that must actually be SERVED can never
+// be named that way — it would vanish here, silently.
+//
+//go:embed assets
 var assetsFS embed.FS
 
 // assetHandler serves the embedded front end. Unknown paths fall back to the shell:

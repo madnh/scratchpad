@@ -63,7 +63,7 @@ vendor-ui: ## Cập nhật thư viện UI đã vendor từ puredashboard (PD_REF
 	@tmp=$$(mktemp -d) && \
 	git clone --quiet --depth 1 --branch $(PD_REF) $(PD_REPO) $$tmp && \
 	rm -rf $(PD_DIR) && mkdir -p $(PD_DIR)/theme && \
-	cp $$tmp/src/*.js $$tmp/src/*.css $(PD_DIR)/ && \
+	cp $$tmp/src/*.js $$tmp/src/*.css $$tmp/src/_* $(PD_DIR)/ && \
 	cp $$tmp/src/theme/*.css $(PD_DIR)/theme/ && \
 	cp $$tmp/LICENSE $(PD_DIR)/LICENSE && \
 	printf 'source: %s\ncommit: %s\ndate:   %s\n' \
