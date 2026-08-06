@@ -81,6 +81,7 @@ const extOf = (name) => { const m = /\.([^.]+)$/.exec(name || ""); return m ? m[
  *
  * @method upload - `upload(url: string, opts?: {headers?,field?,method?}) => Promise<Array>` — send every pending (ready/errored) file; updates per-file status + progress.
  * @method clear  - `clear() => void` — remove all selected files (revokes thumbnails).
+ * @method removeFile - `removeFile(id: number) => void` — drop ONE selected file by its id (revokes its thumbnail). Prefer this over `remove(id)`: `remove` is also the DOM's own `Element.remove()`, so a bare `el.remove()` detaches the element and only an explicit id drops a file.
  *
  * @cssprop [--puredashboard-upload-thumb=40px] - Thumbnail / file-glyph box size.
  *
@@ -127,26 +128,81 @@ class PuredashboardUpload extends Reactive {
     this._internals.setFormValue(fd);
   }
 
+  // Revoking on disconnect is right — an element that leaves for good must not leak its
+  // object URLs. But a RELOCATION is a disconnect plus a reconnect (re-parenting a node is
+  // defined as a remove plus an insert, so a keyed repeat() reorder or a filter that leaves
+  // survivors non-adjacent runs both), and after it every `it.thumb` pointed at a blob that
+  // had been revoked. Measured before this: a row holding one image, relocated once, left the
+  // thumbnail permanently broken with the URL string unchanged — revoked, not replaced, and
+  // nothing rebuilt it. We still hold `it.file`, so mint them again on the way back in.
+  connectedCallback() {
+    // Per ITEM, not per element. A flag on the element said "this element was revoked", which
+    // stops being true of every item the moment one is ADDED while disconnected: that item's
+    // thumb is live, and re-minting it overwrote a URL nobody revoked. Measured that way —
+    // created=4 revoked=1 live=3 for 2 items, one leaked per disconnected add.
+    // `thumbDead` covers the revoke; `isImage && !thumb` covers a mint that FAILED. A
+    // transient createObjectURL failure used to be permanent — the item stayed an image with
+    // no thumbnail for the element's life, because _revokeAll only marks a truthy thumb, so
+    // the flag was never set. Retrying on reconnect costs one call and recovers it.
+    for (const it of this.items || []) if (it.thumbDead || (it.isImage && !it.thumb)) {
+      it.thumb = this._mintThumb(it.file); it.thumbDead = false;
+    }
+    super.connectedCallback();
+  }
   disconnectedCallback() { this._revokeAll(); }
   get files() { return (this.items || []).map((it) => it.file); }
   clear() { this._revokeAll(); this.items = []; this._syncForm(); this._emit("files", this.files); }
-  remove(id) {
+  // `remove` is ALSO Element.prototype.remove(), and this class shadows it. Overriding it
+  // outright made `uploadEl.remove()` a no-op for the DOM — measured: after el.remove() the
+  // element was still connected — and that is a method the ENGINE calls. `Row.remove()` in
+  // reactive.js does `for (const n of this.nodes) n.remove()`, so a keyed row whose top-level
+  // node IS an upload could never be dropped: repeat() removed it from its own bookkeeping and
+  // it stayed on screen forever (measured: [1,2,3] → [1,3] left all three). NodePart.replace
+  // uses n.remove() the same way. Wrapping the element in any other node hid it, which is why
+  // it survived this long.
+  //
+  // The two contracts do not overlap, so both are kept: no argument means the platform's
+  // "detach me", an id means "drop that file". Item ids come from `++uid` and are never
+  // undefined, so the discriminator is safe.
+  /** Drop one selected file by its `id` (revokes its thumbnail). */
+  removeFile(id) {
     const it = (this.items || []).find((x) => x.id === id);
     if (it && it.thumb) { try { URL.revokeObjectURL(it.thumb); } catch { /* */ } }
     this.items = (this.items || []).filter((x) => x.id !== id);
     this._syncForm(); this._emit("files", this.files);
   }
-  _revokeAll() { for (const it of this.items || []) if (it.thumb) { try { URL.revokeObjectURL(it.thumb); } catch { /* */ } } }
+  // `remove` is the platform's "detach me" AND was this component's "drop a file". Overloading
+  // it is fragile — measured: remove(null) and remove(0) do neither, silently, and a callback
+  // that forwards an index (el.remove(i)) detaches nothing. removeFile(id) is the name that
+  // cannot collide and is what the docs point at; this stays so existing callers keep working.
+  // No argument at all is the DOM contract, because that is the form the ENGINE uses:
+  // Row.remove() and NodePart.replace both call n.remove() bare, and while this method
+  // shadowed Element's outright, a keyed row whose top node was an upload could never be
+  // dropped — measured, [1,2,3] -> [1,3] left all three on screen.
+  remove(id) {
+    // arguments.length, NOT `id === undefined`. The value test cannot tell "no argument" from
+    // "an argument that happens to be undefined", and the second is the ordinary migration
+    // case: `up.remove(sel?.id)` or `up.remove(item?.id)` evaluates to remove(undefined) the
+    // first time nothing is selected, and under a value test that DETACHED the uploader from
+    // the page — silently, no error. Measured. arguments.length separates exactly the two
+    // contracts and nothing else.
+    if (arguments.length === 0) { super.remove(); return; }
+    this.removeFile(id);
+  }
+  _revokeAll() { for (const it of this.items || []) if (it.thumb) { try { URL.revokeObjectURL(it.thumb); } catch { /* */ } it.thumbDead = true; } }
 
   _emit(name, detail) {
     if (this.debug) { try { console.debug(`[${this.tagName.toLowerCase()}]`, name, detail); } catch { /* */ } }
     this.emit(name, detail);
   }
 
+  _mintThumb(f) {
+    if (typeof URL === "undefined" || !URL.createObjectURL) return null;
+    try { return URL.createObjectURL(f); } catch { return null; }
+  }
   _wrap(f) {
     const isImage = (f.type || "").startsWith("image/");
-    let thumb = null;
-    if (isImage && typeof URL !== "undefined" && URL.createObjectURL) { try { thumb = URL.createObjectURL(f); } catch { /* */ } }
+    const thumb = isImage ? this._mintThumb(f) : null;
     return { id: ++uid, file: f, status: "ready", progress: 0, error: null, thumb, isImage, ext: extOf(f.name) };
   }
 
