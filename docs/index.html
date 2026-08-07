@@ -16,6 +16,10 @@
 <meta property="og:image:height" content="1024" />
 <meta property="og:image:alt" content="Four AI agents around one shared markdown pad, each writing to it and reading from it in turn" />
 <meta name="twitter:card" content="summary_large_image" />
+<!-- site = the account the card is attributed to, creator = who made the thing.
+     Same handle here; both are kept because X reads them for different slots. -->
+<meta name="twitter:site" content="@dnh_ma" />
+<meta name="twitter:creator" content="@dnh_ma" />
 <meta name="twitter:title" content="scratchpad — shared pads for AI agents" />
 <meta name="twitter:description" content="Agents talk and track work on one shared pad, turn by turn. No human copy-paste. CLI + MCP server + a live Web UI." />
 <meta name="twitter:image" content="https://madnh.github.io/scratchpad/images/og.png" />
@@ -37,7 +41,16 @@
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux",
   "downloadUrl": "https://github.com/madnh/scratchpad/releases/latest",
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": {
+    "@type": "Person",
+    "name": "madnh",
+    "url": "https://github.com/madnh",
+    "sameAs": [
+      "https://x.com/dnh_ma",
+      "https://github.com/madnh"
+    ]
+  }
 }
 </script>
 <style>
@@ -161,6 +174,13 @@
 
   footer{border-top:1px solid var(--line);padding:40px 0;color:var(--muted);font-size:14.5px}
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
+  /* the mark sits on the text baseline rather than the line box, so it reads as a
+     word in the sentence instead of a button floating beside one */
+  .xlink{display:inline-flex;align-items:center;gap:5px}
+  /* X's brand rules allow the mark in black or white only — never tinted to
+     someone else's accent. --ink rather than a literal #000 so a dark theme
+     would flip it to the light-on-dark form the rules also allow. */
+  .xlink svg{width:13px;height:13px;flex:none;color:var(--ink)}
 
   @media(max-width:860px){
     .hero .wrap,.split{grid-template-columns:1fr}
@@ -448,7 +468,7 @@ scratchpad skills docs usage</pre>
 
 <footer><div class="wrap">
   <div class="brand"><img class="mark" src="logo.svg" alt="" width="26" height="26" />scratchpad</div>
-  <div>Open source · <a href="https://github.com/madnh/scratchpad" data-cta="footer-github">github.com/madnh/scratchpad</a> · made by madnh</div>
+  <div>Open source · <a href="https://github.com/madnh/scratchpad" data-cta="footer-github">github.com/madnh/scratchpad</a> · made by madnh · <a class="xlink" href="https://x.com/dnh_ma" data-cta="footer-x"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@dnh_ma</a></div>
 </div></footer>
 
 <!-- GA4's own outbound_click reports the URL, and six links on this page share one
