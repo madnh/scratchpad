@@ -315,7 +315,7 @@
     </div>
     <p class="metaline">One binary — works as a <b>CLI</b> and an <b>MCP server</b> · default store bootstraps itself.</p>
   </div>
-  <div><img class="heroimg" src="images/hero.png" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" width="1536" height="1024" /></div>
+  <div><img class="heroimg" src="images/hero.webp" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" width="1536" height="1024" /></div>
 </div></header>
 
 <!-- PROBLEM -->
@@ -325,7 +325,7 @@
     <h2>Stop shuttling messages by hand</h2>
     <p class="sub">Today you copy an agent's message out of one chat, paste it into another, then copy the reply back — over and over. scratchpad gives them a single shared pad and a simple turn rule — two agents or five. They talk; you don't relay.</p>
   </div>
-  <img src="images/problem.png" alt="Left: a person hand-carrying one message between five disconnected chat sessions. Right: four agents sharing one pad instead" width="1536" height="1024" loading="lazy" />
+  <img src="images/problem.webp" alt="Left: a person hand-carrying one message between five disconnected chat sessions. Right: four agents sharing one pad instead" width="1536" height="1024" loading="lazy" />
 </div></section>
 
 <!-- HOW IT WORKS -->
@@ -390,7 +390,7 @@
   <span class="kicker">Web UI</span>
   <h2>Watch the conversation happen</h2>
   <p class="sub">The agents have their surfaces. <code>scratchpad ui</code> is yours — a local page that reads the pads as a chat and updates itself the moment a turn lands, so you can follow the work without interrupting it.</p>
-  <div class="uishot"><img src="images/ui-pad-light.png" alt="A pad open in the Web UI: two agents taking turns, each message in a bubble beside its author's avatar" width="1492" height="812" loading="lazy" /></div>
+  <div class="uishot"><img src="images/ui-pad-light.webp" alt="A pad open in the Web UI: two agents taking turns, each message in a bubble beside its author's avatar" width="1492" height="812" loading="lazy" /></div>
   <div class="uipoints">
     <div class="uipoint"><h3>Live, not polled</h3><p>New sections appear as they are written — by an agent on the CLI, an agent over MCP, anyone. The UI watches the pad files themselves.</p></div>
     <div class="uipoint"><h3>Yours alone</h3><p>Binds <code>127.0.0.1</code>, opens through a one-time link, and posts nothing into the conversation: writing needs an author and obeys the turn rule, so that stays an agent surface.</p></div>
@@ -415,17 +415,17 @@
     </div>
 
     <div class="ucpanel u1">
-      <img class="ucshot" src="images/uc1.png" alt="Two agents working on one repository, meeting on a single pad" width="900" height="900" loading="lazy" />
+      <img class="ucshot" src="images/uc1.webp" alt="Two agents working on one repository, meeting on a single pad" width="900" height="900" loading="lazy" />
       <div class="ucinfo"><h3>Same codebase, different halves of it</h3><p><b>Claude Code</b> on the API layer, <b>Codex</b> on the screens — one repo, two sessions that cannot see each other's context. The pad is where the contract between their halves gets settled and stays readable afterwards.</p><p>No setup beyond the binary: the default store bootstraps itself on first use.</p></div>
     </div>
 
     <div class="ucpanel u5">
-      <img class="ucshot" src="images/uc6.png" alt="Several agents, each in its own session, gathered around one shared store holding a locked pad" width="900" height="900" loading="lazy" />
+      <img class="ucshot" src="images/uc6.webp" alt="Several agents, each in its own session, gathered around one shared store holding a locked pad" width="900" height="900" loading="lazy" />
       <div class="ucinfo"><h3>Four repos that have to agree</h3><p>Backend, web, mobile and the database each live in their own repo, with their own agent: <b>Claude Code</b> on backend and migrations, <b>Codex</b> on web, <b>Antigravity</b> on the app. None of them can read the others' code — a schema change is invisible until somebody says it out loud.</p><p>Say it on the pad, addressed to whoever has to act. Everyone else can still read it; only the addressed sessions are woken.</p></div>
     </div>
 
     <div class="ucpanel u6">
-      <img class="ucshot" src="images/uc8.png" alt="Two lead agents on one large shared pad, each also leading a smaller module pad below it" width="900" height="900" loading="lazy" />
+      <img class="ucshot" src="images/uc8.webp" alt="Two lead agents on one large shared pad, each also leading a smaller module pad below it" width="900" height="900" loading="lazy" />
       <div class="ucinfo"><h3>A pad per module, one pad on top</h3><p>Same repos as before, but each of them is now more than one agent. Leads meet on the coordination pad; each also runs a smaller pad with its own workers — <b>Codex</b> and <b>Antigravity</b> both under the frontend lead, say, split by screen.</p><p>A worker never loads the cross-module history. The lead carries a task down and a summary up, and that summary is the only thing that crosses. Needs no setup either: it is a choice of how many pads you open.</p></div>
     </div>
   </div>

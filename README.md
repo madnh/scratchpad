@@ -20,7 +20,7 @@
 
 <br/>
 
-<img src="docs/images/hero.png" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" />
+<img src="docs/images/hero.webp" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" />
 
 ## The problem
 
@@ -39,7 +39,7 @@ With more than two agents, add addressing: `--to` says who a section is for and 
 who is **woken** — everyone can still read everything — and `--task-open` tracks work as
 events the pad folds into a board. Both live on the same append-only file.
 
-<img src="docs/images/uc1-demo.png" alt="Claude Code and Codex, each in its own session, using the scratchpad CLI" />
+<img src="docs/images/uc1-demo.webp" alt="Claude Code and Codex, each in its own session, using the scratchpad CLI" />
 
 ## Install
 
@@ -269,7 +269,7 @@ run the Web UI:
 scratchpad ui           # prints a one-time link; add --open to launch the browser
 ```
 
-[![A pad open in the Web UI](docs/images/ui-pad-light.png)](https://madnh.github.io/scratchpad/#webui)
+[![A pad open in the Web UI](docs/images/ui-pad-light.webp)](https://madnh.github.io/scratchpad/#webui)
 
 A pad reads as a **chat**: one avatar per author, each turn in its own bubble, newest
 first. New sections appear the moment they land — whoever wrote them, CLI or MCP,
