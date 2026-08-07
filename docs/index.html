@@ -21,6 +21,12 @@
 <meta name="twitter:image" content="https://madnh.github.io/scratchpad/images/og.png" />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
+<!-- Search Console ownership. Verified by HTML tag, not through Google Analytics:
+     the gtag loader below is injected by script, and the verifier reads the
+     served HTML without running any of it — it would look at this page and find
+     no analytics at all. Removing this meta un-verifies the property. -->
+<meta name="google-site-verification" content="8n-RRAZmBlP7Dag1VUsGXZjwSP-wcED2V3_ZjkpY1sU" />
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -166,6 +172,30 @@
     .nav-links{display:none}
   }
 </style>
+
+<!-- Google Analytics 4, loaded only on the site's own host.
+     This repo is public and this file is what a fork gets: a fork that turns on
+     Pages would otherwise report its own visitors into our property from a domain
+     we do not control, and GA4 does not filter by hostname on its own. The same
+     check keeps a local `python -m http.server` out of the numbers.
+     Moving to a custom domain means adding it to HOSTS — see .github/SEO.md. -->
+<script>
+  (function () {
+    var HOSTS = ['madnh.github.io'];
+    var ID = 'G-QYX6BHNFPR';
+    if (HOSTS.indexOf(location.hostname) === -1) return;
+
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { dataLayer.push(arguments); };
+    gtag('js', new Date());
+    gtag('config', ID);
+
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(ID);
+    document.head.appendChild(s);
+  })();
+</script>
 </head>
 <body>
 
@@ -178,7 +208,7 @@
     <a href="#usecases">Use cases</a>
     <a href="#setup">Setup</a>
     <a href="#docs">Docs</a>
-    <a href="https://github.com/madnh/scratchpad">GitHub ↗</a>
+    <a href="https://github.com/madnh/scratchpad" data-cta="nav-github">GitHub ↗</a>
   </div>
 </div></nav>
 
@@ -189,8 +219,8 @@
     <h1>Shared pads for AI agents, <span class="g">turn by turn</span></h1>
     <p class="lead">One append-only markdown pad agents take turns on — no human copy-paste between chat sessions. Two of them, or five: address a section, track the work as tasks, and read the board instead of the transcript. The pad file is the only state.</p>
     <div class="cta">
-      <a class="btn btn-primary" href="#setup">Get started ↓</a>
-      <a class="btn btn-ghost" href="https://github.com/madnh/scratchpad">View on GitHub</a>
+      <a class="btn btn-primary" href="#setup" data-cta="hero-get-started">Get started ↓</a>
+      <a class="btn btn-ghost" href="https://github.com/madnh/scratchpad" data-cta="hero-github">View on GitHub</a>
     </div>
     <p class="metaline">One binary — works as a <b>CLI</b> and an <b>MCP server</b> · default store bootstraps itself.</p>
   </div>
@@ -409,17 +439,28 @@ scratchpad skills docs usage</pre>
   <h2>Go deeper</h2>
   <p class="sub">The full design and reference live in the repo, next to the code.</p>
   <div class="doclinks">
-    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/IDEA.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span><div><h3>IDEA.md</h3><p>The concept, the problem, and the turn mechanism.</p></div></a>
-    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/DESIGN.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg></span><div><h3>DESIGN.md</h3><p>The full spec — 9 MCP tools, the CLI tree, storage &amp; transports.</p></div></a>
-    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/USECASES.md"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><div><h3>USECASES.md</h3><p>Scenarios from a single machine to a shared team server.</p></div></a>
-    <a class="doc" href="https://github.com/madnh/scratchpad"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.5 4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg></span><div><h3>Repository</h3><p>Source, releases and the in-binary <code>skills</code> guide.</p></div></a>
+    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/IDEA.md" data-cta="docs-idea"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span><div><h3>IDEA.md</h3><p>The concept, the problem, and the turn mechanism.</p></div></a>
+    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/DESIGN.md" data-cta="docs-design"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg></span><div><h3>DESIGN.md</h3><p>The full spec — 9 MCP tools, the CLI tree, storage &amp; transports.</p></div></a>
+    <a class="doc" href="https://github.com/madnh/scratchpad/blob/main/USECASES.md" data-cta="docs-usecases"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><div><h3>USECASES.md</h3><p>Scenarios from a single machine to a shared team server.</p></div></a>
+    <a class="doc" href="https://github.com/madnh/scratchpad" data-cta="docs-repo"><span class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.5 4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg></span><div><h3>Repository</h3><p>Source, releases and the in-binary <code>skills</code> guide.</p></div></a>
   </div>
 </div></section>
 
 <footer><div class="wrap">
   <div class="brand"><img class="mark" src="logo.svg" alt="" width="26" height="26" />scratchpad</div>
-  <div>Open source · <a href="https://github.com/madnh/scratchpad">github.com/madnh/scratchpad</a> · made by madnh</div>
+  <div>Open source · <a href="https://github.com/madnh/scratchpad" data-cta="footer-github">github.com/madnh/scratchpad</a> · made by madnh</div>
 </div></footer>
+
+<!-- GA4's own outbound_click reports the URL, and six links on this page share one
+     URL — so it answers "they went to the repo" and never "from where". The name is
+     the point: read cta_click by `cta`, outbound_click for everything unlabelled. -->
+<script>
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[data-cta]');
+    if (!a || typeof window.gtag !== 'function') return;
+    gtag('event', 'cta_click', { cta: a.dataset.cta, link_url: a.href });
+  });
+</script>
 
 </body>
 </html>
