@@ -26,30 +26,43 @@ between them is normal (ad blockers, prefetch, bots), not a bug to chase.
    Leave *Enhanced measurement* on — it supplies scroll depth and outbound clicks
    without any more code.
 
-   Then three settings that **apply only from the moment they are switched on**.
-   None of them backfills, so each day they are left alone is a day of data that
-   cannot be recovered later:
+   Three property settings **apply only from the moment they are switched on** and
+   never backfill. All three are set; the note is here so nobody undoes one:
 
-   - *Admin → Data settings → Data retention*: change **2 months → 14 months**.
-     The default quietly caps every year-over-year question you will ever ask.
-   - *Admin → Custom definitions → Create custom dimension*: name `CTA`, scope
-     **Event**, parameter `cta`. Without this the `cta_click` events still
-     arrive, but the parameter that says *which* CTA is unreadable in reports —
-     the event becomes a number with no breakdown.
-   - *Admin → Product links → Search Console*: link the verified property, then
-     publish the *Search Console* report collection under Library. This is what
-     joins "which query" to "what they did after landing"; neither tool can
-     answer that alone.
+   - *Admin → Data collection and modification → Data retention*: **14 months**,
+     not the 2-month default, which quietly caps every year-over-year question.
+   - *Admin → Data display → Custom definitions*: dimension `CTA`, scope
+     **Event**, parameter `cta`. Without it the `cta_click` events still arrive
+     but the parameter saying *which* CTA is unreadable — the event collapses to
+     a number with no breakdown. Scope and parameter cannot be edited after
+     creation, only deleted and remade.
+   - *Admin → Product links → Search Console*: linked, and the *Search Console*
+     collection published under Reports → Library. Linking alone adds no report;
+     the collection ships unpublished. This is what joins "which query" to "what
+     they did after landing" — neither tool answers that alone.
+
+   **Internal traffic is deliberately NOT filtered.** The filter keys on IP, an
+   office shares one, and colleagues visiting is traffic worth having. If that
+   ever needs revisiting, define the rule but leave the filter on *Testing*: it
+   tags `traffic_type` without excluding anything, which keeps the data and adds
+   a dimension to split by. Unlike the three above, that choice is reversible.
 2. **Search Console** — *done.* A **URL-prefix** property for
    `https://madnh.github.io/scratchpad/`, verified by the HTML-tag method; the
    token is the `google-site-verification` meta in `docs/index.html` and must
    stay there or the property un-verifies. A Domain property is not available:
    that would cover all of `github.io`, which is not ours to verify. Not the
    Google Analytics method either — the reason is in the comment beside the tag.
-3. **Sitemap** — in Search Console, submit `sitemap.xml`. It is already linked
-   from `robots.txt`, but submitting is what puts a *status* on it.
-4. **Bing Webmaster Tools** — add the site and choose *Import from Google Search
-   Console*. Two minutes, and it covers Bing, DuckDuckGo and Copilot at once.
+3. **Sitemap** — *done.* Submitted in Search Console as **`sitemap.xml`**, with
+   no leading slash. A leading `/` is read as root-relative and silently drops
+   the `/scratchpad/` prefix, producing `madnh.github.io/sitemap.xml`, a 404, and
+   a permanent *Couldn't fetch* row that must be deleted by hand. A sitemap
+   outside the property's prefix is refused whether it exists or not.
+   `robots.txt` already points at the full URL, so Googlebot finds it regardless;
+   submitting is what puts a *status* on it, not what makes it count.
+4. **Bing Webmaster Tools** — *done.* Added by *Import from Google Search
+   Console*, which carries the sitemap across too — no separate submission was
+   needed, and Bing had crawled it the same day. One import covers Bing,
+   DuckDuckGo and Copilot.
 
 ## What to expect, and what to watch
 

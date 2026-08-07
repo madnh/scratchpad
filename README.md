@@ -20,7 +20,7 @@
 
 <br/>
 
-<img src="docs/images/hero.png" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" />
+<img src="docs/images/hero.webp" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" />
 
 ## The problem
 
@@ -39,7 +39,7 @@ With more than two agents, add addressing: `--to` says who a section is for and 
 who is **woken** — everyone can still read everything — and `--task-open` tracks work as
 events the pad folds into a board. Both live on the same append-only file.
 
-<img src="docs/images/uc1-demo.png" alt="Claude Code and Codex, each in its own session, using the scratchpad CLI" />
+<img src="docs/images/uc1-demo.webp" alt="Claude Code and Codex, each in its own session, using the scratchpad CLI" />
 
 ## Install
 
@@ -59,7 +59,79 @@ mv scratchpad_darwin_arm64 ~/.local/bin/scratchpad
 scratchpad version
 ```
 
+Or build it from source with Go 1.26+. Note the `/cmd/scratchpad` suffix — the module
+root holds no `main` package, so the bare module path fails with *does not contain
+package*:
+
+```sh
+go install github.com/madnh/scratchpad/cmd/scratchpad@latest
+```
+
+It lands in `$GOBIN`, else `$GOPATH/bin` (usually `~/go/bin`). One difference from the
+release build: `scratchpad version` reports `dev`, because `go install` cannot pass the
+`-ldflags` that stamp the tag and commit.
+
+## Teach your agent about it
+
+The binary is self-documenting, but an agent will not run `scratchpad skills` unprompted —
+it has to be told the tool exists and when to reach for it. That is what `SKILL.md` is: a
+short document your agent host loads so the agent knows to use scratchpad when it needs to
+ask another session something.
+
+Most hosts now read a **shared, host-neutral directory**, so one command usually covers
+them all:
+
+```sh
+scratchpad skills install --into ~/.agents/skills   # → ~/.agents/skills/scratchpad/SKILL.md
+```
+
+That is read by **Codex**, **Gemini CLI** and **Pi**. Two need their own path:
+
+| Host | Personal | Per project |
+|---|---|---|
+| **Claude Code** | `~/.claude/skills` | `.claude/skills` |
+| **Codex** | `~/.agents/skills` | `.agents/skills` |
+| **Gemini CLI** | `~/.gemini/skills` *or* `~/.agents/skills` | `.gemini/skills` *or* `.agents/skills` |
+| **Antigravity** | `~/.gemini/config/skills` | `.agents/skills` |
+| **Pi** | `~/.pi/agent/skills` *or* `~/.agents/skills` | `.pi/skills` *or* `.agents/skills` |
+
+```sh
+scratchpad skills install --into ~/.claude/skills     # Claude Code
+scratchpad skills install --into .agents/skills       # just this project
+export SCRATCHPAD_SKILLS_DIR=~/.agents/skills         # or set it once and drop --into
+```
+
+The layout the command writes — a `scratchpad/` folder holding `SKILL.md` — is what all of
+them expect.
+
+> The table is a convenience, and it is about somebody else's product: paths move. If a
+> host is missing here or the path has changed, check its documentation — the flag takes
+> any directory. **The tool itself has no default and never asks who your host is.**
+
+For a host with no skills directory at all, write the document out and place it however
+that host expects:
+
+```sh
+scratchpad skills install --print > wherever/you/need.md
+```
+
+An installed copy is **not** upgraded when you upgrade the binary — `SKILL.md` ships inside
+it, so re-run the install after upgrading:
+
+```sh
+scratchpad skills install --into <dir>            # "already current" if nothing changed
+scratchpad skills install --into <dir> --force    # replace a copy that differs
+```
+
+Without `--force` an existing file that differs is left alone and the command fails rather
+than overwriting it, so a copy you have edited is never lost silently. Diff it first if
+that is the case.
+
 ## Quick start (CLI)
+
+Everything above is this, with an agent doing the typing. Worth reading once so you can
+follow what your agents are doing — and it stays the fastest way to look at a pad
+yourself.
 
 ```sh
 # Agent A opens a pad and asks
@@ -153,71 +225,29 @@ and open tasks), records the link in both headers, and puts the post there. The 
 refuses further posts forever — two live ends would be two conversations that both look
 current. Set `limits.on_full` to `reject` if you would rather the post simply fail.
 
-## Teach your agent about it
-
-The binary is self-documenting, but an agent will not run `scratchpad skills` unprompted —
-it has to be told the tool exists and when to reach for it. That is what `SKILL.md` is: a
-short document your agent host loads so the agent knows to use scratchpad when it needs to
-ask another session something.
-
-Most hosts now read a **shared, host-neutral directory**, so one command usually covers
-them all:
-
-```sh
-scratchpad skills install --into ~/.agents/skills   # → ~/.agents/skills/scratchpad/SKILL.md
-```
-
-That is read by **Codex**, **Gemini CLI** and **Pi**. Two need their own path:
-
-| Host | Personal | Per project |
-|---|---|---|
-| **Claude Code** | `~/.claude/skills` | `.claude/skills` |
-| **Codex** | `~/.agents/skills` | `.agents/skills` |
-| **Gemini CLI** | `~/.gemini/skills` *or* `~/.agents/skills` | `.gemini/skills` *or* `.agents/skills` |
-| **Antigravity** | `~/.gemini/config/skills` | `.agents/skills` |
-| **Pi** | `~/.pi/agent/skills` *or* `~/.agents/skills` | `.pi/skills` *or* `.agents/skills` |
-
-```sh
-scratchpad skills install --into ~/.claude/skills     # Claude Code
-scratchpad skills install --into .agents/skills       # just this project
-export SCRATCHPAD_SKILLS_DIR=~/.agents/skills         # or set it once and drop --into
-```
-
-The layout the command writes — a `scratchpad/` folder holding `SKILL.md` — is what all of
-them expect.
-
-> The table is a convenience, and it is about somebody else's product: paths move. If a
-> host is missing here or the path has changed, check its documentation — the flag takes
-> any directory. **The tool itself has no default and never asks who your host is.**
-
-For a host with no skills directory at all, write the document out and place it however
-that host expects:
-
-```sh
-scratchpad skills install --print > wherever/you/need.md
-```
-
-An installed copy is **not** upgraded when you upgrade the binary — `SKILL.md` ships inside
-it, so re-run the install after upgrading:
-
-```sh
-scratchpad skills install --into <dir>            # "already current" if nothing changed
-scratchpad skills install --into <dir> --force    # replace a copy that differs
-```
-
-Without `--force` an existing file that differs is left alone and the command fails rather
-than overwriting it, so a copy you have edited is never lost silently. Diff it first if
-that is the case.
-
 ## Run as an MCP server
 
 For agents that can't spawn a CLI (the host only speaks MCP):
 
 ```sh
-scratchpad serve            # Streamable HTTP on a Unix socket (default)
-scratchpad serve --stdio    # for hosts that spawn the process
-scratchpad serve --tcp      # opt-in loopback TCP + bearer token
+scratchpad serve            # Streamable HTTP on a Unix socket (default), path /mcp
+scratchpad serve --stdio    # for hosts that spawn the process; stdout is JSON-RPC
 ```
+
+The socket needs no port and no token — it is gated by file permissions and a peer-uid
+check. Loopback TCP is the cross-machine option and **refuses to start without a token**,
+so mint one first; the server stores only its digest:
+
+```sh
+TOKEN=$(openssl rand -hex 32)
+DIGEST="sha256:$(printf %s "$TOKEN" | shasum -a 256 | awk '{print $1}')"   # sha256sum on Linux
+
+scratchpad serve --tcp --tcp-port 6710 --tcp-token-digest "$DIGEST"
+```
+
+Clients then send `Authorization: Bearer $TOKEN`; without it the listener answers `401`.
+Put it behind an SSH tunnel or a TLS-terminating proxy — the bearer token is the only
+thing standing in front of it.
 
 The server exposes nine tools — `pad_create`, `pad_post`, `pad_get`, `pad_read`,
 `pad_wait`, `pad_tasks`, `pad_rules`, `pad_list`, `project_list`. A CLI agent and an MCP
@@ -239,7 +269,7 @@ run the Web UI:
 scratchpad ui           # prints a one-time link; add --open to launch the browser
 ```
 
-[![A pad open in the Web UI](docs/images/ui-pad-light.png)](https://madnh.github.io/scratchpad/#webui)
+[![A pad open in the Web UI](docs/images/ui-pad-light.webp)](https://madnh.github.io/scratchpad/#webui)
 
 A pad reads as a **chat**: one avatar per author, each turn in its own bubble, newest
 first. New sections appear the moment they land — whoever wrote them, CLI or MCP,

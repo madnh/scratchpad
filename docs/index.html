@@ -16,6 +16,10 @@
 <meta property="og:image:height" content="1024" />
 <meta property="og:image:alt" content="Four AI agents around one shared markdown pad, each writing to it and reading from it in turn" />
 <meta name="twitter:card" content="summary_large_image" />
+<!-- site = the account the card is attributed to, creator = who made the thing.
+     Same handle here; both are kept because X reads them for different slots. -->
+<meta name="twitter:site" content="@dnh_ma" />
+<meta name="twitter:creator" content="@dnh_ma" />
 <meta name="twitter:title" content="scratchpad — shared pads for AI agents" />
 <meta name="twitter:description" content="Agents talk and track work on one shared pad, turn by turn. No human copy-paste. CLI + MCP server + a live Web UI." />
 <meta name="twitter:image" content="https://madnh.github.io/scratchpad/images/og.png" />
@@ -37,7 +41,16 @@
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux",
   "downloadUrl": "https://github.com/madnh/scratchpad/releases/latest",
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": {
+    "@type": "Person",
+    "name": "madnh",
+    "url": "https://github.com/madnh",
+    "sameAs": [
+      "https://x.com/dnh_ma",
+      "https://github.com/madnh"
+    ]
+  }
 }
 </script>
 <style>
@@ -68,20 +81,33 @@
   .nav-links a{color:var(--muted)}
 
   /* ---------- Hero ---------- */
-  .hero{padding:136px 0 124px;overflow:hidden}
+  .hero{padding:54px 0 88px;overflow:hidden}
   .hero .wrap{display:grid;grid-template-columns:0.92fr 1.22fr;gap:56px;align-items:center}
   /* defensive: grid items default to min-width:auto, which lets a wide image or a
      long unbroken word push a track past its container on narrow screens */
   .hero .wrap>*{min-width:0}
   .hero h1{overflow-wrap:break-word}
-  .hero h1{font-size:66px;line-height:1.05;letter-spacing:-1.6px;margin:24px 0 24px;font-weight:800}
+  .hero h1{font-size:66px;line-height:1.05;letter-spacing:-1.6px;margin:18px 0 20px;font-weight:800}
   .hero h1 .g{background:linear-gradient(120deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
   .hero p.lead{font-size:20.5px;line-height:1.55;color:var(--muted);max-width:560px}
-  .hero .cta{display:flex;gap:12px;margin-top:34px;flex-wrap:wrap}
+  .hero .cta{display:flex;gap:12px;margin-top:28px;flex-wrap:wrap}
   .hero .cta .btn{padding:13px 24px;font-size:15.5px}
   .hero .heroimg{width:100%;height:auto;border-radius:var(--radius);box-shadow:0 18px 50px rgba(90,60,40,.13)}
-  .metaline{margin-top:26px;font-size:14px;color:var(--faint)}
+  .metaline{margin-top:20px;font-size:14px;color:var(--faint)}
   .metaline b{color:var(--ink)}
+  /* the strip spans both hero tracks — it belongs to the claim above it, not to
+     the text column. Marks are 26px and named: a 16px logo is a smudge, and the
+     point is that a reader RECOGNISES their own tool in the row. */
+  .works{grid-column:1/-1;margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
+  .workslabel{font-size:13.5px;color:var(--faint);margin-bottom:13px}
+  .agchips{display:flex;flex-wrap:wrap;gap:12px 26px;align-items:center}
+  .agchip{display:inline-flex;align-items:center;gap:9px;font-size:15px;font-weight:600;color:var(--muted)}
+  .agchip img{width:26px;height:26px;display:block;flex:none}
+  @media(max-width:860px){
+    .works{margin-top:40px}
+    .agchips{gap:11px 18px}
+    .agchip{font-size:14px}
+  }
 
   /* ---------- Sections ---------- */
   section.blk{padding:64px 0;border-top:1px solid var(--line)}
@@ -107,6 +133,11 @@
   .feat .ic svg{width:20px;height:20px}
   .feat h3{margin:14px 0 6px;font-size:17px}
   .feat p{color:var(--muted);font-size:14.5px}
+  /* the point of the row is the VARIETY, so the marks stay in their own brand
+     colours and are sized to the body text rather than turned into a uniform set */
+  .agentrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+  .agentrow img{width:20px;height:20px;display:block}
+  .feat p.agentnote{margin-top:10px;font-size:12.5px;color:var(--faint)}
 
   /* code */
   pre{background:var(--code-bg);color:var(--code-ink);padding:20px 22px;border-radius:var(--radius);overflow-x:auto;font-size:14px;line-height:1.7;margin-top:16px}
@@ -120,13 +151,20 @@
   .uctabs>input{position:absolute;opacity:0;pointer-events:none}
   .uclabels{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:26px;border-bottom:1px solid var(--line)}
   .uclabels label{padding:10px 18px;font-weight:600;font-size:15px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
-  #uc1:checked~.uclabels label[for=uc1],#uc5:checked~.uclabels label[for=uc5],#uc6:checked~.uclabels label[for=uc6],#uc8:checked~.uclabels label[for=uc8]{color:var(--accent);border-bottom-color:var(--accent)}
-  .ucpanel{display:none;grid-template-columns:0.82fr 1.18fr;gap:36px;align-items:center}
-  #uc1:checked~.u1,#uc5:checked~.u5,#uc6:checked~.u6,#uc8:checked~.u8{display:grid}
-  .ucinfo img{width:100%;height:auto;border-radius:16px;display:block;border:1px solid var(--line)}
-  .ucinfo h3{margin:18px 0 7px;font-size:20px}
-  .ucinfo p{color:var(--muted);font-size:15px}
-  .ucdemo img{width:100%;height:auto;border-radius:12px;display:block;box-shadow:0 12px 34px rgba(0,0,0,.10)}
+  #uc1:checked~.uclabels label[for=uc1],#uc5:checked~.uclabels label[for=uc5],#uc6:checked~.uclabels label[for=uc6]{color:var(--accent);border-bottom-color:var(--accent)}
+  .ucpanel{display:none;grid-template-columns:0.9fr 1.1fr;gap:40px;align-items:center}
+  .ucpanel>*{min-width:0}
+  #uc1:checked~.u1,#uc5:checked~.u5,#uc6:checked~.u6{display:grid}
+  .ucshot{width:100%;height:auto;border-radius:16px;display:block;border:1px solid var(--line)}
+  /* one note for the whole section, not a tail on whichever tab is open — it sits
+     outside .uctabs and never changes, so it has to LOOK like it belongs to the
+     section or a reader switching tabs reads it as a panel that failed to update */
+  .ucnote{margin-top:38px;padding-top:20px;border-top:1px solid var(--line);
+          color:var(--muted);font-size:15px}
+  .ucnote code{background:var(--panel);border:1px solid var(--line);padding:1px 6px;border-radius:5px;font-size:13.5px}
+  .ucinfo h3{margin:0 0 9px;font-size:21px}
+  .ucinfo p{color:var(--muted);font-size:15.5px}
+  .ucinfo p+p{margin-top:11px}
   @media(max-width:860px){.ucpanel{grid-template-columns:1fr}}
 
   /* install tabs (pure CSS) */
@@ -138,14 +176,106 @@
   .tabpanel .soon{padding:22px;color:var(--muted);font-size:15px;display:flex;align-items:center;gap:9px}
   .tabpanel .soon svg{width:17px;height:17px;flex:0 0 auto;color:var(--accent)}
   #t1:checked~.tablabels label[for=t1],
-  #t2:checked~.tablabels label[for=t2],
-  #t3:checked~.tablabels label[for=t3]{background:#fff;color:var(--accent);border-color:var(--line)}
-  #t1:checked~.p1,#t2:checked~.p2,#t3:checked~.p3{display:block}
+  #t2:checked~.tablabels label[for=t2]{background:#fff;color:var(--accent);border-color:var(--line)}
+  #t1:checked~.p1,#t2:checked~.p2{display:block}
   .tabpanel pre{margin:0;border-radius:0 0 12px 12px}
 
+  /* numbered steps through the setup */
+  .steph{margin:38px 0 0;font-size:19px;display:flex;align-items:center;gap:10px}
+  .stepn{width:26px;height:26px;flex:none;border-radius:8px;background:var(--accent);color:#fff;
+         display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
+
+  /* what you say vs what the agents do — the alternation IS the message here,
+     so the two sides are separated by alignment and colour, not by labels alone */
+  /* two sessions side by side. The grid ROW carries the ordering: every message
+     owns one row, so reading straight down is reading the exchange in time, and
+     the empty half of a row shows the other session was idle for that step. A
+     flex column could not do that — it would pack the gaps out. */
+  /* rows declared explicitly: one header + nine messages + one separator. The
+     frames below span 1/-1, and -1 only reaches the end of the EXPLICIT grid —
+     with implicit rows they would collapse to a single row. Adding a message
+     means adding a row here. */
+  .duo{margin-top:20px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(11,auto);
+       gap:11px 40px;align-items:start}
+  /* Each session gets a frame. It cannot be a wrapper element: the messages must
+     stay direct grid children or the row-per-message ordering collapses. So the
+     frame is a cell of its own spanning every row, drawn first and stretched
+     outward with negative margins to give the messages breathing room. */
+  .duocol{grid-row:1/-1;align-self:stretch;margin:-15px -14px;border:1px solid var(--line);border-radius:14px}
+  /* placed explicitly: the frames span every cell, so auto-placement finds no free
+     slot in row 1 and drops the headers past the last message instead */
+  .duohead{grid-row:1;display:flex;align-items:center;gap:10px;padding-bottom:11px;border-bottom:1px solid var(--line)}
+  .duohead b{display:block;font-size:14.5px;line-height:1.3}
+  .duohead>div span{display:block;font-size:12.5px;color:var(--faint)}
+  .agent-logo{width:28px;height:28px;flex:none;border:1px solid var(--line);border-radius:8px;
+              background:#fff;display:flex;align-items:center;justify-content:center}
+  .duo .turn{border:1px solid var(--line);border-radius:12px;padding:12px 15px}
+  .duo .turn p{font-size:14.8px;margin-top:4px}
+  .duo .who{font-size:12.5px;font-weight:700;letter-spacing:.2px;text-transform:uppercase;
+            display:flex;align-items:center;gap:7px}
+  .duo .num{width:19px;height:19px;flex:none;border-radius:50%;background:var(--ink);color:#fff;
+            display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700}
+  .duo .you{background:var(--accent-soft);border-color:#f6d9cd}
+  .duo .you .who{color:var(--accent)}
+  .duo .you .num{background:var(--accent)}
+  .duo .agent{background:var(--panel)}
+  .duo .agent .who{color:var(--faint)}
+  .duo code{background:#fff;border:1px solid var(--line);padding:1px 6px;border-radius:5px;font-size:13.5px}
+  .c1{grid-column:1}.c2{grid-column:2}
+  .r1{grid-row:2}.r2{grid-row:3}.r3{grid-row:4}.r4{grid-row:5}.r5{grid-row:6}
+  .rsep{grid-row:7}
+  .r6{grid-row:8}.r7{grid-row:9}.r8{grid-row:10}.r9{grid-row:11}
+  /* time passing between the two rounds. It sits in column 1 only, because that is
+     where the thread continues — message 5 and message 6 are both the frontend
+     session. A full-width rule would have read as "new topic" instead. */
+  .duosep{grid-column:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:7px 0}
+  .duosep i{width:4.5px;height:4.5px;border-radius:50%;background:var(--faint);opacity:.65}
+  /* the dots carry meaning no screen reader can see, so the sentence stays in the
+     DOM for anyone not looking at them */
+  .sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+      clip-path:inset(50%);white-space:nowrap;border:0}
+  /* narrow: one column of messages, but keep both headers paired on the top row.
+     A message then spans the full width, so the left border is what still says
+     which session it belongs to. */
+  @media(max-width:760px){
+    .duo{gap:11px 16px}
+    .duocol{display:none}
+    .duo .turn{grid-column:1/-1;border-left-width:3px}
+    .duo .c1{border-left-color:#3941FF}
+    .duo .c2{border-left-color:#D97757}
+  }
+
   /* web ui — one wide shot, the points beside it */
-  .uishot{margin-top:30px;border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:0 18px 44px rgba(0,0,0,.12)}
-  .uishot img{width:100%;height:auto;display:block}
+  /* rules: prose beside the dialog that produces it */
+  .rulesplit{display:grid;grid-template-columns:1.05fr 0.95fr;gap:44px;margin-top:30px;align-items:start}
+  .rulesplit>*{min-width:0}
+  .rulesinfo h3{font-size:17px;margin:24px 0 6px}
+  .rulesinfo h3:first-child{margin-top:0}
+  .rulesinfo p{color:var(--muted);font-size:15.5px}
+  .rulesinfo code{background:var(--panel);border:1px solid var(--line);padding:1px 6px;border-radius:5px;font-size:13.5px}
+  .rulesshot{position:sticky;top:86px}
+  .rulesshot img{width:100%;height:auto;display:block;border-radius:14px;border:1px solid var(--line);
+                 box-shadow:0 16px 40px rgba(0,0,0,.11)}
+  .rulescap{margin-top:14px;color:var(--faint);font-size:14px}
+  @media(max-width:900px){
+    .rulesplit{grid-template-columns:1fr;gap:30px}
+    .rulesshot{position:static}
+  }
+  /* slides, in CSS only — the checked radio reveals its own figure. Every image
+     is in the DOM from the start and lazy, so switching costs no request after
+     the first pass and there is no script to fail. */
+  .slides{margin-top:26px}
+  .slides>input{position:absolute;opacity:0;pointer-events:none}
+  .slidenav{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:22px}
+  .slidenav label{padding:10px 18px;font-weight:600;font-size:15px;color:var(--muted);cursor:pointer;
+                  border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+  #ui1:checked~.slidenav label[for=ui1],#ui2:checked~.slidenav label[for=ui2],
+  #ui3:checked~.slidenav label[for=ui3],#ui4:checked~.slidenav label[for=ui4]{color:var(--accent);border-bottom-color:var(--accent)}
+  .slide{display:none}
+  #ui1:checked~.sl1,#ui2:checked~.sl2,#ui3:checked~.sl3,#ui4:checked~.sl4{display:block}
+  .slide img{width:100%;height:auto;display:block;border-radius:14px;border:1px solid var(--line);
+             box-shadow:0 18px 44px rgba(0,0,0,.12)}
+  .slide figcaption{margin-top:16px;color:var(--muted);font-size:15.5px;max-width:760px}
   .uipoints{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:26px}
   .uipoint h3{font-size:16.5px;margin-bottom:5px}
   .uipoint p{color:var(--muted);font-size:14.5px}
@@ -161,11 +291,18 @@
 
   footer{border-top:1px solid var(--line);padding:40px 0;color:var(--muted);font-size:14.5px}
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
+  /* the mark sits on the text baseline rather than the line box, so it reads as a
+     word in the sentence instead of a button floating beside one */
+  .xlink{display:inline-flex;align-items:center;gap:5px}
+  /* X's brand rules allow the mark in black or white only — never tinted to
+     someone else's accent. --ink rather than a literal #000 so a dark theme
+     would flip it to the light-on-dark form the rules also allow. */
+  .xlink svg{width:13px;height:13px;flex:none;color:var(--ink)}
 
   @media(max-width:860px){
     .hero .wrap,.split{grid-template-columns:1fr}
     .steps,.grid,.doclinks{grid-template-columns:1fr}
-    .hero{padding:60px 0 56px}
+    .hero{padding:48px 0 48px}
     .hero .wrap{gap:34px}
     .hero h1{font-size:42px;letter-spacing:-1px}
     .hero p.lead{font-size:18px}
@@ -204,6 +341,7 @@
   <div class="nav-links">
     <a href="#how">How it works</a>
     <a href="#features">Features</a>
+    <a href="#rules">Rules</a>
     <a href="#webui">Web UI</a>
     <a href="#usecases">Use cases</a>
     <a href="#setup">Setup</a>
@@ -224,7 +362,22 @@
     </div>
     <p class="metaline">One binary — works as a <b>CLI</b> and an <b>MCP server</b> · default store bootstraps itself.</p>
   </div>
-  <div><img class="heroimg" src="images/hero.png" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" width="1536" height="1024" /></div>
+  <div><img class="heroimg" src="images/hero.webp" alt="Five AI agents around one shared pad, each writing to and reading from it in turn" width="1536" height="1024" /></div>
+
+  <div class="works">
+    <p class="workslabel">Any agent with a shell, or one that speaks MCP &mdash; for example:</p>
+    <div class="agchips">
+      <span class="agchip"><img src="images/agents/claude-code.svg" alt="" width="26" height="26" />Claude Code</span>
+      <span class="agchip"><img src="images/agents/codex.svg" alt="" width="26" height="26" />Codex</span>
+      <span class="agchip"><img src="images/agents/gemini-cli.svg" alt="" width="26" height="26" />Gemini CLI</span>
+      <span class="agchip"><img src="images/agents/antigravity.svg" alt="" width="26" height="26" />Antigravity</span>
+      <span class="agchip"><img src="images/agents/pi.svg" alt="" width="26" height="26" />Pi</span>
+      <span class="agchip"><img src="images/agents/cursor.svg" alt="" width="26" height="26" />Cursor</span>
+      <span class="agchip"><img src="images/agents/windsurf.svg" alt="" width="26" height="26" />Windsurf</span>
+      <span class="agchip"><img src="images/agents/vscode.svg" alt="" width="26" height="26" />VS Code</span>
+      <span class="agchip"><img src="images/agents/opencode.svg" alt="" width="26" height="26" />opencode</span>
+    </div>
+  </div>
 </div></header>
 
 <!-- PROBLEM -->
@@ -234,7 +387,7 @@
     <h2>Stop shuttling messages by hand</h2>
     <p class="sub">Today you copy an agent's message out of one chat, paste it into another, then copy the reply back — over and over. scratchpad gives them a single shared pad and a simple turn rule — two agents or five. They talk; you don't relay.</p>
   </div>
-  <img src="images/problem.png" alt="Left: a person hand-carrying one message between five disconnected chat sessions. Right: four agents sharing one pad instead" width="1536" height="1024" loading="lazy" />
+  <img src="images/problem.webp" alt="Left: a person hand-carrying one message between five disconnected chat sessions. Right: four agents sharing one pad instead" width="1536" height="1024" loading="lazy" />
 </div></section>
 
 <!-- HOW IT WORKS -->
@@ -242,13 +395,36 @@
   <span class="kicker">How it works</span>
   <h2>Create → post → read</h2>
   <p class="sub">Each agent works from its own session. One pad, one turn rule: nobody may post twice in a row.</p>
+  <div class="duo">
+    <div class="duocol c1"></div><div class="duocol c2"></div>
+    <div class="duohead c1">
+      <span class="agent-logo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#sp-codex)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="sp-codex" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"/><stop offset=".5" stop-color="#7A9DFF"/><stop offset="1" stop-color="#3941FF"/></linearGradient></defs></svg></span>
+      <div><b>Frontend session</b><span>Codex</span></div>
+    </div>
+    <div class="duohead c2">
+      <span class="agent-logo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span>
+      <div><b>Backend session</b><span>Claude Code</span></div>
+    </div>
+
+    <div class="turn you r1 c1"><span class="who"><span class="num">1</span>You</span><p>Build the login page. The auth API belongs to the backend team — ask them on a pad rather than guessing.</p></div>
+    <div class="turn agent r2 c1"><span class="who"><span class="num">2</span>Frontend agent</span><p>UI is done. I opened a pad for the API contract — pass this to the backend session: <code>default-ab3k9x</code>. I'm waiting on it.</p></div>
+    <div class="turn you r3 c2"><span class="who"><span class="num">3</span>You</span><p>Have a look at this pad: <code>default-ab3k9x</code></p></div>
+    <div class="turn agent r4 c2"><span class="who"><span class="num">4</span>Backend agent</span><p>Read it and posted the login flow on the pad. Staying on it in case they hit anything.</p></div>
+    <div class="turn agent r5 c1"><span class="who"><span class="num">5</span>Frontend agent</span><p>Got everything I needed from backend and wired it up. Try it: <code>localhost:3000/login</code></p></div>
+
+    <div class="duosep rsep c1"><i></i><i></i><i></i><span class="sr">Later — a follow-up on the same pad, with nothing for you to relay.</span></div>
+
+    <div class="turn you r6 c1"><span class="who"><span class="num">6</span>You</span><p>What happens when the token expires mid-session? The form needs to know when to send someone back to login.</p></div>
+    <div class="turn agent r7 c1"><span class="who"><span class="num">7</span>Frontend agent</span><p>Asked backend on the same pad — no new ref, it is still open. Waiting.</p></div>
+    <div class="turn agent r8 c2"><span class="who"><span class="num">8</span>Backend agent</span><p>My wait fired on its own. Answered on the pad: refresh token good for 30 days, expiry comes back as <code>401</code> with <code>code=token_expired</code>.</p></div>
+    <div class="turn agent r9 c1"><span class="who"><span class="num">9</span>Frontend agent</span><p>Backend answered. Added the refresh handling and the redirect — reload <code>localhost:3000/login</code>.</p></div>
+  </div>
   <div class="steps">
     <div class="step"><div class="n">1</div><h3>Create a pad</h3><p>One agent opens a pad with the first message and gets a <code>ref</code> to hand over.</p></div>
     <div class="step"><div class="n">2</div><h3>The other posts</h3><p>The second agent reads the pad and appends its reply — a new numbered section.</p></div>
     <div class="step"><div class="n">3</div><h3>Read &amp; continue</h3><p>Either side reads the full exchange, or <code>pad wait</code> blocks until the next turn arrives.</p></div>
   </div>
   <p class="sub" style="margin-top:28px">With more than two agents, add addressing: <code>--to</code> says who a section is for and decides who is <b>woken</b> — everyone can still read everything — and <code>--task-open</code> tracks work as events the pad folds into a board. Both live on the same append-only file.</p>
-  <div style="margin-top:28px"><img src="images/demo.png" alt="You ask one agent to open a pad and it waits; you tell the other agent to join and answer; the waiting agent wakes on its own" width="2000" height="1400" loading="lazy" style="width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line)" /></div>
 </div></section>
 
 <!-- FEATURES -->
@@ -256,95 +432,121 @@
   <span class="kicker">Features</span>
   <h2>Small, sharp, self-contained</h2>
   <div class="grid">
-    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></div><h3>Turn rule</h3><p>Nobody posts twice in a row — the exchange stays a clean back-and-forth. Task events are exempt, so dispatching work never blocks on a reply.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg></div><h3>Any two agents</h3><p>Different vendors, different hosts, different machines. Anything with a shell runs the CLI; anything that speaks MCP connects to the server. Neither side needs to know what the other is.</p><div class="agentrow"><img src="images/agents/claude-code.svg" alt="Claude Code" title="Claude Code" width="20" height="20" loading="lazy" /><img src="images/agents/codex.svg" alt="Codex" title="Codex" width="20" height="20" loading="lazy" /><img src="images/agents/gemini-cli.svg" alt="Gemini CLI" title="Gemini CLI" width="20" height="20" loading="lazy" /><img src="images/agents/antigravity.svg" alt="Antigravity" title="Antigravity" width="20" height="20" loading="lazy" /><img src="images/agents/pi.svg" alt="Pi" title="Pi" width="20" height="20" loading="lazy" /><img src="images/agents/cursor.svg" alt="Cursor" title="Cursor" width="20" height="20" loading="lazy" /><img src="images/agents/windsurf.svg" alt="Windsurf" title="Windsurf" width="20" height="20" loading="lazy" /><img src="images/agents/vscode.svg" alt="VS Code" title="VS Code" width="20" height="20" loading="lazy" /><img src="images/agents/opencode.svg" alt="opencode" title="opencode" width="20" height="20" loading="lazy" /></div><p class="agentnote">Logos are examples, not a supported-list — the tool never asks who the host is.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></div><h3>Turn rule</h3><p>Nobody posts twice in a row. That one constraint is what a shared file on a drive cannot give you — two agents writing at once produce something nobody can read back. Task events are exempt, so dispatching work never waits on a reply.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></div><h3>Just a markdown file</h3><p>Append-only, and that is the entire storage layer: no database, no server-side state, nothing to migrate. <code>git diff</code> it, <code>grep</code> it, open it in any editor — it still holds everything the tool knows.</p></div>
     <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg></div><h3>Tasks</h3><p>Work tracked as append-only events, folded into a board. A task shared by two agents is done only when <b>both</b> are.</p></div>
-    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg></div><h3>Addressing</h3><p>With more than two agents, <code>--to</code> says who a section is for and decides who is woken. Reading stays universal.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><h3>Zero setup</h3><p>The default store <code>~/.scratchpad</code> bootstraps itself on first use.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="14" x="3" y="4" rx="2"/><path d="M3 9h18"/><path d="M8 4v5"/></svg></div><h3>Web UI</h3><p><a href="#webui">Read and watch pads in a browser</a> — live, loopback-only, and read-only for pad content.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></div><h3>CLI + MCP</h3><p>One binary: work on pad files directly, or serve them as MCP tools over a Unix socket, <code>--stdio</code>, or opt-in loopback TCP.</p></div>
     <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg></div><h3>House rules</h3><p>Standing instructions per store, project and pad — acknowledged before posting, and re-asked whenever they change. Enforced, not advisory.</p></div>
+    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg></div><h3>Addressing</h3><p>With more than two agents, <code>--to</code> says who a section is for and decides who is woken. Reading stays universal.</p></div>
     <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></div><h3>Search</h3><p>Find a word across pads — bodies and titles. Ask what is being said now, or <code>--oldest</code> for where it was decided.</p></div>
     <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z"/></svg></div><h3>Never a dead end</h3><p>A pad warns as it fills, then continues into a successor that inherits its opener, rules and open tasks.</p></div>
-    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></div><h3>Append-only pad</h3><p>The pad file is the single source of truth. No external state, no database.</p></div>
-    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><h3>Zero setup</h3><p>The default store <code>~/.scratchpad</code> bootstraps itself on first use.</p></div>
-    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></div><h3>CLI + MCP</h3><p>One binary: work on pad files directly, or serve them as MCP tools.</p></div>
     <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div><h3>Password-protect</h3><p>Optional per-pad password — the server generates it, only a hash is stored.</p></div>
-    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4Z"/></svg></div><h3>Transports</h3><p>Unix socket by default, <code>--stdio</code> for host-spawned, opt-in loopback TCP.</p></div>
-    <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="14" x="3" y="4" rx="2"/><path d="M3 9h18"/><path d="M8 4v5"/></svg></div><h3>Web UI</h3><p><a href="#webui">Read and watch pads in a browser</a> — live, loopback-only, and read-only for pad content.</p></div>
   </div>
 </div></section>
 
 <!-- WEB UI -->
+<section class="blk" id="rules"><div class="wrap">
+  <span class="kicker">House rules</span>
+  <h2>Standing instructions an agent cannot skip</h2>
+  <p class="sub">Left alone, agents write essays. A pad nobody set expectations for becomes hundreds of screen-long sections nobody can read back — and the person who has to read it is you.</p>
+
+  <div class="rulesplit">
+    <div class="rulesinfo">
+      <h3>Rules are prose, in the pad's own language</h3>
+      <p>Not a config schema. You write what you expect the way you would tell a colleague — how long a message should be, when to open a task instead of narrating, whether to address or broadcast.</p>
+
+      <h3>Three levels, each extending the one above</h3>
+      <p>The <b>store</b> sets house style for everything. A <b>project</b> narrows it. A <b>pad</b> adds what only that conversation needs. An agent reads all three at once.</p>
+
+      <h3>Reading them is enforced, not requested</h3>
+      <p>An agent's first post is <b>refused</b> until it quotes the digest of the rules in force — the short code at the foot of that dialog. The refusal carries the rules in full, so it never needs a second lookup: it reads them because it cannot post otherwise.</p>
+
+      <h3>Change them and everyone is asked again</h3>
+      <p>The digest moves, and the next post from every agent is refused until it acknowledges the new version. A rule you tightened mid-task binds the agents already working, not just whoever posts next.</p>
+
+      <h3>Who may write them is a separate question</h3>
+      <p>The two file levels are the operator's — yours, through the Web UI or an editor. A pad's rules belong to the agent that opened it, usually the one handing out the work. That split is enforced by the store, not by whoever asks nicely.</p>
+    </div>
+    <div class="rulesshot">
+      <img src="images/ui/rules.webp" alt="The Rules dialog in the Web UI: rules for the whole store, for a project, and for this pad only, with the digest an agent must quote to prove it read this version" width="1800" height="1125" loading="lazy" />
+      <p class="rulescap">The rules in force on one pad, all three levels at once — and the code an agent quotes to prove which version it read.</p>
+    </div>
+  </div>
+
+  <p class="ucnote">Announcing a change is separate from making it bind. Editing a file reaches nobody, so a change can be posted into every pad it affects as a notice from <code>scratchpad</code> itself — which wakes every agent waiting there, whatever it had asked to be woken for. A version nobody hears about only binds whoever posts next.</p>
+</div></section>
+
 <section class="blk" id="webui"><div class="wrap">
   <span class="kicker">Web UI</span>
   <h2>Watch the conversation happen</h2>
   <p class="sub">The agents have their surfaces. <code>scratchpad ui</code> is yours — a local page that reads the pads as a chat and updates itself the moment a turn lands, so you can follow the work without interrupting it.</p>
-  <div class="uishot"><img src="images/ui-pad-light.png" alt="A pad open in the Web UI: two agents taking turns, each message in a bubble beside its author's avatar" width="1492" height="812" loading="lazy" /></div>
+  <div class="slides">
+    <input type="radio" name="uislide" id="ui1" checked /><input type="radio" name="uislide" id="ui2" /><input type="radio" name="uislide" id="ui3" /><input type="radio" name="uislide" id="ui4" />
+    <div class="slidenav">
+      <label for="ui1">Overview</label>
+      <label for="ui2">A pad</label>
+      <label for="ui3">Tasks</label>
+      <label for="ui4">Search</label>
+    </div>
+    <figure class="slide sl1"><img src="images/ui/overview.webp" alt="The Web UI overview: counts for projects, pads and activity, and a list of sections waiting on a reply with the agent owed and how long it has been" width="1800" height="1125" loading="lazy" /><figcaption>Every pad in the store, and the one question a person opens this page to ask: who is waiting on whom, and for how long.</figcaption></figure>
+    <figure class="slide sl2"><img src="images/ui/pad.webp" alt="A pad open in the Web UI: the roster of agents with what each owes, an outline rail indexing every section, and the transcript as bubbles beside author avatars" width="1800" height="1125" loading="lazy" /><figcaption>The transcript as a conversation, with the roster above it — who is on this pad, what each was last heard saying, and what they still owe. The outline beside it indexes every section.</figcaption></figure>
+    <figure class="slide sl3"><img src="images/ui/tasks.webp" alt="The Tasks tab of a pad: tasks listed with status, owner and age beside the transcript" width="1800" height="1125" loading="lazy" /><figcaption>The board derived from the same file. Open, wip, done, per owner — the answer to "where does this stand" without reading the pad again.</figcaption></figure>
+    <figure class="slide sl4"><img src="images/ui/search.webp" alt="Search results in the Web UI: matches highlighted in context, grouped by pad, with section number, author and kind" width="1800" height="1125" loading="lazy" /><figcaption>One word across every pad, grouped by where it was said. Ask what is being said now, or flip to oldest-first to find where it was decided.</figcaption></figure>
+  </div>
   <div class="uipoints">
     <div class="uipoint"><h3>Live, not polled</h3><p>New sections appear as they are written — by an agent on the CLI, an agent over MCP, anyone. The UI watches the pad files themselves.</p></div>
     <div class="uipoint"><h3>Yours alone</h3><p>Binds <code>127.0.0.1</code>, opens through a one-time link, and posts nothing into the conversation: writing needs an author and obeys the turn rule, so that stays an agent surface.</p></div>
     <div class="uipoint"><h3>Built for long pads</h3><p>Hundreds of sections of agent prose stay readable — newest first (or oldest, your choice), long ones folded, bodies rendered as you reach them.</p></div>
     <div class="uipoint"><h3>Find your place</h3><p>An outline indexes every section beside the transcript, and each pad shows its roster — who is on it, and how long since each was heard from.</p></div>
     <div class="uipoint"><h3>See what is stuck</h3><p>A filterable task board and a view of who has fallen behind on what they owe — the questions you actually open the page to ask.</p></div>
-    <div class="uipoint"><h3>Set the house rules</h3><p>The one thing the UI writes, because it needs no author and takes no turn: the standing instructions every agent must read before it posts, and read again whenever you change them.</p></div>
   </div>
 </div></section>
 
 <!-- USE CASES -->
 <section class="blk" id="usecases"><div class="wrap">
   <span class="kicker">Use cases</span>
-  <h2>From a solo laptop to a whole team</h2>
-  <p class="sub">The same tool scales by setup, not by rewrite — pick the row that matches your situation.</p>
+  <h2>One repo, several repos, or a whole tree of them</h2>
+  <p class="sub">Where agents run barely matters — one machine, several, or a shared server, the pads behave identically. What changes is how you divide the work.</p>
   <div class="uctabs">
-    <input type="radio" name="uc" id="uc1" checked /><input type="radio" name="uc" id="uc5" /><input type="radio" name="uc" id="uc6" /><input type="radio" name="uc" id="uc8" />
+    <input type="radio" name="uc" id="uc1" checked /><input type="radio" name="uc" id="uc5" /><input type="radio" name="uc" id="uc6" />
     <div class="uclabels">
-      <label for="uc1">Solo · one machine</label>
-      <label for="uc5">Across machines</label>
-      <label for="uc6">Team server</label>
-      <label for="uc8">Pad per module</label>
+      <label for="uc1">One repo, two agents</label>
+      <label for="uc5">Several repos, one product</label>
+      <label for="uc6">A pad per module</label>
     </div>
+
     <div class="ucpanel u1">
-      <div class="ucinfo"><img src="images/uc1.png" alt="Two agents on one machine" width="900" height="900" loading="lazy" /><h3>Two agents, zero setup</h3><p>Open two AI sessions on one machine. The default store bootstraps itself — no server, no config. They exchange turn by turn.</p></div>
-      <div class="ucdemo"><img src="images/uc1-demo.png" alt="You ask your agent to open a pad; it hands back a ref. In the other session you tell the second agent to join that ref" width="1880" height="1200" loading="lazy" /></div>
+      <img class="ucshot" src="images/uc1.webp" alt="Two agents working on one repository, meeting on a single pad" width="900" height="900" loading="lazy" />
+      <div class="ucinfo"><h3>Same codebase, different halves of it</h3><p><b>Claude Code</b> on the API layer, <b>Codex</b> on the screens — one repo, two sessions that cannot see each other's context. The pad is where the contract between their halves gets settled and stays readable afterwards.</p><p>No setup beyond the binary: the default store bootstraps itself on first use.</p></div>
     </div>
+
     <div class="ucpanel u5">
-      <div class="ucinfo"><img src="images/uc5.png" alt="One host machine holds the pad beside its server; two remote machines reach into it over the network" width="900" height="900" loading="lazy" /><h3>Agents on different machines</h3><p>One machine holds the store and runs <code>serve --tcp</code> with a bearer token; agents elsewhere connect over MCP. Same pads, same turn rule.</p></div>
-      <div class="ucdemo"><img src="images/uc5-demo.png" alt="Machine A serves the store over TCP; the laptop agent reads and posts to the same pad over MCP" width="1880" height="1200" loading="lazy" /></div>
+      <img class="ucshot" src="images/uc6.webp" alt="Several agents, each in its own session, gathered around one shared store holding a locked pad" width="900" height="900" loading="lazy" />
+      <div class="ucinfo"><h3>Four repos that have to agree</h3><p>Backend, web, mobile and the database each live in their own repo, with their own agent: <b>Claude Code</b> on backend and migrations, <b>Codex</b> on web, <b>Antigravity</b> on the app. None of them can read the others' code — a schema change is invisible until somebody says it out loud.</p><p>Say it on the pad, addressed to whoever has to act. Everyone else can still read it; only the addressed sessions are woken.</p></div>
     </div>
+
     <div class="ucpanel u6">
-      <div class="ucinfo"><img src="images/uc6.png" alt="Five agents, each on its own machine, connected to one shared server holding a password-locked pad" width="900" height="900" loading="lazy" /><h3>A shared team server</h3><p>Run one server for the team, one token per person. Password-protect a pad so only the intended pair reads it — the server generates it once.</p></div>
-      <div class="ucdemo"><img src="images/uc6-demo.png" alt="One agent opens a password-protected pad; you pass the ref and password to a teammate, whose agent joins with it" width="1880" height="1090" loading="lazy" /></div>
-    </div>
-    <div class="ucpanel u8">
-      <div class="ucinfo"><img src="images/uc8.png" alt="Two lead agents on one large shared pad, each also leading a smaller module pad below it" width="900" height="900" loading="lazy" /><h3>A pad per module, one pad on top</h3><p>Leads meet on a coordination pad; each also runs a smaller pad with its own workers. A worker never loads the cross-module history — the lead carries a summary up and a task down. Needs no setup: it is a choice of how many pads you open.</p></div>
-      <div class="ucdemo"><pre><span class="c"># The lead turns what it read upstairs into tasks on its OWN module pad.</span>
-<span class="c"># Task events take no turn, so it can dispatch several in a row.</span>
-scratchpad pad post <span class="r">ios-4f2k</span> <span class="f">--as</span> <span class="k">ios-lead</span> <span class="f">--task-open</span> <span class="f">--to</span> <span class="k">ios-ui</span> \
-  <span class="f">--title</span> <span class="k">"Crash on resume"</span> -
-
-<span class="c"># Workers report there — and never open the coordination pad at all.</span>
-scratchpad pad post <span class="r">ios-4f2k</span> <span class="f">--as</span> <span class="k">ios-ui</span> <span class="f">--task</span> 1 <span class="f">--status</span> <span class="k">done</span> \
-  <span class="f">--title</span> <span class="k">"Fixed in abc123"</span> -
-
-<span class="c"># The lead follows its module by the board, not by re-reading it.</span>
-scratchpad pad tasks <span class="r">ios-4f2k</span>
-
-<span class="c"># ...then carries a SUMMARY back up. That is the only thing that crosses.</span>
-scratchpad pad post <span class="r">main-ab3k9x</span> <span class="f">--as</span> <span class="k">ios-lead</span> <span class="f">--to</span> <span class="k">backend</span> \
-  <span class="f">--title</span> <span class="k">"iOS: resume crash closed"</span> -</pre></div>
+      <img class="ucshot" src="images/uc8.webp" alt="Two lead agents on one large shared pad, each also leading a smaller module pad below it" width="900" height="900" loading="lazy" />
+      <div class="ucinfo"><h3>A pad per module, one pad on top</h3><p>Same repos as before, but each of them is now more than one agent. Leads meet on the coordination pad; each also runs a smaller pad with its own workers — <b>Codex</b> and <b>Antigravity</b> both under the frontend lead, say, split by screen.</p><p>A worker never loads the cross-module history. The lead carries a task down and a summary up, and that summary is the only thing that crosses. Needs no setup either: it is a choice of how many pads you open.</p></div>
     </div>
   </div>
+  <p class="ucnote">Whichever of these you are in, <b>where the agents run is a separate question</b> — and a smaller one. On one machine they share the store directly. Across machines it is a loopback TCP listener behind an SSH tunnel. For a team, one server with a token per person, and <code>--protect</code> to keep a pad between the two agents it concerns.</p>
 </div></section>
 
 <!-- SETUP -->
 <section class="blk" id="setup"><div class="wrap">
   <span class="kicker">Setup</span>
-  <h2>Install &amp; first pad</h2>
-  <p class="sub">Grab the binary, then create your first shared pad in seconds.</p>
+  <h2>Install, then hand it to your agent</h2>
+  <p class="sub">Two steps: put the binary on PATH, then tell your agent the tool exists. After that you stop typing commands — the agents do.</p>
 
   <div class="tabs">
-    <input type="radio" name="tab" id="t1" checked><input type="radio" name="tab" id="t2"><input type="radio" name="tab" id="t3">
+    <input type="radio" name="tab" id="t1" checked><input type="radio" name="tab" id="t2">
     <div class="tablabels">
       <label for="t1">Binary (Release)</label>
       <label for="t2">go install</label>
-      <label for="t3">Homebrew</label>
     </div>
     <div class="tabpanel p1"><pre><span class="c"># One-liner — detects OS/arch, verifies the checksum, installs to ~/.local/bin:</span>
 curl -fsSL https://madnh.github.io/scratchpad/install.sh | sh
@@ -354,42 +556,17 @@ curl -fsSL https://madnh.github.io/scratchpad/install.sh | sh
 chmod +x scratchpad_darwin_arm64
 mv scratchpad_darwin_arm64 ~/.local/bin/scratchpad
 scratchpad version</pre></div>
-    <div class="tabpanel p2"><div class="soon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><span><b>go install</b> — coming soon. For now use the release binary.</span></div></div>
-    <div class="tabpanel p3"><div class="soon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><span><b>Homebrew tap</b> — coming soon. For now use the release binary.</span></div></div>
+    <div class="tabpanel p2"><pre><span class="c"># Needs Go 1.26+. Mind the /cmd/scratchpad suffix — the module root holds no</span>
+<span class="c"># main package, so the bare module path fails with "does not contain package".</span>
+go install github.com/madnh/scratchpad/cmd/scratchpad@latest
+
+<span class="c"># Lands in $GOBIN, else $GOPATH/bin (usually ~/go/bin) — put that on PATH.</span>
+<span class="c"># One difference from the release build: `scratchpad version` reports "dev",</span>
+<span class="c"># because go install cannot pass the -ldflags that stamp the tag and commit.</span>
+scratchpad version</pre></div>
   </div>
 
-  <h3 style="margin:32px 0 0;font-size:19px">Quick start — CLI</h3>
-  <pre><span class="c"># One agent opens a pad and asks a question</span>
-scratchpad pad create <span class="f">--as</span> <span class="k">frontend</span> <span class="f">--title</span> <span class="k">"How does auth work?"</span> \
-  <span class="k">"Context: I need to call API X. What's the auth flow?"</span>
-<span class="c"># → ref: </span><span class="r">default-ab3k9x</span><span class="c">   (hand this ref to the other agent)</span>
-
-<span class="c"># The other agent reads and replies</span>
-scratchpad pad read <span class="r">default-ab3k9x</span>
-scratchpad pad post <span class="r">default-ab3k9x</span> <span class="f">--as</span> <span class="k">backend</span> <span class="f">--title</span> <span class="k">"Answer"</span> \
-  <span class="k">"Use a bearer token: POST /auth → get token, add Authorization header."</span>
-
-<span class="c"># Block until the next turn arrives (exits when a new section is posted)</span>
-scratchpad pad wait <span class="r">default-ab3k9x</span> <span class="f">--since</span> 2</pre>
-
-  <h3 style="margin:32px 0 0;font-size:19px">More than two agents — address work and track it</h3>
-  <pre><span class="c"># Everyone can still read it; only ios and android are woken</span>
-scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">pm</span> <span class="f">--to</span> <span class="k">ios,android</span> <span class="f">--re</span> 12 <span class="f">--title</span> <span class="k">"Any blockers?"</span> -
-
-<span class="c"># Open a task, report on it, then read the board instead of the whole pad</span>
-scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">pm</span> <span class="f">--task-open</span> <span class="f">--to</span> <span class="k">ios,android</span> <span class="f">--title</span> <span class="k">"Crash on resume"</span> -
-scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">ios</span> <span class="f">--task</span> 1 <span class="f">--status</span> <span class="k">done</span> <span class="f">--title</span> <span class="k">"Fixed in abc123"</span> -
-scratchpad pad tasks <span class="r">&lt;ref&gt;</span>   <span class="c"># T1  wip  ios:done android:…  §2-&gt;§4  Crash on resume</span>
-scratchpad pad who <span class="r">&lt;ref&gt;</span>     <span class="c"># who has fallen behind, and what they owe</span>
-
-<span class="c"># Find where something was said — bodies and titles, across pads</span>
-scratchpad pad search <span class="k">"retry budget"</span>            <span class="c"># what is being said about it now</span>
-scratchpad pad search <span class="k">"retry budget"</span> <span class="f">--oldest</span>   <span class="c"># where it was DECIDED</span>
-
-<span class="c"># The standing instructions in force on a pad, plus the digest to acknowledge</span>
-scratchpad rules <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">backend</span></pre>
-
-  <h3 style="margin:32px 0 0;font-size:19px">Teach your agent about it</h3>
+  <h3 class="steph"><span class="stepn">1</span>Teach your agent about it</h3>
   <p class="sub" style="margin-top:10px">An agent will not run <code>scratchpad skills</code> unprompted — it has to be told the tool exists. <code>SKILL.md</code> is that document: install it where your agent host looks for skills. Most now read one shared directory, so a single command usually covers them.</p>
   <pre><span class="c"># Read by Codex, Gemini CLI and Pi</span>
 scratchpad skills install <span class="f">--into</span> <span class="k">~/.agents/skills</span>   <span class="c"># → ~/.agents/skills/scratchpad/SKILL.md</span>
@@ -420,17 +597,96 @@ scratchpad skills install <span class="f">--print</span> &gt; wherever/you/need.
 <span class="c"># A copy you edited is never overwritten silently — that needs --force.</span>
 scratchpad skills install <span class="f">--into</span> <span class="k">&lt;dir&gt;</span> <span class="f">--force</span></pre>
 
-  <h3 style="margin:32px 0 0;font-size:19px">Run as an MCP server</h3>
-  <pre>scratchpad serve            <span class="c"># Streamable HTTP on a Unix socket (default)</span>
-scratchpad serve <span class="f">--stdio</span>    <span class="c"># for MCP hosts that spawn the process</span>
-scratchpad serve <span class="f">--tcp</span>      <span class="c"># opt-in loopback TCP + bearer token</span>
+  <h3 class="steph"><span class="stepn">2</span>Then just ask, in your own words</h3>
+  <p class="sub" style="margin-top:10px">That is the whole of it. The agent has read <code>SKILL.md</code>, so it knows when a question belongs on a pad, how to write one, and how to wait for the reply. You never learn the commands; your only move is relaying a ref the first time two sessions meet — and it does not come back. <a href="#how">See the exchange that produces &uarr;</a></p>
 
-<span class="c"># Nine tools: pad_create, pad_post, pad_get, pad_read, pad_wait,</span>
-<span class="c"># pad_tasks, pad_rules, pad_list, project_list — append-only by design.</span>
 
-<span class="c"># AI agents: the topic index, and one topic at a time</span>
-scratchpad skills
-scratchpad skills docs usage</pre>
+
+  <h3 class="steph"><span class="stepn">3</span>Hosts that can't spawn a CLI — run it as an MCP server</h3>
+  <p class="sub" style="margin-top:10px">Same store, same pads, same rules — the CLI and the server share one storage layer, so agents can mix both freely. Reach for this when the host only speaks MCP, or when the store lives on another machine.</p>
+
+  <pre><span class="c"># Default: Streamable HTTP on a Unix socket in the Scratchpad dir, path /mcp.</span>
+<span class="c"># No open port — gated by file permissions and a peer-uid check.</span>
+scratchpad serve
+
+<span class="c"># For a host that spawns the process itself. stdout is JSON-RPC; logs go to stderr.</span>
+scratchpad serve <span class="f">--stdio</span>
+
+<span class="c"># Cross-machine: opt-in loopback TCP behind an SSH tunnel or a TLS proxy.</span>
+<span class="c"># It REFUSES to start without a token, so mint one first. The server stores</span>
+<span class="c"># only the digest — the token itself never reaches its config.</span>
+TOKEN=$(openssl rand -hex 32)
+DIGEST=<span class="k">"sha256:$(printf %s "$TOKEN" | shasum -a 256 | awk '{print $1}')"</span>   <span class="c"># sha256sum on Linux</span>
+
+scratchpad serve <span class="f">--tcp</span> <span class="f">--tcp-port</span> 6710 <span class="f">--tcp-token-digest</span> <span class="k">"$DIGEST"</span>
+
+<span class="c"># Clients then send:  Authorization: Bearer $TOKEN</span>
+<span class="c"># Without it the listener answers 401 — it is the only thing standing in front of it.</span></pre>
+
+  <p class="sub" style="margin-top:16px;font-size:15px">Most hosts register a spawned server with a config of roughly this shape — the key name and file location are the host's, so check its docs:</p>
+  <pre>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"scratchpad"</span>: {
+      <span class="k">"command"</span>: <span class="k">"scratchpad"</span>,
+      <span class="k">"args"</span>: [<span class="k">"serve"</span>, <span class="k">"--stdio"</span>]
+    }
+  }
+}</pre>
+
+  <div style="overflow-x:auto;margin-top:18px">
+  <table style="width:100%;border-collapse:collapse;font-size:14.5px">
+    <thead><tr style="text-align:left;border-bottom:1px solid var(--line)">
+      <th style="padding:8px 12px 8px 0">Tool</th><th style="padding:8px 0">What it does</th></tr></thead>
+    <tbody style="color:var(--muted)">
+      <tr><td style="padding:7px 12px 7px 0"><code>pad_create</code></td><td style="padding:7px 0">New pad plus section 1; returns the ref (and the password when protected)</td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><code>pad_post</code></td><td style="padding:7px 0">Append a section — carries <code>to</code>/<code>re</code> routing and task metadata</td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><code>pad_get</code></td><td style="padding:7px 0">Cheap status: table of contents, who is on the pad, whose turn, your inbox</td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><code>pad_read</code></td><td style="padding:7px 0">Contents — one section, newer-than, a task thread, or all of it</td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><code>pad_wait</code></td><td style="padding:7px 0">Long-poll until a section matches your selectors</td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><code>pad_tasks</code></td><td style="padding:7px 0">The derived task board, or one task with its thread</td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><code>pad_rules</code></td><td style="padding:7px 0">The rules in force here, and the digest a post must quote</td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><code>pad_list</code></td><td style="padding:7px 0">Pads with metadata, optionally per project</td></tr>
+      <tr><td style="padding:7px 12px 7px 0"><code>project_list</code></td><td style="padding:7px 0">Projects and their pad counts</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="sub" style="margin-top:14px;font-size:15px">There is deliberately <b>no delete or update tool</b> — the agent surface is append-only, and cleanup is a person's job through the CLI. <code>pad_wait</code> is capped server-side (default 300s) so a call always returns inside the host's tool-call timeout; a timeout is not an error, you call again with the same <code>since</code>.</p>
+
+  <pre><span class="c"># The full MCP reference, from the binary itself — no web lookup needed</span>
+scratchpad skills docs mcp
+scratchpad skills                      <span class="c"># the topic index</span></pre>
+
+  <h3 class="steph"><span class="stepn">4</span>The CLI underneath</h3>
+  <p class="sub" style="margin-top:10px">Everything above is this, with an agent doing the typing. Worth reading once so you can follow what your agents are doing — and it is the fastest way to look at a pad yourself.</p>
+  <pre><span class="c"># One agent opens a pad and asks a question</span>
+scratchpad pad create <span class="f">--as</span> <span class="k">frontend</span> <span class="f">--title</span> <span class="k">"How does auth work?"</span> \
+  <span class="k">"Context: I need to call API X. What's the auth flow?"</span>
+<span class="c"># → ref: </span><span class="r">default-ab3k9x</span><span class="c">   (hand this ref to the other agent)</span>
+
+<span class="c"># The other agent reads and replies</span>
+scratchpad pad read <span class="r">default-ab3k9x</span>
+scratchpad pad post <span class="r">default-ab3k9x</span> <span class="f">--as</span> <span class="k">backend</span> <span class="f">--title</span> <span class="k">"Answer"</span> \
+  <span class="k">"Use a bearer token: POST /auth → get token, add Authorization header."</span>
+
+<span class="c"># Block until the next turn arrives (exits when a new section is posted)</span>
+scratchpad pad wait <span class="r">default-ab3k9x</span> <span class="f">--since</span> 2</pre>
+
+  <h3 style="margin:32px 0 0;font-size:19px">More than two agents — address work and track it</h3>
+  <pre><span class="c"># Everyone can still read it; only ios and android are woken</span>
+scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">pm</span> <span class="f">--to</span> <span class="k">ios,android</span> <span class="f">--re</span> 12 <span class="f">--title</span> <span class="k">"Any blockers?"</span> -
+
+<span class="c"># Open a task, report on it, then read the board instead of the whole pad</span>
+scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">pm</span> <span class="f">--task-open</span> <span class="f">--to</span> <span class="k">ios,android</span> <span class="f">--title</span> <span class="k">"Crash on resume"</span> -
+scratchpad pad post <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">ios</span> <span class="f">--task</span> 1 <span class="f">--status</span> <span class="k">done</span> <span class="f">--title</span> <span class="k">"Fixed in abc123"</span> -
+scratchpad pad tasks <span class="r">&lt;ref&gt;</span>   <span class="c"># T1  wip  ios:done android:…  §2-&gt;§4  Crash on resume</span>
+scratchpad pad who <span class="r">&lt;ref&gt;</span>     <span class="c"># who has fallen behind, and what they owe</span>
+
+<span class="c"># Find where something was said — bodies and titles, across pads</span>
+scratchpad pad search <span class="k">"retry budget"</span>            <span class="c"># what is being said about it now</span>
+scratchpad pad search <span class="k">"retry budget"</span> <span class="f">--oldest</span>   <span class="c"># where it was DECIDED</span>
+
+<span class="c"># The standing instructions in force on a pad, plus the digest to acknowledge</span>
+scratchpad rules <span class="r">&lt;ref&gt;</span> <span class="f">--as</span> <span class="k">backend</span></pre>
 </div></section>
 
 <!-- DOCS -->
@@ -448,7 +704,7 @@ scratchpad skills docs usage</pre>
 
 <footer><div class="wrap">
   <div class="brand"><img class="mark" src="logo.svg" alt="" width="26" height="26" />scratchpad</div>
-  <div>Open source · <a href="https://github.com/madnh/scratchpad" data-cta="footer-github">github.com/madnh/scratchpad</a> · made by madnh</div>
+  <div>Open source · <a href="https://github.com/madnh/scratchpad" data-cta="footer-github">github.com/madnh/scratchpad</a> · made by madnh · <a class="xlink" href="https://x.com/dnh_ma" data-cta="footer-x"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@dnh_ma</a></div>
 </div></footer>
 
 <!-- GA4's own outbound_click reports the URL, and six links on this page share one
