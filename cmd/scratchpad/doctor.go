@@ -14,6 +14,7 @@ import (
 	"github.com/madnh/scratchpad/internal/buildinfo"
 	"github.com/madnh/scratchpad/internal/config"
 	"github.com/madnh/scratchpad/internal/pad"
+	"github.com/madnh/scratchpad/internal/relay"
 	"github.com/madnh/scratchpad/internal/store"
 
 	"golang.org/x/sys/unix"
@@ -124,6 +125,12 @@ type doctorStore struct {
 	// listing skips them; this is the one place that says they exist, so a pad renamed
 	// by hand does not simply vanish.
 	Strays []string `json:"strays,omitempty"`
+
+	// StaleRelays are `exec` control sockets nothing is listening on. A relay removes its
+	// own socket when it stops, so one survives only when the process was ended without a
+	// chance to clean up. Harmless, invisible, and worth saying out loud once — a person
+	// who finds a socket in their store deserves to know which of the two it is.
+	StaleRelays []string `json:"stale_relays,omitempty"`
 }
 
 // doctorPadInfo is one pad's --content entry.
@@ -316,6 +323,7 @@ func statStore(cfg config.Config) *doctorStore {
 	if strays, err := st.StrayFiles(); err == nil {
 		ds.Strays = strays
 	}
+	ds.StaleRelays = relay.StaleSockets(cfg.RootDir)
 	return ds
 }
 
@@ -452,6 +460,14 @@ func (r *doctorReport) writeText(w io.Writer) {
 		if len(r.Store.Strays) > 0 {
 			fmt.Fprintln(w, "\n▸ Stray files in projects/ (not pads, not tool files — ignored everywhere else)")
 			for _, s := range r.Store.Strays {
+				fmt.Fprintf(w, "  %s\n", s)
+			}
+		}
+		// Same spirit as the strays: not a fault, but the only place a person who found
+		// one of these in their store can learn that nobody is on the other end of it.
+		if len(r.Store.StaleRelays) > 0 {
+			fmt.Fprintln(w, "\n▸ Relay sockets with nothing listening (left by an `exec` that was ended abruptly — safe to delete)")
+			for _, s := range r.Store.StaleRelays {
 				fmt.Fprintf(w, "  %s\n", s)
 			}
 		}
