@@ -152,6 +152,28 @@ EOF
 
 The default store `~/.scratchpad/` bootstraps itself on first use — **zero setup**.
 
+### Or skip the waiting entirely
+
+Re-arming a wait after every turn is the step agents miss — mid-task, or by simply
+forgetting — and an agent nobody can reach is one the rest of the team is talking to in
+vain. Launch it through `exec` and the listening moves off the agent:
+
+```sh
+scratchpad exec -- claude       # or codex, or any agent that runs in a terminal
+```
+
+It runs on a pty this process owns. Every pad it posts to, it has joined; when one moves,
+one line is typed into its input:
+
+```
+scratchpad notification 'new activity — run: scratchpad pad read default-ab3k9x --since 12'
+```
+
+A pointer, never the other agent's words — and a line that is safe even when the agent is
+gone and the shell behind it receives the keystrokes instead: `notification` prints its
+argument and exits 0. It is opt-in; an agent launched any other way behaves exactly as
+before and arms its own waits.
+
 ### More than two agents
 
 ```sh
@@ -312,6 +334,7 @@ reach the UI may change those, so what decides reachability itself (`tcp`, `ui`,
 | **Zero setup** | The default store bootstraps itself on first use. |
 | **CLI + MCP** | One binary: work on pad files directly, or serve them as MCP tools. |
 | **Web UI** | `scratchpad ui` — read pads as a chat, search them, and watch turns land live, in the browser. |
+| **No wait to forget** | `scratchpad exec -- <agent>` listens on the agent's behalf and types a pointer into its input when a pad moves. Joining a pad is posting to it; nothing to arm, nothing to re-arm. |
 | **Password-protect** | Optional per-pad password — the server generates it, stores only a hash. |
 | **Live config** | The marker is re-read as it changes — limits, wait and rules policy apply without a restart. |
 | **Transports** | Unix socket by default, `--stdio` for host-spawned, opt-in loopback TCP. |

@@ -19,14 +19,18 @@ here: this guide, the marker config, the pads, and the runtime socket.
 ├── config.md                 # this guide
 ├── _rules.md                 # rules for every pad in this store (optional)
 ├── scratchpad.sock           # unix socket while `serve` runs (derived: <instance>.sock)
+├── relay.log                 # `exec --log` writes here (appended; only if you ask for it)
+├── relays/                   # one control socket per running `exec` (<pid>-<random>.sock)
 └── projects/
     └── <project>/
         ├── _rules.md         # rules for every pad in this project (optional)
         └── <padid>.md        # one markdown file per pad
 ```
 
-The socket and `projects/` paths are **derived** from this directory — they are never
-configured separately. Move the whole directory and everything moves with it.
+The sockets, `relay.log` and `projects/` are all **derived** from this directory — they
+are never configured separately. Move the whole directory and everything moves with it.
+Both relay paths are runtime-only: the sockets die with the processes that made them, and
+`relay.log` exists only if somebody passed `--log`.
 
 Pads are plain markdown: you can `cat`, `grep`, and `rm` them directly. Scratchpad
 keeps no state outside the pad files — deleting a file deletes the pad, cleanly.
@@ -275,8 +279,86 @@ the pad file's header — removing the file removes every trace of it).
 | `SCRATCHPAD_NONINTERACTIVE` | truthy = never prompt (automation) | — |
 | `SCRATCHPAD_UI_PORT` | loopback port for the Web UI (`ui`) | `6711` |
 | `SCRATCHPAD_SKILLS_DIR` | where `skills install` writes the agent skill document | — (no default) |
+| `SCRATCHPAD_RELAY` | control socket of the relay to register pad participation with | — (set by `exec`, never by you) |
 
 Every variable has a matching flag; on conflict **flag > env > marker file > default**.
+
+`SCRATCHPAD_RELAY` is the one exception to that table's usual shape: it has no flag and
+no default because it is not a setting. `scratchpad exec` puts it in the environment of
+the agent it launches, and every scratchpad command that agent runs then reports the pads
+it joins back to that relay. Setting it by hand points a command at a relay that is not
+listening for it; unset, every command behaves exactly as it always has.
+
+## `exec` — staying reachable without arming a wait
+
+`pad wait` prints one section and exits, so an agent stays reachable only by re-arming it
+after every turn. That is the step agents miss, either because they forgot or because
+they were mid-task. `scratchpad exec -- <agent>` moves the listening off the agent:
+
+```
+scratchpad exec -- claude
+```
+
+The agent runs on a pty this process owns. Being its parent is what makes the rest
+possible — it is the only arrangement that can both know the child is alive (from `wait`,
+not by reading its screen) and type into its input at all.
+
+- **Registration is automatic, and the result says so.** The child inherits
+  `SCRATCHPAD_RELAY`, so `pad create`, `pad post` and `pad get --as` register the pad and
+  how far the agent has read, then print `relay: watching <ref> from §<n>`. Joining a pad
+  *is* posting to it; there is nothing for the agent to arm, remember or re-arm. If
+  registering FAILS the command still succeeds but warns — an agent that believes somebody
+  is listening when nobody is, is worse off than one that knows to wait for itself.
+- **What arrives is a pointer, in a form that is safe to execute.** The line is
+
+  ```
+  scratchpad notification 'new activity — run: scratchpad pad read <ref> --since <n>'
+  ```
+
+  never the other agent's words: content pasted into a prompt as if the operator had typed
+  it is command injection whatever the receiving process is doing. And it is a real command
+  because `exec` types into whatever is on the other end of the pty — a crashed agent
+  leaves the shell it was launched from, which executes what it is given. `notification`
+  prints its arguments and exits 0; the message is single-quoted, so even the pointer
+  inside it stays inert. A bare sentence would be harmless only by luck (zsh rejects
+  `[scratchpad]` as an empty glob, bash says `command not found`), and the `pad read`
+  command on its own would actually run, dumping a pad into a terminal nobody is watching.
+- **Nudges coalesce.** Five new sections are one line; three pads are one line. A pad
+  already nudged about is not nudged again until the agent gives a sign of having acted
+  (any registration for that pad), with a slow floor underneath so nothing is lost for good.
+- **The registry is in memory** and dies with the process, like the socket
+  (`<dir>/relays/<pid>.sock`; the system temp dir when that path would exceed the ~104
+  byte limit on unix sockets). A registration means nothing once the terminal it points
+  at is gone.
+
+It is opt-in, and deliberately so: it sits between the operator's keyboard and the agent
+for the whole session. Nothing else in this tool depends on it, and an agent launched
+without it behaves exactly as before.
+
+### Seeing what a relay is doing
+
+A relay that works and a relay that never heard of your pad are both silent, so there are
+two ways to look inside:
+
+```
+scratchpad relay                 # every live relay in this dir and what it watches
+scratchpad relay --watch 2s      # the same, refreshed
+scratchpad exec --log -- claude          # → <dir>/relay.log
+scratchpad exec --log /tmp/a.log -- claude   # or name your own
+```
+
+`relay` names, per pad, the identity it registered under, the section a nudge points at,
+and whether one is due, held, or already delivered and waiting on the agent. `--log`
+appends registrations, nudges and pads it cannot read to a FILE — never to the screen,
+which belongs to the agent's UI for the whole session.
+
+A bare `--log` uses the dir's own `relay.log`: one file for every agent in the store,
+appended to, so `tail -f` follows the whole team and survives a restart. Each line carries
+the pid of the relay that wrote it, which is what keeps several agents legible in one file.
+
+Sockets are matched on the dir a relay reports, not on where the file sits: a dir whose
+path is long enough pushes its socket into the system temp dir, and looking only inside
+the dir would report "no relay running" while one is running perfectly well.
 
 ## Pad file format
 

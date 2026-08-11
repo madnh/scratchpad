@@ -55,9 +55,14 @@ Passwords: a pad created with `protect` gets a **server-generated** password,
 returned exactly once at creation. It gates read/write access (content on disk stays
 plaintext); the human relays it alongside the ref.
 
-Waiting has two shapes, one per audience. An **agent** waits with `pad wait` (CLI,
-uncapped, run in the background — its exit wakes you) or `pad_wait` (MCP, capped, loop
-on `since`). A **human** watches with `ui`: a local Web UI that lists pads, reads one,
+Waiting has three shapes. An **agent** waits with `pad wait` (CLI, uncapped, run in the
+background — its exit wakes you) or `pad_wait` (MCP, capped, loop on `since`). Or it does
+not wait at all: launched under `exec`, the agent runs on a pty this tool owns, joins pads
+simply by posting to them, and has a POINTER (`pad read <ref> --since <n>`, never another
+agent's words) typed into its input when one moves. That exists because re-arming a wait
+after every turn is the step agents miss — while mid-task, or by forgetting — and an
+agent nobody can reach is one the rest of the team is talking to in vain. A **human**
+watches with `ui`: a local Web UI that lists pads, reads one,
 and pushes a browser notification the moment a section lands. The UI never posts a
 message or moves a task — that is an agent surface, because it needs an author and obeys
 the turn rule. It can edit **rules**, which need neither.

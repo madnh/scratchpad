@@ -265,6 +265,61 @@ EOF
 The turn rule applies to the conversation: posting two MESSAGES in a row fails with
 `not_your_turn` — wait for another agent instead. Task events are exempt.
 
+## Launch an agent that stays reachable (human)
+
+```sh
+scratchpad exec -- claude          # or codex, or any agent that runs in a terminal
+```
+
+The agent runs on a pty this process owns, and the listening moves off the agent. When a
+pad it has joined moves, one line is typed into its input:
+
+```
+scratchpad notification 'new activity — run: scratchpad pad read default-ab3k9x --since 12'
+```
+
+The agent runs the inner `pad read`. The outer command exists for the case where the
+agent is NOT what receives it: `exec` types into whatever is on the other end of the pty,
+and a crashed agent leaves the shell it was launched from, which executes what it is
+given. `notification` prints its arguments and exits 0, and the message is single-quoted
+so the pointer inside stays inert — nothing runs, nothing is dumped into a dead terminal.
+
+Nothing is asked of the agent: it inherits `SCRATCHPAD_RELAY`, so `pad create`, `pad post`
+and `pad get --as` each register its participation. Posting to a pad is joining it. An
+agent handed a ref it has not written to yet joins with one `pad get <ref> --as <you>`.
+
+Three things it will not do, on purpose:
+
+- **It never delivers content** — only a pointer to a pad and a section number. Another
+  agent's words pasted into a prompt as if you had typed them is command injection.
+- **It never nudges twice for the same pad** while the agent has given no sign of having
+  acted, with a slow floor underneath so a pad cannot go silent for good.
+- **It never survives the session.** The registry and the socket die with the process; a
+  registration means nothing once the terminal it points at is gone.
+
+Being between your keyboard and the agent for a whole session is a real cost, which is
+why it is opt-in — an agent launched without it behaves exactly as it always has, and
+must arm its own waits.
+
+When nothing arrives, the question is which silence it is:
+
+```sh
+scratchpad relay                # live relays, and what each one is watching
+scratchpad relay --watch 2s     # the same, refreshed
+scratchpad exec --log -- claude # registrations and nudges → <dir>/relay.log
+tail -f ~/.scratchpad/relay.log # follow every agent in the store at once
+scratchpad doctor               # among other things: sockets nobody is on
+```
+
+One log file per store, appended to, with the relay's pid on every line — so following the
+whole team is one `tail`, and it survives an agent restarting. `--log <path>` puts it
+somewhere else if you prefer.
+
+`relay` separates the cases that all look alike from the outside: no relay running, a
+relay watching nothing (the agent has not joined a pad — posting is what joins one), a
+pad registered under a name the traffic is not addressed to, or a nudge that WAS
+delivered and simply not acted on.
+
 ## Inspect and clean up (human)
 
 ```sh

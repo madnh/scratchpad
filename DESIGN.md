@@ -605,6 +605,99 @@ when they wake nobody.
 **No subscription state exists.** A waiter passes its selectors on every call and the
 store evaluates a predicate; there is no subscriber table to keep, expire or clean up.
 
+## `exec` — when the agent cannot be relied on to keep listening
+
+Everything above assumes an agent that arms a wait and re-arms it after every turn. That
+assumption fails in two ordinary ways, and it fails silently: the agent **forgets**, or
+it is **mid-task** and will only get round to it much later. Either way the pad has an
+answer nobody is coming for, and the other agents are talking to a process that will
+never notice. Only one host tested here even has a background mechanism whose exit
+reaches the agent; the rest can only block.
+
+`scratchpad exec -- <agent>` moves the listening off the agent altogether. The agent runs
+on a pty this process owns, and a **nudge is typed into its input** when a pad it takes
+part in moves.
+
+**Why be the parent.** There is no way to put a line into another process's input from
+outside. A pid answers only whether something is alive (`kill -0`); writing to a
+stranger's terminal is `TIOCSTI`, disabled on modern Linux and unavailable safely on
+macOS. Owning the pty is the only arrangement that can both KNOW the child is alive (from
+`wait`, not by reading its screen and guessing whether that prompt belongs to an agent or
+to the shell that replaced it) and type into it at all.
+
+**Registration is an act, not a claim.** The child inherits `SCRATCHPAD_RELAY`, so every
+scratchpad command it runs reports the pads it touches back over this process's own
+socket. Joining a pad *is* posting to it; `pad get --as` covers the agent that was handed
+a ref and has not written yet. The relay never infers "which pads are mine" from an author
+string — two sessions may both call themselves `backend`, and an author name is only
+meaningful *within* one pad. Same law as `PostRequest.SystemPost`: a privilege is a field
+the calling code sets, never a string an agent can send.
+
+**And the RESULT says so** — `relay: watching <ref> from §<n>` on stdout, plus a note on
+stderr that no wait is needed. The skill document says the same thing, but a skill file is
+a copy on disk that can be months old and that not every host loads at all; the agent
+decides whether to arm a wait at exactly this moment, so this is where the answer belongs.
+A failed registration is louder still: it used to be swallowed in silence, which left an
+agent believing somebody was listening for it. It now prints a `warning:` telling the
+agent to arm a wait itself — without failing the command, because the pad file was written
+before any of this ran and a post that SUCCEEDED must not report failure.
+
+**What is delivered is a pointer, in a form that is safe to execute:**
+
+```
+scratchpad notification 'new activity — run: scratchpad pad read <ref> --since <n>'
+```
+
+Never the other agent's words — content pasted into a prompt as if the operator typed it
+is command injection whatever state the receiver is in. And it is a real command because
+the receiver is not always the agent: a crashed one leaves the shell it was launched from,
+which executes what it is given. `notification` prints its arguments and exits 0; the
+message is single-quoted so the pointer inside stays inert. A bare sentence would be
+harmless only by luck (zsh rejects `[scratchpad]` as an empty glob, bash says `command not
+found`), and sending `pad read` itself would actually run, dumping a pad into a terminal
+nobody is watching.
+
+**The Enter is written separately from the line.** A TUI that sees a burst of bytes arrive
+at once treats it as a *paste*, where Enter means newline rather than send — deliberately,
+so pasting three lines does not fire three times. Measured with Codex: text and `\r` in one
+write sat in the composer indefinitely; the same `\r` on its own submitted immediately.
+
+**Nudges coalesce, they do not queue.** Every nudge for a pad says the same thing, so a
+later one subsumes an earlier one: five new sections are one line, three pads are one
+line. A pad already nudged about is not nudged again until the agent gives a sign of
+having acted (any registration for that pad), with a slow floor underneath so a nudge that
+is never consumed cannot silence a pad for good. `since` moves only when the agent says so
+by registering again — a nudge is not evidence that anybody read anything, and a pointer
+that walked forward on its own would let an agent skip sections by following only the
+newest nudge.
+
+**The registry is in memory and dies with the process.** A registration is meaningless
+once the terminal it points at is gone, and on disk it would outlive both the terminal and
+the machine's last reboot. The socket lives at `<dir>/relays/<pid>-<random>.sock`, or in
+the system temp dir when that path would exceed the ~104-byte `sun_path` limit; `relay`
+matches on the dir a relay reports, not on where its socket sits.
+
+The random half of the name guards against **pid reuse**. Binding is safe without it —
+the OS never gives one pid to two live processes, so a file left by `kill -9` is an orphan
+and `Listen` removes it — but a grandchild that outlived a crashed agent still carries
+`SCRATCHPAD_RELAY` in its environment, and if a new relay had claimed that exact path its
+registrations would land in a stranger's terminal. The pid stays in the name because
+`relay` prints it and an operator matches it against `ps`.
+
+**Two ways to look inside**, because a relay that works and a relay that never heard of
+your pad are both silent: `scratchpad relay` (live registrations, what is pending, what was
+already delivered) and `exec --log` (registrations and nudges over time). The log goes to a
+file, never the screen — that belongs to the agent's UI for the whole session. Bare `--log`
+means `<dir>/relay.log`, derived like every other path here: ONE file per store, appended
+to, with the writing relay's pid on each line. One file rather than one per run because a
+log whose name changes every time cannot be followed with `tail -f`, and following it is
+why anybody turns it on; `--log <path>` overrides for the rare case that is not wanted.
+
+**It is opt-in and must stay so.** It sits between the operator's keyboard and the agent
+for the entire session: raw mode, resizes and cleanup all have to be right, and when they
+are wrong they are wrong in the irritating way rather than the loud way. An agent launched
+any other way behaves exactly as before and arms its own waits.
+
 ## Knowing whether work is moving
 
 An agent assigns work to an agent that is not watching the pad, and waits forever. The
@@ -974,6 +1067,13 @@ scratchpad
 ├── rules   [--set <text|-> --if-digest <d>] [--replace]   # the store-wide rules (operator's by default)
 ├── serve                # MCP server: UDS by default; --stdio; --tcp opt-in
 ├── ui                   # Web UI for a human: browse, read, watch (loopback only) — see the Web UI section
+├── exec  [--log [<file>]] -- <agent> [args…]   # bare --log → <dir>/relay.log
+│                        # run an agent on a pty we own and nudge it when a pad moves,
+│                        # so nobody has to arm a wait — see the `exec` section
+├── relay [--json] [--watch <d>]
+│                        # what the live relays are watching (read-only diagnostics)
+├── notification [text…] # print the text and exit 0 — the harmless form of a nudge,
+│                        # for when a shell receives one instead of an agent
 ├── doctor               # diagnostics, strictly read-only (see the Doctor section)
 ├── skills               # self-documenting docs (go:embed); skills docs <topic>; -o json
 │                        #   skills install --into <dir> (env SCRATCHPAD_SKILLS_DIR) publishes
@@ -1511,6 +1611,10 @@ internal/pad/      pure: no I/O, no locks, no clock beyond an injected `now`
   errors.go        the coded errors the rules return
 
 internal/store/    files, flock, limits — calls internal/pad to enforce and derive
+
+internal/relay/    the exec nudge: registry, coalescing, the control socket
+                   in-memory only; reads through store, watches through watch
+internal/ptyrun/   a child on a pty we own, and a second writer into its input
 ```
 
 Each rule sits in the file that owns the derivation it guards, rather than in a
@@ -1556,6 +1660,7 @@ Positioning: **the CLI is the primary path, self-sufficient for local use** — 
 |---|---|---|
 | Create / post / view TOC / read / list (`create` `post` `get` `read` `list`, project list) | ✅ | ✅ |
 | Wait for a new section | ✅ `pad wait` — **not capped**, runs in the background, exit code wakes the agent | ✅ `pad_wait` — **capped at 300s**, the agent loops itself using `since` |
+| Not waiting at all | ✅ `exec` — the agent runs on a pty we own and is nudged when a pad moves; nothing to arm or re-arm | ❌ — an MCP host owns its own process and terminal; there is nothing here to be the parent of |
 | Selective waking (`--wake-for`, `--unacked`) | ✅ | ✅ (`wake_for`, `unacked_s`) |
 | Tasks: open / move / close | ✅ `pad post --task-open/--task` | ✅ `pad_post` with task metadata |
 | Tasks: the derived board | ✅ `pad tasks`, `pad who` | ✅ `pad_tasks` (read-only) |
@@ -1567,7 +1672,7 @@ Both rules-writing rows carry the policy and the version check on top of the sur
 shape: by default a pad's rules are its opener's, and the file levels are the operator's on
 BOTH surfaces — the CLI's ✅ above is the command existing, not the permission.
 | Delete / cleanup (`delete`, `purge`) | ✅ (confirm with a human, `--yes` for automation) | ❌ — the agent surface is append-only |
-| Operations (`init`, `serve`, `ui`, `doctor`, `skills`, `version`) | ✅ | ❌ |
+| Operations (`init`, `serve`, `ui`, `exec`, `relay`, `doctor`, `skills`, `version`) | ✅ | ❌ |
 | Identity | `--as` / env `SCRATCHPAD_AUTHOR` | param `author` (self-declared, mandatory) |
 | Needs a running server | ❌ — reads/writes disk directly (flock) | ✅ — needs `serve` (UDS / stdio / TCP) |
 | Long content | via stdin (`-`), no shell-escaping worries | param `content`, capped at 64KB |
