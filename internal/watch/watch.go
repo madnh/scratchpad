@@ -72,6 +72,14 @@ type fileState struct {
 type Watcher struct {
 	projectsDir string
 
+	// ready closes once the initial snapshot is taken. Until then the watcher is blind in
+	// a way that leaves no trace: a write landing between the listing and the stat is
+	// recorded as the starting state, so it never emits and the periodic rescan has
+	// nothing to compare against either. A subscriber that must not miss the very first
+	// write after it starts waits on this.
+	ready     chan struct{}
+	readyOnce sync.Once
+
 	mu       sync.Mutex
 	subs     map[int]chan Event
 	nextSub  int
@@ -84,10 +92,16 @@ type Watcher struct {
 func New(projectsDir string) *Watcher {
 	return &Watcher{
 		projectsDir: projectsDir,
+		ready:       make(chan struct{}),
 		subs:        make(map[int]chan Event),
 		snapshot:    make(map[string]fileState),
 	}
 }
+
+// Ready is closed once Run has taken its initial snapshot, after which every write to the
+// store is seen. It is never closed if Run is not called, so a caller that waits on it
+// should also have a timeout or a context.
+func (w *Watcher) Ready() <-chan struct{} { return w.ready }
 
 // Degraded reports whether kernel notification is unavailable and the watcher is
 // running on the rescan safety net alone (changes are still seen, just later).
@@ -141,6 +155,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	for _, dir := range w.projectDirs() {
 		w.addWatch(fsw, dir)
 	}
+	w.live()
 
 	rescan := time.NewTicker(rescanInterval)
 	defer rescan.Stop()
@@ -196,6 +211,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 // runRescanOnly is the degraded loop: no kernel notification, just the safety net.
 func (w *Watcher) runRescanOnly(ctx context.Context) error {
+	// Degraded is still live: writes are seen, just on the rescan's clock. Never
+	// announcing readiness here would hang every caller that waits for it.
+	w.live()
 	t := time.NewTicker(rescanInterval)
 	defer t.Stop()
 	for {
@@ -224,6 +242,14 @@ func (w *Watcher) seed() {
 			w.snapshot[path] = st
 		}
 	}
+}
+
+// live announces that no further write can be missed. It must be called after BOTH the
+// snapshot and the directory watches are in place: between those two the watcher is at
+// its blindest — the snapshot already says "this is the starting state", so a write
+// landing there emits nothing now and matches the snapshot at the next rescan too.
+func (w *Watcher) live() {
+	w.readyOnce.Do(func() { close(w.ready) })
 }
 
 // rescan diffs the whole store against the snapshot — the backstop for kernel events

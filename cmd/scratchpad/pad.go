@@ -204,6 +204,7 @@ func newPadCreateCmd() *cobra.Command {
 				fmt.Fprintf(out, "password: %s\n", pw)
 				fmt.Fprintln(cmd.ErrOrStderr(), "note: the password is shown only this once — relay it together with the ref")
 			}
+			noteJoin(cmd, created.Ref(), a, pw, 1)
 			return nil
 		},
 	}
@@ -299,6 +300,10 @@ func newPadPostCmd() *cobra.Command {
 				}
 				fmt.Fprintf(out, "%s: T%d\n", verb, res.Task)
 			}
+			// Register against the pad the post actually LANDED in: when a full pad
+			// continued, the conversation is in the successor and nudging about the old
+			// one would point the agent at a pad that refuses every reply.
+			noteJoin(cmd, res.Pad.Ref(), a, password, res.Section)
 			// Warnings go to stderr: the post SUCCEEDED, and stdout must stay clean for
 			// whatever is parsing it.
 			for _, w := range res.Warnings {
@@ -365,6 +370,11 @@ func newPadGetCmd() *cobra.Command {
 			fmt.Fprintf(out, "turn: %s (last message: %s)\n", p.TurnState().WaitingFor, p.TurnState().LastAuthor)
 			if a := strings.TrimSpace(author); a != "" {
 				in := p.Inbox(a)
+				// Asking for a pad's state with an identity is the other way to join one:
+				// it covers the agent that was handed a ref and has not posted yet, which
+				// is exactly when being reachable matters most. The mark is the agent's own
+				// last post — the only section it is PROVEN to have seen.
+				noteJoin(cmd, p.Ref(), a, password, in.Since)
 				fmt.Fprintf(out, "\ninbox for %s (your last post: §%d)\n", a, in.Since)
 				if len(in.Unread) == 0 {
 					fmt.Fprintln(out, "  nothing addressed to you since then")

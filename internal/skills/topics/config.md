@@ -37,6 +37,7 @@ There is no working-directory inference at all.
 | `SCRATCHPAD_NONINTERACTIVE` | truthy = never prompt |
 | `SCRATCHPAD_UI_PORT` | loopback port for the Web UI (`ui`), default 6711 |
 | `SCRATCHPAD_SKILLS_DIR` | where `skills install` writes SKILL.md; no default, you name it |
+| `SCRATCHPAD_RELAY` | set by `exec` on the agent it launches; commands report the pads they join to that relay. Not a setting — do not set it yourself |
 
 Every env var has a matching flag; conflicts resolve flag > env > marker > default.
 

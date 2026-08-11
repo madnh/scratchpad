@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -16,6 +17,12 @@ func main() {
 		if err == errWaitTimeout {
 			fmt.Fprintln(os.Stderr, "timeout: no new section")
 			os.Exit(exitTimeout)
+		}
+		// `exec` is transparent: the agent's exit status is this process's, and printing
+		// an error over it would be inventing a failure the agent never reported.
+		var ec exitError
+		if errors.As(err, &ec) {
+			os.Exit(int(ec))
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

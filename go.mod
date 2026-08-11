@@ -3,6 +3,7 @@ module github.com/madnh/scratchpad
 go 1.26.4
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/spf13/cobra v1.10.2

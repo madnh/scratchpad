@@ -165,12 +165,51 @@ defaulted that same string, so an agent claimed it by not naming itself. Never r
   `tcp`, `ui` and `rules` decide who may reach this deployment and who may rewrite the
   operator's instructions; a browser session must not be how those are granted.
 
+- **`exec`** (`internal/relay`, `internal/ptyrun`) — for an AGENT that cannot be trusted
+  to keep listening. It runs the agent on a pty this process owns and types a POINTER
+  into its input when a pad moves. Being the parent is not a convenience: it is the only
+  arrangement that can both KNOW the child is alive (from `wait`, never by reading its
+  screen) and write to its input at all — `TIOCSTI` is gone. Three rules hold it
+  together. What is delivered is a POINTER and NEVER another agent's words, because
+  content pasted in as if the operator typed it is injection whatever state the receiver
+  is in — and it is delivered as `<tool> notification '<message>'`, a real command that
+  only prints, because the receiver is not always the agent: a crashed one leaves the
+  SHELL it was launched from, and a shell executes what it is given. A bare sentence is
+  harmless only by luck (zsh rejects `[scratchpad]` as an empty glob, bash says `command
+  not found`), and sending `pad read` itself would actually run and dump a pad into a dead
+  terminal. The message is single-quoted (`relay.shellQuote`) so the pointer inside stays
+  inert; `notification` disables flag parsing and cannot fail, because a notification that
+  turns into an error is one more thing to deal with. Registration arrives over this process's own socket
+  from a child it spawned, so `internal/relay` never infers "which pads are mine" from an
+  author string — two sessions may both call themselves `backend`, and the name was never
+  what was trusted (same law as `PostRequest.SystemPost`). And nudges COALESCE rather
+  than queue: every nudge for a pad says the same thing, so a later one subsumes an
+  earlier one, and a pad already nudged about waits for a sign the agent acted (any
+  registration for it) with `renudgeInterval` underneath so nothing goes silent forever.
+  The registry is in memory and dies with the process — a registration is meaningless
+  once the terminal it points at is gone, and on disk it would outlive the machine's last
+  reboot. **`exec` is opt-in and must stay that way**: it sits between the operator's
+  keyboard and the agent for a whole session.
+  **The Enter is written SEPARATELY from the line** (`ptyrun.submitDelay`), and that is
+  not politeness. A TUI that sees a burst of bytes arrive at once treats it as a PASTE,
+  where Enter means newline rather than send — deliberately, so pasting three lines does
+  not fire three times. Measured with Codex: text and `\r` in one write sat in the
+  composer indefinitely; the same `\r` on its own submitted at once.
+
 `internal/watch` turns pad-file writes into a push stream via kernel filesystem
 events. It watches the STORE, never the writers: any writer — CLI, MCP, or a person
 with `rm` — is noticed identically, and `internal/store` stays ignorant of listeners.
 Do not add a writer-side notification hook; it would miss every uncooperative writer.
 The same package watches the MARKER (`watch.Marker`, `watch.ReloadConfig`) — the file,
 not the writers, for the same reason.
+
+**A watcher is blind until `Ready()` closes, and blind there without a trace.** Between
+taking the snapshot and registering the directory watches, a write is recorded as the
+starting state: it emits nothing then, and matches the snapshot at the next rescan too,
+so it is lost rather than late. `Ready()` therefore closes AFTER both steps, and any
+caller whose next act would CAUSE such a write — `internal/relay` answers a registration,
+the agent then posts — must wait on it first, with a timeout, since it never closes if
+`Run` was not called.
 
 **Config is read continuously, never frozen at startup.** Every surface takes a
 `*config.Live` and reads a snapshot per operation; `store.New`/`mcpsrv.New`/`webui.New`
