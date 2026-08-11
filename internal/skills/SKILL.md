@@ -2,285 +2,141 @@
 name: scratchpad
 description: >-
   Exchange messages and TRACK WORK with other AI agents through shared,
-  turn-based markdown pads using the `scratchpad` CLI. Use this whenever you
-  need to communicate with another agent session — ask another agent a
-  question, answer a question relayed from another agent, coordinate work
-  between two or more agents (e.g. a frontend agent asking a backend agent how
-  an API works), assign or track a piece of work across agents, report progress
-  on work someone else assigned you, check what the team is working on or who
-  has fallen behind, wait for another agent's reply, or when the user mentions
-  "scratchpad", gives you a pad ref like `default-ab3k9x` or
-  `<project>-<padid>`, or says things like "hỏi agent kia", "gửi cho agent
-  backend", "giao việc cho agent", "theo dõi tiến độ", "check the pad", "reply
-  on the pad", "open a task", "what is T3 doing". Also use it when the user asks
-  how two AI sessions can talk to each other without copy-pasting.
+  turn-based markdown pads using the `scratchpad` CLI. Use whenever you need to
+  talk to another agent session — ask it a question, answer one relayed from it,
+  coordinate work between agents (a frontend agent asking a backend agent how an
+  API works), assign or track work across agents, report progress on work someone
+  assigned you, check what the team is doing or who has fallen behind, wait for a
+  reply — or when the user says "scratchpad", gives a pad ref like `default-ab3k9x`
+  / `<project>-<padid>`, or says "hỏi agent kia", "gửi cho agent backend", "giao
+  việc cho agent", "theo dõi tiến độ", "check the pad", "reply on the pad", "open a
+  task", "what is T3 doing", or asks how two AI sessions talk without copy-pasting.
 ---
 
 # Scratchpad — agent-to-agent messaging and work tracking
 
-`scratchpad` gives agents shared **pads**: append-only markdown transcripts
-written turn by turn. One agent creates a pad with a question, the human relays
-the pad **ref** (`<project>-<padid>`, e.g. `default-ab3k9x`) to the other
-agent's session once, and from then on the agents talk directly.
+`scratchpad` gives agents shared **pads**: append-only markdown transcripts written turn
+by turn. One agent creates a pad, the human relays its **ref** (`<project>-<padid>`, e.g.
+`default-ab3k9x`) to the other agent once, and from then on the agents talk directly. A
+pad carries a **conversation** and a **work ledger** — prefer a task over prose the moment
+something must be DONE by someone and reported back.
 
-A pad carries two things: a **conversation** and a **work ledger**. Track work
-as tasks — see *Tracking work*, and prefer it over prose the moment something
-has to be done by someone and reported back.
-
-The binary is self-documenting. This file covers the core loops; for anything
-deeper, ask the tool itself:
-
-```sh
-scratchpad skills                 # topic index
-scratchpad skills docs usage      # full CLI walkthrough
-scratchpad skills docs mcp        # MCP tool surface (if you use it via MCP)
-scratchpad skills docs config     # dir resolution, env vars, limits
-```
-
-If `scratchpad` is not on PATH, ask the user where the binary lives — do not
-guess or build it yourself.
+This file is the rules you must follow; the detail behind them is in the binary —
+`scratchpad skills docs usage` (CLI walkthrough), `… mcp`, `… config`. If `scratchpad` is
+not on PATH, ask the user where it lives — do not guess or build it yourself.
 
 ## The four rules
 
-1. **Turn-based**: nobody posts twice in a row *in the conversation*. If a post
-   fails with `not_your_turn`, that is not an error to retry — it means nobody
-   else has spoken yet. Wait instead. Task events (`--task-open`, `--status`)
-   and the pad's house rules are exempt: reporting progress never takes the
-   turn, and a coordinator can open five tasks in a row.
-2. **Append-only**: nothing is ever edited or deleted by agents. If you made a
-   mistake, post a correction as a new section; a task is closed by an event,
-   not by removing anything. `pad delete` / `pad purge` exist but are for the
-   human — never run them unless the user explicitly asks.
-3. **Self-declared identity**: pick a stable, role-shaped author name
-   (`frontend`, `backend`, `reviewer`) and keep it for the whole conversation.
-   Set it once: `export SCRATCHPAD_AUTHOR=<name>` (or pass `--as <name>`). The
-   name `scratchpad` is reserved for changes a PERSON makes in the Web UI and is
-   refused — never use it.
-4. **Read the house rules before you post, and again whenever they change** — see
-   the next section. This is enforced, not advisory: the post is refused until you
-   quote them.
+1. **Turn-based**: nobody posts twice in a row *in the conversation*. `not_your_turn`
+   is not an error to retry — it means nobody else has spoken yet. Wait instead. Task
+   events (`--task-open`, `--status`) and rules are exempt: reporting progress never
+   takes the turn, and a coordinator can open five tasks in a row.
+2. **Append-only**: agents never edit or delete. Post a correction as a new section;
+   close a task with an event. `pad delete` / `pad purge` are the human's — never run
+   them unless the user asks.
+3. **Self-declared identity**: pick a stable, role-shaped name (`frontend`, `backend`,
+   `reviewer`) and keep it. `export SCRATCHPAD_AUTHOR=<name>`, or `--as <name>`. The
+   name `scratchpad` is reserved for a PERSON acting in the Web UI and is refused.
+4. **Read the house rules before you post, and again whenever they change.** Enforced,
+   not advisory: the post is refused until you quote them.
 
-## House rules — read them before you post
+## House rules
 
-A pad can carry **rules**: how work is done here, in prose. Message length, when
-to open a task instead of narrating, whether to address or broadcast. They exist
-because a pad nobody set expectations for turns into hundreds of screen-long
-sections that nobody can read back.
-
-Posting to a pad that has rules means quoting their digest:
+A pad can carry **rules**: how work is done here, in prose — message length, when to
+open a task instead of narrating, whether to address or broadcast. They apply in three
+levels (store, project, pad), each extending the one above.
 
 ```sh
-scratchpad pad rules <ref>          # store + project + pad, each labelled, with a digest
+scratchpad pad rules <ref>          # each level, labelled, with a digest
 scratchpad pad post <ref> --as ios --ack-rules 4f2a9c31 --title "…" -
 ```
 
-Without it the post is refused with `rules_unread` — **and the error hands you
-the rules in full plus the digest to repeat**, so you never need a second lookup.
-`pad get --as <you>` and `pad wait --as <you>` print the same thing on stderr
-while you are still deciding what to write.
+Without the digest the post is refused with `rules_unread` — **and the error hands you the
+rules in full plus the digest to repeat**, so a second lookup is never needed.
+`pad get --as <you>` and `pad wait --as <you>` print the same on stderr beforehand.
 
-**You are asked again whenever the rules CHANGE** (on most deployments — some ask
-only once). That includes rules edited at the store or project level, in a file you
-never see, possibly while you were in the middle of a task. So:
+- **`rules_unread` on a pad you have posted in before is not a bug**, and not a
+  retry-with-the-old-digest situation. The rules moved — possibly at a level you never
+  see, possibly mid-task. Read what the error gave you, decide what it changes about the
+  message you were about to send, repeat with the new digest.
+- **A `scratchpad` section titled "Rules changed" wakes you** whatever your `--wake-for`
+  was. Read them before finishing work started under the old ones.
+- **Obey what they say.** Nothing enforces prose but you; acknowledging the rules and
+  then writing three screens is the exact failure they exist to prevent.
 
-- `rules_unread` on a pad you have posted in before is **not** a bug and not a
-  retry-with-the-old-digest situation. The rules moved. Read what the error handed
-  you, decide what it changes about the message you were about to send, then repeat
-  with the new digest.
-- A `scratchpad` section titled *"Rules changed"* may appear in a pad, and it wakes
-  you out of `pad wait` whatever you asked to be woken for. Read the rules then —
-  before you finish the work you are doing under the old ones.
-- Quote `--ack-rules` again after any change. It is per pad, so being up to date on
-  one pad says nothing about another.
+**Writing rules is narrower than reading them.** Only the agent that OPENED a pad may
+set that pad's rules (`--as` required, plus `--if-digest`, which is NOT `--ack-rules`).
+The store's and project's rules are the operator's: `rules --set` is refused with
+`rules_readonly` unless the deployment opted in — put your proposed text in your reply
+and let the human paste it into the Web UI. Details: `skills docs usage`.
 
-Rules apply in three levels — store, project, pad — each extending the one above.
-
-**Obey what they say.** They are prose, so nothing enforces them but you; an agent
-that acknowledges the rules and then writes three screens is the exact failure they
-exist to prevent.
-
-### Writing rules is narrower than reading them
-
-Rules are the one thing here that is EDITED rather than appended, so an overwritten
-rule is simply gone — nothing records that it ever said something else. Two gates
-follow from that.
-
-**Who.** Only the agent that OPENED a pad may write its rules — usually the one
-handing out the work. Anyone else gets `not_rules_owner`, which names who can (or
-`rules_unread` first, if they still owe the pad a read: reading comes before
-everything). The
-store's and a project's rules are the operator's, not any agent's: `scratchpad rules
---set` and `project rules --set` are refused with `rules_readonly` unless the
-deployment opted in. If you think they should change, **put your proposed text in
-your reply and let the person you are working for paste it into the Web UI** — do
-not try to edit the files directly. Say whether the change is one the agents already
-working should stop and read — announcing it is the default, so what a person needs from
-you is a reason to turn that OFF (a typo, a reworded line), not a reason to leave it on.
-
-**On top of what.** Every write quotes the version of that level it replaces. Reads
-print it on a `versions (--if-digest)` line; a level with none yet is at `none`:
+## Asking, and answering
 
 ```sh
-scratchpad pad rules <ref>                            # …versions (--if-digest): store 47eef471 · pad none
-scratchpad pad rules <ref> --as pm --set - --if-digest none <<'EOF'
-- Progress goes on the task, not in a message.
-EOF
-```
-
-- `--as` is **required** — there is no anonymous write. The identity `scratchpad`
-  belongs to the Web UI and is refused here.
-- `--if-digest` is **required**. If it no longer matches, someone changed those rules
-  since you read them: you get `rules_conflict` carrying the version that won, so
-  merge yours into it and repeat.
-- It is NOT `--ack-rules`. That one says "I have read what binds me" and spans all
-  three levels; this one says "I am replacing the version I saw" and is per level.
-- Writing rules is still an ordinary append: it takes no turn, and the previous
-  version stays in the pad as history.
-
-## Asking (you start the conversation)
-
-```sh
+# You start: prints the ref — tell the user, nothing happens until they relay it.
 scratchpad pad create --as frontend --title "How does the orders API paginate" - <<'EOF'
-Context and the actual question, in markdown…
+Context and the actual question…
 EOF
-# → ref: default-ab3k9x
-```
 
-Pass content via stdin (`-`) rather than an argument for anything longer than a
-sentence — it avoids shell-escaping problems. Then:
-
-1. **Tell the user the ref** so they can relay it to the other agent. Nothing
-   happens until they do. If you're using a non-default store (`SCRATCHPAD_DIR`
-   set or `--dir` passed), include the store path in the relay message too —
-   the other agent needs both to find the pad.
-2. **Wait for the reply in the background** so you can keep working (see
-   *Waiting*).
-
-## Answering (the user gives you a ref)
-
-```sh
-scratchpad pad read default-ab3k9x            # read the whole pad first
-scratchpad pad rules default-ab3k9x           # and how this pad expects you to write
-scratchpad pad post default-ab3k9x --as backend --title "Pagination answer" \
+# Handed a ref: read the pad AND its rules before writing.
+scratchpad pad read <ref>; scratchpad pad rules <ref>
+scratchpad pad post <ref> --as backend --title "Pagination answer" \
   --re 1 --ack-rules <digest> - <<'EOF'
 The answer…
 EOF
 ```
 
-Always read before posting — the title alone is not the question. `--re <n>`
-marks which section you are answering, and addresses its author automatically.
-Drop `--ack-rules` if the pad has no rules; if it has, your first post is refused
-without it (see *House rules*).
+Content on stdin (`-`) for anything past a sentence — it avoids shell escaping. `--re <n>`
+marks which section you answer and addresses its author. Always read before posting: a
+title is not the question. On a non-default store (`SCRATCHPAD_DIR` / `--dir`), relay the
+store path along with the ref.
 
 ## Tracking work
 
-**Prefer a task over prose whenever something must be DONE and reported back.**
-A question is a message; a piece of work is a task. Tasks are the only thing
-that answers "where does the team stand" without re-reading the pad, and they
-survive an agent leaving and coming back.
+Tasks are the only thing that answers "where does the team stand" without re-reading the
+pad, and they survive an agent leaving and coming back.
 
 ```sh
-# Open work. --to is mandatory: a task must have an owner. Prints "opened: T1".
-scratchpad pad post <ref> --as pm --title "Crash on resume" \
-  --task-open --to ios,android - <<'EOF'
-Investigate the crash when the app returns from background.
-EOF
-
-# Claim it, then report. --status is what makes a section a task event.
-scratchpad pad post <ref> --as ios --title "iOS: on it" --task 1 --status wip -
-scratchpad pad post <ref> --as ios --title "iOS: fixed in abc123" --task 1 --status done -
-
-scratchpad pad tasks <ref>            # the board
-scratchpad pad tasks <ref> --task 1   # one task and its whole thread
+# --to is mandatory: a task must have an owner. Prints "opened: T1".
+scratchpad pad post <ref> --as pm --title "Crash on resume" --task-open --to ios,android -
+scratchpad pad post <ref> --as ios --title "iOS: on it"  --task 1 --status wip -
+scratchpad pad post <ref> --as ios --title "iOS: fixed"  --task 1 --status done -
+scratchpad pad tasks <ref>            # the board (--task 1 for one thread)
 ```
 
 Statuses: `open`, `wip`, `blocked`, `done`, `dropped`.
 
-What to remember:
-
-- **Claim work with `--status wip` as soon as you start.** That is the signal
-  everyone else reads as "someone has this"; silence on a task you own is what
-  `--unacked` and `pad who` report as stuck.
-- **`--status` is what makes a section a task event.** `--task 3` on its own is
-  an ordinary message that merely mentions T3 — it takes the turn, anyone may
-  write it, and it does **not** count as you answering for that task. Use it to
-  ask about work; use `--status` to move it.
-- **Only owners and the opener may move a task.** An owner reports on their own
-  slice; the opener may reassign (`--status open --to <who>`), drop it, or force
-  it closed. Anything else fails `not_task_owner`.
-- **On a task event `--to` REASSIGNS the task — it does not address anyone.** It
-  sets the owner set to exactly the names you give, and only the opener may use
-  it; an owner that tries gets `not_task_owner`. To tell somebody about your
-  progress, report with `--status` and no `--to`, and post an ordinary message if
-  they need to hear about it. `--re` on a task event likewise does *not* add its
-  parent's author, because that would be handing over the work.
-- **A shared task is done only when every owner says so.** `--to ios,android`
-  stays open after iOS reports `done` — that is deliberate, not a bug.
-- **Reopening resets the work.** `--status open` from the opener puts every owner
-  back to `open`, so they have to report again. That is what disagreeing with a
-  `done` means.
-- Task numbers (`T1`) are separate from section numbers (`§12`) and are never
-  reused.
+- **Claim work with `--status wip` as soon as you start.** Silence on a task you own is
+  what `--unacked` and `pad who` report as stuck.
+- **`--status` is what makes a section a task event.** `--task 3` alone is an ordinary
+  message mentioning T3: it takes the turn and does **not** count as you answering.
+- **Only owners and the opener may move a task**, else `not_task_owner`. An owner
+  reports its own slice; the opener may reassign, drop, or force-close.
+- **On a task event `--to` REASSIGNS — it does not address anyone.** It replaces the
+  owner set, and only the opener may. To tell somebody about progress, report with
+  `--status` and no `--to`. `--re` likewise does not add its parent's author.
+- **A shared task is done only when every owner says so**; `--status open` from the
+  opener **resets every owner**, which is what disagreeing with a `done` means.
+- Task numbers (`T1`) are separate from section numbers (`§12`) and never reused.
 
 ## Addressing and waking
 
-In a pad with more than two agents, say who a section is for and control what
-interrupts you. **Reading is never filtered — only waking is.**
+**Reading is never filtered — only waking is.**
 
 ```sh
 scratchpad pad post <ref> --as pm --title "Contract question" --to backend -
 scratchpad pad wait <ref> --as ios --wake-for me,mine --unacked 15m
 ```
 
-- `--to a,b` addresses a section; `--re <n>` answers one (and addresses its
-  author). Both are advisory — everyone can still read everything.
-- `--wake-for` decides what wakes you: `any` (default), `me` (addressed to you,
-  answering you, or a broadcast), `mine` (task events on tasks you own),
-  `task:<n>`, `tasks` (any task event). They combine with commas.
+- `--to a,b` addresses; `--re <n>` answers (and addresses that author). Both advisory.
+- `--wake-for`: `any` (default), `me` (addressed to you, answering you, or broadcast),
+  `mine` (task events on tasks you own), `task:<n>`, `tasks`. Combine with commas.
+  Whatever wakes you, the reply also lists everything you slept through.
 - **Pick the selector for your role.** Doing work someone gave you → `me,mine`.
-  **Dispatching work to others → `tasks`, not `mine`**: a task's opener is
-  deliberately not one of its owners, so `mine` will never fire for the person
-  who handed the work out, and you would sit through the other agent picking it
-  up without noticing. Use `task:<n>` to follow one piece of work.
-- Whatever wakes you, the reply also lists everything you slept through, so a
-  filtered wait never leaves you answering from stale context.
-- `--unacked 15m` also returns when something *you* addressed has gone
-  unanswered that long — that is your cue to escalate to the user, not to keep
-  waiting.
-
-## Knowing who else is there
-
-**There is no presence, and never will be.** A pad cannot tell you whether another
-agent is running, only what it has WRITTEN — an agent working hard for an hour
-and an agent that died look identical from the outside. So "is anyone else on
-this pad?" is always answered from the transcript:
-
-```sh
-scratchpad pad get <ref>      # authors: frontend, backend  ← the roster
-scratchpad pad who <ref>      # per agent: last section, how long ago, what they owe
-```
-
-- `authors` lists everyone who has **posted**. If it still lists only you, the
-  other agent has not arrived — almost always because the human has not relayed
-  the ref yet.
-- `pad who` also lists an agent that was **addressed and never appeared**, shown
-  as `— never`. That row is the one worth acting on.
-- Addressing someone who has never posted warns you at the moment you post:
-  `"backend" has never posted in this pad — check the name, or tell them the ref`.
-  Two causes, both for the human: a typo in the author name, or nobody ever gave
-  that session the ref.
-- `pad wait --unacked 15m` returns when something you addressed has gone
-  unanswered that long.
-
-**When nobody comes, escalate to the user — do not keep waiting.** You cannot
-relay a ref yourself, and the turn rule stops you from posting twice in a row to
-nudge, so a pad waiting on an agent that never joined will wait forever. Say
-plainly which agent is missing and what it was asked for.
-
-A new agent joining is visible the moment they post: they appear in `authors`,
-and your wait fires if your selector covers what they wrote (a first message is
-usually a broadcast or addressed, so `me` catches it; a first **task event**
-does not, which is why a coordinator waits on `tasks`).
+  **Dispatching work → `tasks`, not `mine`**: an opener is deliberately not an owner, so
+  `mine` never fires for the agent that handed the work out.
+- `--unacked 15m` returns when something *you* addressed has gone unanswered that long —
+  your cue to escalate to the user, not to keep waiting.
 
 ## Waiting
 
@@ -288,144 +144,99 @@ does not, which is why a coordinator waits on `tasks`).
 scratchpad pad wait default-ab3k9x --since 1 --as frontend --wake-for me,mine
 ```
 
-Run this with your harness's own background-execution mechanism — the one that
-delivers a result back to you when the process exits.
-It blocks until a matching section exists, prints it, and exits 0. `--since N`
-= the highest section number you have already seen. With `--timeout 60s` it
-exits 3 on timeout — timeout is "nothing yet", not failure; wait again with the
-same `--since`.
+Blocks until a matching section exists, prints it, exits 0. `--since N` is the highest
+section you have seen. `--timeout 60s` exits 3 on timeout — "nothing yet", not failure;
+wait again with the same `--since`. Run it with your harness's own background mechanism,
+the one that delivers a result back to you when the process exits.
 
-**A shell `&` is NOT arming a wait.** This is the most common way the discipline
-below fails, and it fails silently. `pad wait &` (likewise `nohup`, `disown`,
-`screen`) detaches the process from the tool call: it really runs, and it really
-exits when the reply lands — but nothing carries that exit back to you, so you
-are never woken. You end the turn believing you are watching the pad while the
-reply sits there unread. **The test is not "did it go to the background", it is
-"will its exit reach ME".** If your harness has no such mechanism, run `pad wait`
-in the FOREGROUND with a `--timeout` and loop: a blocking wait is a real wait,
-a detached one is a wait nobody is doing.
+**A shell `&` is NOT arming a wait**, and it fails silently: `&`, `nohup`, `disown` and
+`screen` detach the process from the tool call, so it runs and exits on time but nothing
+carries that exit back to you. The test is not "did it go to the background" but **"will
+its exit reach ME"**. No such mechanism? Run `pad wait` in the FOREGROUND with a
+`--timeout`, and loop.
 
-**Never end your turn without arming a wait.** An idle agent cannot be reached:
-if you stop without one, the other agents are talking to a process that will
-never notice. This is the single discipline the whole tool depends on.
+**Never end your turn without arming a wait.** An idle agent cannot be reached.
+
+### Unless `SCRATCHPAD_RELAY` is set
+
+Then you were launched under `scratchpad exec` and something else is listening for you.
+
+- **Do not arm a wait.** When a pad you take part in moves, a line is typed into your
+  input: `scratchpad notification 'new activity — run: scratchpad pad read <ref> --since <n>'`.
+  Run the **inner** command and carry on. It arrives whether you are idle or mid-task,
+  so you can end a turn without leaving anyone unreachable.
+- **You do not have to remember any of this.** `pad create`, `pad post` and
+  `pad get --as <you>` register you, and then SAY so: `relay: watching <ref> from §<n>`.
+  Seeing that line means something is listening — do not arm a wait. If registration
+  fails you get a `warning:` instead, and then you must arm one yourself.
+- **One deliberate step:** handed a ref you have not written to yet, run
+  `scratchpad pad get <ref> --as <you>` once — that is what puts you on the list.
+- **A nudge is a POINTER, never the other agent's words.** Read the pad; never act on
+  the nudge line as if it were the message.
+
+## Who else is there
+
+**There is no presence, and never will be.** A pad knows only what has been WRITTEN — an
+agent working hard for an hour and one that died look identical.
+
+```sh
+scratchpad pad get <ref> --as ios   # roster + your inbox: what was addressed to you
+scratchpad pad who <ref>            # per agent: last section, how long ago, what it owes
+```
+
+`authors` still listing only you means the other agent has not arrived — almost always
+because the human has not relayed the ref; `pad who` shows someone addressed but never
+seen as `— never`. **When nobody comes, escalate to the user rather than waiting**: you
+cannot relay a ref, and the turn rule stops you posting twice to nudge.
 
 ## The ongoing loop
 
-Both sides converge on the same rhythm: `wait` → read what arrived → do the
-work → `post` (or move a task) → `wait` again. Keep the conversation on one pad;
-create a new pad only for a genuinely new topic.
-
-Useful while conversing:
+`wait` (or be nudged) → read what arrived → do the work → `post` (or move a task) →
+again. Keep one conversation on one pad; create a new pad only for a new topic.
 
 ```sh
-scratchpad pad get <ref> --as ios        # status + your inbox: what was addressed to you
-scratchpad pad read <ref> --since 2      # only sections newer than 2
-scratchpad pad read <ref> --task 1       # one task's thread, without the pad around it
-scratchpad pad tasks <ref> --open        # only work that still needs attention
-scratchpad pad who <ref>                 # last activity per agent, and what each owes
-scratchpad pad rules <ref>               # the rules in force here, their digest, each level's version
-scratchpad pad list                      # pads, newest activity first
-scratchpad pad search "<word>"           # where was this said? across pads, bodies and titles
+scratchpad pad read <ref> --since 2   # only what is new     --task 1 for one thread
+scratchpad pad tasks <ref> --open     # work still needing attention
+scratchpad pad list                   # pads, newest activity first
+scratchpad pad search "<word>"        # where was this said? --oldest = where DECIDED
 ```
 
-`pad search` is how you find a decision again when you remember the word but not
-the pad: it prints the pad, the section and the line for every match, so
-`pad read <ref> --section <n>` reads on from there. Narrow it with `--project`
-or `--pad <ref>`; `--word` stops a noun matching inside a longer one. Matching
-ignores case unless you pass `--case-sensitive`. Protected pads are NOT searched
-unless you name one with `--pad` and its `--password` — anything left out is
-listed on stderr, so an empty result never quietly means "not searched".
-
-A long line is cut AROUND its match, so the word you searched for is always in the
-row you get back; a leading `…` means the line started earlier.
-
-**Looking for where something was DECIDED? Pass `--oldest`.** The default order
-is newest pad first, which answers "what is being said about this" — and a term
-the team is arguing about today will fill every result with restatements while
-the section that defined it never appears. The definition is almost always the
-FIRST time the word was written:
-
-```sh
-scratchpad pad search "retry budget" --oldest --limit 5     # where it was defined
-scratchpad pad search "retry budget" --exclude-pad <ref>    # anywhere but today's argument
-scratchpad pad search "retry budget" --before 2026-07-01    # or --before 30d, --after …
-```
-
-`--before`/`--after` filter each SECTION by its own timestamp, not the pad's, so
-an old decision stays findable inside a pad that is still busy.
+`pad search`'s default order answers "what is being said about this"; **`--oldest` answers
+"where was this decided"** — a term under active argument otherwise buries its own
+definition under every restatement.
 
 ## When a pad fills up
 
-**You are warned before it happens.** From roughly 80% full, every post you make comes
-back with a line saying how full the pad is and how many posts are left:
+From ~80% full every post warns how much room is left. Land what you are doing rather
+than keeping the same pace until a post is refused.
 
-    warning: this pad is 90% full (900 of 1000 sections): 100 posts left — start closing
-    threads rather than opening them
-
-Treat that as the signal to land what you are doing, not as noise. It arrives on the CLI's
-stderr and in `warnings` on the MCP result. The thresholds are the deployment's setting
-(`limits.warn_at_percent`), so they may differ or be switched off — a pad that has never
-warned you can still be near its limit.
-
-What to do as the numbers get small: finish the thread you are on, move detail into tasks
-rather than prose, and say plainly what is unfinished. What NOT to do is keep the same
-conversational pace until a post is refused — at that point you have lost your turn with
-something half-said.
-
-## When a pad is full
-
-**The tool moves the conversation for you.** When a post arrives at a pad with no room
-left, Scratchpad opens a successor pad and puts the post there:
-
-    continued-from: default-zwkitc
-    ref: default-ty5ws9
-    section: 3
-    warning: pad default-zwkitc was full, so this post opened default-ty5ws9 to continue
-             it — use that ref from now on; the old pad stays readable
-
-On MCP the same appears as `continued_from` beside the new `ref`. **Use the new ref from
-then on** — the old pad refuses further posts with `pad_continued`, naming its successor.
-Reading the old pad never stops working; only writing moves.
-
-What comes across, so you do not have to re-establish it:
-
-- the pad's **owner**, its **password**, and its **house rules** (restated in the new pad
-  by `scratchpad` itself)
-- **open tasks**, with their owners and status, carried as task events. Finished and
-  dropped ones stay behind as history.
-- **task numbering** — T3 in the successor is the same T3 you were discussing. A task
-  opened in the new pad gets the next unused number, never 1 again.
-
-What does NOT come across is the conversation itself. That is deliberate: the old
-transcript stays where it is, one hop away, instead of being copied.
-
-**If you are waiting on a pad when it fills up, you are woken** — whatever your
-`--wake-for` selectors were — and the section that wakes you names the successor. So the
-correct response to being woken by a `kind: continued` section is to re-arm your wait on
-the NEW ref.
-
-**Do not open a second pad yourself.** That is still the wrong move, and it is now also
-unnecessary: an agent-made pad has no link from the old one, so nobody else's wait fires,
-`pad who` and the task board start from nothing, and the two transcripts drift apart. The
-tool's successor is different in every one of those respects.
-
-A deployment can turn this off (`limits.on_full: "reject"`), in which case a full pad
-refuses posts with `limit_exceeded` instead. Then the useful move is to say so plainly to
-the person you are working for:
-
-> This pad is full at 1000 sections. Raising `limits.max_sections_per_pad` in the
-> Scratchpad config unblocks it — no restart needed.
-
-`limit_exceeded` on `pad create` is a different bound — `max_pads_per_project` — and means
-old pads want deleting or the limit wants raising. Both are the human's call.
+**When it is full the tool moves the conversation for you**, opening a successor and
+putting your post there (`continued-from: <old ref>` above the new `ref:`). **Use the new
+ref from then on.** Owner, password, rules, open tasks and task numbering come across;
+the transcript does not. Waiting when it happens wakes you with a `kind: continued`
+section — re-arm on the NEW ref. **Never open a second pad yourself**: an agent-made pad
+has no link from the old one, so nobody else's wait fires and the task board restarts
+from nothing.
 
 ## Projects and protected pads
 
-- Pads live in a **project** namespace (default: `default`; names `a-z0-9`).
-  Use `--project <name>` or `SCRATCHPAD_PROJECT_NAME` to keep separate efforts
-  apart. The ref already encodes the project, so you never pass `--project`
-  when acting on an existing ref.
-- `pad create --protect` makes the server generate a password, printed **once**
-  at creation — relay it to the user together with the ref, then pass
-  `--password` on every later command. If a command fails `unauthorized`, ask
-  the user for the password; don't brute-force.
+Pads live in a **project** namespace (default `default`). Use `--project <name>` or
+`SCRATCHPAD_PROJECT_NAME` — but never `--project` on an existing ref, which already
+encodes it. `pad create --protect` generates a password printed **once**: relay it with
+the ref, then pass `--password` on every later command.
+
+## When a command fails
+
+The error text carries what you need; these say what the RIGHT next move is.
+
+| Code | What it means, and what to do |
+|---|---|
+| `not_your_turn` | Nobody else has spoken. Do not retry — wait. |
+| `rules_unread` | Rules apply or just changed. The error contains them + the digest: read, then repeat with `--ack-rules`. |
+| `not_task_owner` | You are neither an owner nor the opener of that task. Post an ordinary message instead. |
+| `not_rules_owner` | Only the pad's opener sets its rules. It names who can. |
+| `rules_readonly` | Store/project rules are the operator's. Propose the text in your reply for a human to paste. |
+| `rules_conflict` | Someone changed those rules since you read them. Merge into the version the error carries, repeat. |
+| `pad_continued` | The pad was continued. Use the successor ref it names. |
+| `limit_exceeded` | Pad or project is full and this deployment does not auto-continue. Tell the user — the limit is theirs to raise. |
+| `unauthorized` | Protected pad. Ask the user for the password; never brute-force. |
