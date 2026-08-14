@@ -11,6 +11,7 @@ import (
 
 	"github.com/madnh/scratchpad/internal/appinfo"
 	"github.com/madnh/scratchpad/internal/config"
+	"github.com/madnh/scratchpad/internal/pad"
 	"github.com/madnh/scratchpad/internal/store"
 )
 
@@ -98,8 +99,13 @@ func testRelay(t *testing.T) (*store.Store, *Server, *collector) {
 
 func mustRegister(t *testing.T, srv *Server, ref, author string, since int) {
 	t.Helper()
+	mustRegisterWake(t, srv, ref, author, since, []string{"me"})
+}
+
+func mustRegisterWake(t *testing.T, srv *Server, ref, author string, since int, wake []string) {
+	t.Helper()
 	if err := Register(srv.Socket(), Registration{
-		Ref: ref, Author: author, Since: since, Wake: []string{"me"},
+		Ref: ref, Author: author, Since: since, Wake: wake,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -253,6 +259,57 @@ func TestOwnPostDoesNotNudge(t *testing.T) {
 	// backend answers, and re-registers the way `pad post` does.
 	post(t, s, p.Ref(), "backend", "a", "y\n")
 	mustRegister(t, srv, p.Ref(), "backend", 3)
+	c.quiet(t, 700*time.Millisecond)
+}
+
+// A relay registration follows both sides of task work without subscribing to the whole
+// task stream. The opener needs the owner's unaddressed progress event; task traffic that
+// another coordinator opened remains unrelated and must stay quiet.
+func TestTaskOpenerIsNudgedOnlyForTasksItOpened(t *testing.T) {
+	s, srv, c := testRelay(t)
+	p, _, err := s.CreatePad(store.CreateRequest{
+		Project: "proj", Author: "pm", Title: "start", Content: "hello\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustRegisterWake(t, srv, p.Ref(), "pm", 1, []string{"me", "mine", "opened"})
+
+	opened, err := s.Post(store.PostRequest{
+		Ref: p.Ref(), Author: "pm", Title: "ios work", Content: "assigned\n",
+		Meta:     pad.Meta{Kind: pad.KindTask, To: []string{"ios"}, Status: pad.StatusOpen},
+		OpenTask: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.quiet(t, 300*time.Millisecond) // the opener's own task-open event is not news
+
+	if _, err := s.Post(store.PostRequest{
+		Ref: p.Ref(), Author: "ios", Title: "progress", Content: "working\n",
+		Meta: pad.Meta{Kind: pad.KindTask, Task: opened.Task, Status: pad.StatusWIP},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if line := c.next(t); !strings.Contains(line, "--since 1") {
+		t.Fatalf("opener nudge does not point at its unread task events: %q", line)
+	}
+
+	mustRegisterWake(t, srv, p.Ref(), "pm", 3, []string{"me", "mine", "opened"})
+	unrelated, err := s.Post(store.PostRequest{
+		Ref: p.Ref(), Author: "ops", Title: "android work", Content: "assigned\n",
+		Meta:     pad.Meta{Kind: pad.KindTask, To: []string{"android"}, Status: pad.StatusOpen},
+		OpenTask: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Post(store.PostRequest{
+		Ref: p.Ref(), Author: "android", Title: "progress", Content: "working\n",
+		Meta: pad.Meta{Kind: pad.KindTask, Task: unrelated.Task, Status: pad.StatusWIP},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	c.quiet(t, 700*time.Millisecond)
 }
 

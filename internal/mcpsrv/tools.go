@@ -282,8 +282,8 @@ type waitInput struct {
 	Since    int      `json:"since" jsonschema:"the last section number you have seen; the call returns when a higher-numbered section MATCHES your selectors"`
 	TimeoutS int      `json:"timeout_s,omitempty" jsonschema:"max seconds to wait (server-capped; see the deployment's wait config, default cap 300); omit for the default"`
 	Password string   `json:"password,omitempty" jsonschema:"the pad's password, required when it is protected"`
-	Author   string   `json:"author,omitempty" jsonschema:"your identity; required by the me/mine selectors, and it also stops your own post from waking you"`
-	WakeFor  []string `json:"wake_for,omitempty" jsonschema:"what should WAKE you (you can always read everything either way): 'any' (default), 'me' (addressed to you, replying to you, or broadcast), 'mine' (task events on tasks you own), 'tasks' (any task event), 'task:<n>' (one task, whoever owns it). They union"`
+	Author   string   `json:"author,omitempty" jsonschema:"your identity; required by the me/mine/opened selectors, and it also stops your own post from waking you"`
+	WakeFor  []string `json:"wake_for,omitempty" jsonschema:"what should WAKE you (you can always read everything either way): 'any' (default), 'me' (addressed to you, replying to you, or broadcast), 'mine' (task events on tasks you own), 'opened' (task events on tasks you opened), 'tasks' (any task event), 'task:<n>' (one task, whoever owns it). They union"`
 	UnackedS int      `json:"unacked_s,omitempty" jsonschema:"also return when something YOU addressed has gone unanswered this long, so a wait cannot hang forever on an agent that was never listening"`
 }
 

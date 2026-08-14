@@ -752,7 +752,7 @@ func (s *Store) Wait(ctx context.Context, req WaitRequest) (*WaitResult, error) 
 		req.Wake = pad.DefaultWake()
 	}
 	if req.Wake.NeedsAuthor() && req.Author == "" {
-		return nil, coded(CodeInvalidInput, "the me/mine wake selectors need an author: pass --as (or the author parameter)")
+		return nil, coded(CodeInvalidInput, "the me/mine/opened wake selectors need an author: pass --as (or the author parameter)")
 	}
 	deadline := time.Time{}
 	if req.Timeout > 0 {

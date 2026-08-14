@@ -576,6 +576,7 @@ Selectors form a union: a comma list on the CLI, an array over MCP.
 | `any` | any new section — today's behaviour, and the default |
 | `me` | `to` contains me ∪ `re` points at a section I wrote ∪ broadcast |
 | `mine` | a task event on a task I own |
+| `opened` | a task event on a task I opened |
 | `task:<n>` | a task event on that task, whoever owns it |
 | `tasks` | any task event — for a coordinator |
 
@@ -587,8 +588,10 @@ where it belongs.
 
 `mine` is not covered by `me`: the section that *opens* a task carries `to`, but a
 co-owner's progress update usually does not repeat it — and that update is exactly what
-a co-owner needs to see. `task:<n>` deliberately ignores ownership: an agent blocked on
-someone else's task needs to know when it lands.
+a co-owner needs to see. `opened` is the coordinator's narrow counterpart: it follows
+only tasks that author opened instead of every task event on the pad. `task:<n>`
+deliberately ignores ownership: an agent blocked on someone else's task needs to know
+when it lands.
 
 The selector is named `wake_for` (`--wake-for`) rather than `for`, because the one thing
 it must not be confused with is what the caller may *read*.
@@ -855,7 +858,7 @@ output: { ref, sections: [ { n, author, title, ts, content, kind?, to?, re?, tas
 
 ```
 input:  { ref, since, timeout_s?, password?,
-           author?, wake_for?: ["any"|"me"|"mine"|"tasks"|"task:<n>"], unacked_s? }
+           author?, wake_for?: ["any"|"me"|"mine"|"opened"|"tasks"|"task:<n>"], unacked_s? }
 output: { ref, changed: bool, reason?: "match" | "unacked", section_count, last_author,
           sections?: [ { n, author, title, ts, content, ... } ],   # the MATCHING sections
           skipped?:  [ { n, author, title, ts, ... } ],            # TOC of everything else
@@ -1095,7 +1098,7 @@ scratchpad
     │              [--author <a>] [--kind K] [--before <when>] [--after <when>]
     │              [--oldest] [--regexp] [--word] [--case-sensitive] [--limit N]
     ├── wait     <ref> --since N [--timeout 10m]   # for a background CLI wait
-    │              [--as <author>] [--wake-for any|me|mine|tasks|task:N,…] [--unacked 15m]
+    │              [--as <author>] [--wake-for any|me|mine|opened|tasks|task:N,…] [--unacked 15m]
     ├── tasks    <ref> [--task N] [--open]         # the derived board
     ├── rules    <ref> [--set <text|->] [--replace] [--as <author>]   # rules in force / the pad's own
     ├── who      <ref>                             # last activity + what each author owes
@@ -1762,7 +1765,7 @@ laid on top of the current shape.
 | Phase | Contents |
 |---|---|
 | **1** | `internal/pad` split + Selector + the `make check` invariant; the metadata line (`to`, `re`); `--wake-for`; `--unacked`; the post-time silence warning; `pad who`; UI routing chips, reply links, participants strip |
-| **2** | `kind: task` + ownership + the two-level fold; `pad tasks` / `pad_tasks`; task selectors (`mine`, `task:<n>`, `tasks`); UI Tasks tab, task thread filter, `/api/stuck`, notification filters |
+| **2** | `kind: task` + ownership + the two-level fold; `pad tasks` / `pad_tasks`; task selectors (`mine`, `opened`, `task:<n>`, `tasks`); UI Tasks tab, task thread filter, `/api/stuck`, notification filters |
 | **3** | `kind: rules` + the three levels + the `_` naming law; `rules` / `project rules` / `pad rules`; `--ack-rules` and the `rules_unread` gate; `pad_rules`; the reserved `scratchpad` author; UI rules dialog and the three `PUT`s |
 | **3b** | Who may CHANGE rules, and on top of what: the marker's `rules` policy group (`store`/`project` = `ui`, `pad` = `opener`); per-level versions + `--if-digest` / `rules_digest`; `rules_conflict` / `not_rules_owner` / `rules_readonly`; `--as` required by `pad rules --set`; the UI's merge-on-conflict editor |
 

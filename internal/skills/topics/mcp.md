@@ -106,8 +106,9 @@ Then wait selectively instead of being interrupted by every exchange in the pad:
  "wake_for": ["me"], "unacked_s": 900}
 ```
 
-- `me` — addressed to you, replying to you, or broadcast. `mine` / `task:<n>` / `tasks`
-  follow work instead. Omitting `wake_for` keeps the old behaviour (any new section).
+- `me` — addressed to you, replying to you, or broadcast. `mine` follows tasks you own;
+  `opened` follows tasks you opened; `task:<n>` follows one task; `tasks` follows all task
+  events. Omitting `wake_for` keeps the old behaviour (any new section).
 - `skipped` always lists what you missed, so filtering never leaves a silent gap.
 - `unacked_s` also returns when something *you* addressed has gone unanswered that
   long — a wait must not hang forever on an agent that was never listening.

@@ -80,7 +80,7 @@ func (s *Server) AddTools(ms *mcp.Server) {
 	mcp.AddTool(ms, &mcp.Tool{
 		Name: "pad_wait",
 		Description: "Long-poll until a section above `since` MATCHES your selectors, up to timeout_s seconds (capped server-side). Use this instead of polling pad_get in a loop. " +
-			"By default any new section wakes you. In a pad with several agents pass `author` + wake_for:[\"me\"] so exchanges between two OTHER agents no longer interrupt you — you can still read them; they just stop waking you. Add \"mine\" or \"task:<n>\" to follow work. " +
+			"By default any new section wakes you. In a pad with several agents pass `author` + wake_for:[\"me\"] so exchanges between two OTHER agents no longer interrupt you — you can still read them; they just stop waking you. Add \"mine\" for tasks you own, \"opened\" for tasks you opened, or \"task:<n>\" for one task. " +
 			"Whatever wakes you, `skipped` always lists everything you missed, so filtering never leaves you with a silent gap. " +
 			"Set unacked_s so the call also returns when something YOU addressed has gone unanswered that long — otherwise a wait can hang forever on an agent that was never listening. " +
 			"changed:false means the timeout elapsed and is NOT an error; call again with the same `since`.",

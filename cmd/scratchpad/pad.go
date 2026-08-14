@@ -732,7 +732,7 @@ func newPadWaitCmd() *cobra.Command {
 	f.IntVar(&since, "since", 0, "the last section number you have seen (required)")
 	f.StringVar(&timeout, "timeout", "", "give up after this long, e.g. 90s, 10m, 2h (empty = wait until interrupted)")
 	f.StringSliceVar(&wakeFor, "wake-for", nil,
-		"what should WAKE you: any (default), me, mine, tasks, task:<n> — comma-separated, they union")
+		"what should WAKE you: any (default), me, mine, opened, tasks, task:<n> — comma-separated, they union")
 	f.StringVar(&unacked, "unacked", "", "also return when something you addressed has gone unanswered this long, e.g. 15m")
 	f.StringVar(&password, "password", "", "the pad's password (when protected)")
 	_ = cmd.MarkFlagRequired("since")

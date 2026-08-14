@@ -62,7 +62,7 @@ func TestRulesAndNoticesWakeEveryone(t *testing.T) {
 		sec{"pm", "house rules", Meta{Kind: KindRules}},
 		sec{SystemAuthor, "rules changed", Meta{Kind: KindNotice}},
 	)
-	for _, spec := range [][]string{{"me"}, {"mine"}, {"tasks"}, {"task:1"}} {
+	for _, spec := range [][]string{{"me"}, {"mine"}, {"opened"}, {"tasks"}, {"task:1"}} {
 		wake, err := ParseWake(spec)
 		if err != nil {
 			t.Fatal(err)
@@ -102,6 +102,31 @@ func TestWakeMineIsNotCoveredByMe(t *testing.T) {
 	mine, _ := ParseWake([]string{"mine"})
 	if !p.Wakes(progress, "android", mine) {
 		t.Fatal("a co-owner should be woken by movement on their own task")
+	}
+}
+
+// TestWakeOpened follows only work the coordinator handed out. `tasks` is too broad
+// for an automatic relay registration: it would interrupt the coordinator for work
+// another agent opened on the same pad.
+func TestWakeOpenedIgnoresUnrelatedTasks(t *testing.T) {
+	p := build(
+		sec{"pm", "kickoff", Meta{}},
+		sec{"pm", "ios work", task(1, []string{"ios"}, StatusOpen)},
+		sec{"ios", "ios progress", task(1, nil, StatusWIP)},
+		sec{"ops", "android work", task(2, []string{"android"}, StatusOpen)},
+		sec{"android", "android progress", task(2, nil, StatusWIP)},
+	)
+	wake, err := ParseWake([]string{"opened"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Wakes(p.Sections[2], "pm", wake) {
+		t.Fatal("the opener must wake when an owner moves its task")
+	}
+	for _, n := range []int{4, 5} {
+		if p.Wakes(p.Sections[n-1], "pm", wake) {
+			t.Errorf("§%d belongs to a task opened by somebody else", n)
+		}
 	}
 }
 
@@ -145,6 +170,9 @@ func TestParseWakeRejectsNonsense(t *testing.T) {
 	}
 	if _, err := ParseWake([]string{"me"}); err != nil {
 		t.Fatal(err)
+	}
+	if w, err := ParseWake([]string{"opened"}); err != nil || !w.NeedsAuthor() {
+		t.Fatalf("opened must parse and require an author: %+v, %v", w, err)
 	}
 }
 

@@ -22,6 +22,7 @@ type Wake struct {
 	Any     bool  // any new section — the default, and today's behaviour
 	Me      bool  // addressed to me, replying to me, or broadcast
 	Mine    bool  // a task event on a task I own
+	Opened  bool  // a task event on a task I opened
 	Tasks   bool  // any task event
 	TaskNos []int // task events on these specific tasks, whoever owns them
 }
@@ -31,17 +32,17 @@ type Wake struct {
 func DefaultWake() Wake { return Wake{Any: true} }
 
 // NeedsAuthor reports whether the selector set can only be evaluated with an identity.
-func (w Wake) NeedsAuthor() bool { return w.Me || w.Mine }
+func (w Wake) NeedsAuthor() bool { return w.Me || w.Mine || w.Opened }
 
 // Empty reports whether nothing was selected, so a caller can fall back to the default.
 // Wake holds a slice and therefore is not comparable with ==, which is exactly the kind
 // of thing worth having a method for rather than rediscovering at each call site.
 func (w Wake) Empty() bool {
-	return !w.Any && !w.Me && !w.Mine && !w.Tasks && len(w.TaskNos) == 0
+	return !w.Any && !w.Me && !w.Mine && !w.Opened && !w.Tasks && len(w.TaskNos) == 0
 }
 
-// ParseWake reads selector specs: "any", "me", "mine", "tasks", "task:<n>". An empty
-// list means the default.
+// ParseWake reads selector specs: "any", "me", "mine", "opened", "tasks",
+// "task:<n>". An empty list means the default.
 func ParseWake(specs []string) (Wake, error) {
 	if len(specs) == 0 {
 		return DefaultWake(), nil
@@ -61,6 +62,8 @@ func ParseWake(specs []string) (Wake, error) {
 			w.Me = true
 		case spec == "mine":
 			w.Mine = true
+		case spec == "opened":
+			w.Opened = true
 		case spec == "tasks":
 			w.Tasks = true
 		case strings.HasPrefix(spec, "task:"):
@@ -71,7 +74,7 @@ func ParseWake(specs []string) (Wake, error) {
 			w.TaskNos = append(w.TaskNos, n)
 		default:
 			return Wake{}, Coded(CodeInvalidInput,
-				"unknown wake selector %q (want any, me, mine, tasks or task:<n>)", spec)
+				"unknown wake selector %q (want any, me, mine, opened, tasks or task:<n>)", spec)
 		}
 	}
 	return w, nil
@@ -121,6 +124,9 @@ func (p *Pad) Wakes(sec Section, author string, w Wake) bool {
 		if w.Mine && p.ownsTask(sec.Task, author) {
 			return true
 		}
+		if w.Opened && p.openedTask(sec.Task, author) {
+			return true
+		}
 	}
 	return false
 }
@@ -168,4 +174,18 @@ func (p *Pad) ownsTask(taskNo int, author string) bool {
 		}
 	}
 	return false
+}
+
+// openedTask reports whether author opened the task — the `opened` selector.
+//
+// An opener is deliberately not an owner: opening work assigns it to somebody else.
+// That makes this a separate question from ownsTask, and it is the question a
+// coordinator needs answered when an owner posts a progress event without addressing
+// anyone.
+func (p *Pad) openedTask(taskNo int, author string) bool {
+	if taskNo == 0 || author == "" {
+		return false
+	}
+	t, ok := p.Task(taskNo)
+	return ok && t.Opener == author
 }

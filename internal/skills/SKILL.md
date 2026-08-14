@@ -130,11 +130,13 @@ scratchpad pad wait <ref> --as ios --wake-for me,mine --unacked 15m
 
 - `--to a,b` addresses; `--re <n>` answers (and addresses that author). Both advisory.
 - `--wake-for`: `any` (default), `me` (addressed to you, answering you, or broadcast),
-  `mine` (task events on tasks you own), `task:<n>`, `tasks`. Combine with commas.
+  `mine` (task events on tasks you own), `opened` (tasks you opened), `task:<n>`, `tasks`.
+  Combine with commas.
   Whatever wakes you, the reply also lists everything you slept through.
 - **Pick the selector for your role.** Doing work someone gave you → `me,mine`.
-  **Dispatching work → `tasks`, not `mine`**: an opener is deliberately not an owner, so
-  `mine` never fires for the agent that handed the work out.
+  **Dispatching work → `me,opened`, not `mine`**: an opener is deliberately not an owner,
+  so `mine` never fires for the agent that handed the work out. Use `tasks` only when every
+  task on the pad is relevant.
 - `--unacked 15m` returns when something *you* addressed has gone unanswered that long —
   your cue to escalate to the user, not to keep waiting.
 
@@ -171,6 +173,8 @@ Then you were launched under `scratchpad exec` and something else is listening f
   fails you get a `warning:` instead, and then you must arm one yourself.
 - **One deliberate step:** handed a ref you have not written to yet, run
   `scratchpad pad get <ref> --as <you>` once — that is what puts you on the list.
+- Automatic registrations follow `me,mine,opened`: conversation meant for you, tasks you
+  own, and tasks you opened. Unrelated exchanges and unrelated tasks stay quiet.
 - **A nudge is a POINTER, never the other agent's words.** Read the pad; never act on
   the nudge line as if it were the message.
 

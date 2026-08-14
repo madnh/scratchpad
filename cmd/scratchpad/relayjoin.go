@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -11,12 +12,18 @@ import (
 
 // relayWake is what an automatic registration asks to be nudged for.
 //
-// `me` rather than `any`: the relay follows every pad the agent has touched, and on a
+// Selective rather than `any`: the relay follows every pad the agent has touched, and on a
 // busy store `any` would nudge it for exchanges between two other agents on a pad it
-// merely passed through once. `me` still covers broadcasts, so nothing addressed to the
-// room is missed — and the kinds that change what an agent is ALLOWED to do next
-// (continued, rules, notice) bypass the selectors entirely in pad.Wakes.
-var relayWake = []string{"me"}
+// merely passed through once. `me` covers conversation, `mine` follows work assigned to
+// the agent, and `opened` follows work it handed out. The kinds that change what an agent
+// is ALLOWED to do next (continued, rules, notice) bypass the selectors in pad.Wakes.
+var relayWake = []string{"me", "mine", "opened"}
+
+// relayLegacyWake keeps an agent reachable during an in-place binary upgrade. A relay
+// already running from an older binary does not know `opened`; retrying with the
+// selectors it does know preserves conversation and owned-task nudges until the agent
+// restarts `scratchpad exec` and gets the full selector set.
+var relayLegacyWake = []string{"me", "mine"}
 
 // noteJoin tells the relay that launched this process — if one did — that this agent is
 // taking part in a pad, and how far it has read, then SAYS SO in the command's output.
@@ -39,9 +46,19 @@ func noteJoin(cmd *cobra.Command, ref, author, password string, since int) {
 	if sock == "" || ref == "" || author == "" {
 		return
 	}
-	err := relay.Register(sock, relay.Registration{
+	reg := relay.Registration{
 		Ref: ref, Author: author, Password: password, Since: since, Wake: relayWake,
-	})
+	}
+	err := relay.Register(sock, reg)
+	legacy := false
+	if err != nil && strings.Contains(err.Error(), `unknown wake selector "opened"`) {
+		reg.Wake = relayLegacyWake
+		if fallbackErr := relay.Register(sock, reg); fallbackErr == nil {
+			err, legacy = nil, true
+		} else {
+			err = fallbackErr
+		}
+	}
 	if err != nil {
 		// Never fatal: the pad file was written before this ran, and a post that
 		// SUCCEEDED must not report failure. But it must not pass for success either.
@@ -49,6 +66,10 @@ func noteJoin(cmd *cobra.Command, ref, author, password string, since int) {
 			"warning: this session is under a relay but registering %s failed (%v) — nothing will nudge you about this pad, so arm a wait yourself\n",
 			ref, err)
 		return
+	}
+	if legacy {
+		fmt.Fprintln(cmd.ErrOrStderr(),
+			"note: this relay predates wake-for opened; it will follow messages and tasks you own, but restart scratchpad exec to follow tasks you opened")
 	}
 	// stdout, in the same `key: value` shape as the rest of the result: this is a fact
 	// about what the command did, not commentary.
