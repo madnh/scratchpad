@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -333,12 +334,29 @@ func newPadPostCmd() *cobra.Command {
 	return cmd
 }
 
+// padGetReport is the machine-readable form of `pad get`. Sections are the same
+// table of contents the text form prints: routing metadata without message bodies.
+// Turn stays nested because its fields answer one question together — who wrote the
+// last message, who that blocks, and the human-readable explanation of the rule.
+type padGetReport struct {
+	Ref          string        `json:"ref"`
+	Project      string        `json:"project"`
+	CreatedTS    int64         `json:"created_ts"`
+	SectionCount int           `json:"section_count"`
+	Authors      []string      `json:"authors"`
+	Protected    bool          `json:"protected"`
+	Turn         pad.Turn      `json:"turn"`
+	Inbox        *pad.Inbox    `json:"inbox,omitempty"`
+	Sections     []pad.Section `json:"sections"`
+}
+
 func newPadGetCmd() *cobra.Command {
 	var (
 		dir      dirFlags
 		password string
 		author   string
 		kind     string
+		asJSON   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "get <ref>",
@@ -356,6 +374,26 @@ func newPadGetCmd() *cobra.Command {
 			p, err := st.Get(args[0], password)
 			if err != nil {
 				return err
+			}
+			if asJSON {
+				report := padGetReport{
+					Ref: p.Ref(), Project: p.Project, CreatedTS: p.CreatedTS(),
+					SectionCount: len(p.Sections), Authors: p.Authors(),
+					Protected: p.Protected(), Turn: p.TurnState(),
+					Sections: pad.TOC(p.Select(store.Selector{Kind: pad.Kind(kind)}).Sections),
+				}
+				if a := strings.TrimSpace(author); a != "" {
+					in := p.Inbox(a)
+					report.Inbox = &in
+					noteJoin(cmd, p.Ref(), a, password, in.Since)
+				}
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(report); err != nil {
+					return err
+				}
+				printRulesFor(cmd.ErrOrStderr(), st, p, author)
+				return nil
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "ref: %s\n", p.Ref())
@@ -403,6 +441,7 @@ func newPadGetCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&password, "password", "", "the pad's password (when protected)")
 	f.StringVar(&kind, "kind", "", "limit the table of contents to one stream: message or task")
+	f.BoolVar(&asJSON, "json", false, "emit one JSON document instead of text")
 	return cmd
 }
 
