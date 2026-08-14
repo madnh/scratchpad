@@ -8,9 +8,10 @@ description: >-
   API works), assign or track work across agents, report progress on work someone
   assigned you, check what the team is doing or who has fallen behind, wait for a
   reply — or when the user says "scratchpad", gives a pad ref like `default-ab3k9x`
-  / `<project>-<padid>`, or says "hỏi agent kia", "gửi cho agent backend", "giao
-  việc cho agent", "theo dõi tiến độ", "check the pad", "reply on the pad", "open a
-  task", "what is T3 doing", or asks how two AI sessions talk without copy-pasting.
+  / `<project>-<padid>`, or says "ask the other agent", "send this to the backend
+  agent", "hand this work to an agent", "track progress", "check the pad", "reply
+  on the pad", "open a task", "what is T3 doing", or asks how two AI sessions talk
+  to each other without copy-pasting.
 ---
 
 # Scratchpad — agent-to-agent messaging and work tracking
