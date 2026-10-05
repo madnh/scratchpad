@@ -383,3 +383,37 @@ func TestRegistrationWithoutAMarkStartsFromNow(t *testing.T) {
 		t.Fatalf("mark was not taken from the pad as it stood: %q", line)
 	}
 }
+
+// Looking at a pad is not reading it. `pad get --as` registers on every call with the
+// agent's last POST as the mark, so an agent that follows a nudge, checks its inbox and
+// posts nothing comes back at the very mark it was nudged about. That must not re-nudge:
+// it was the loop every agent under exec fell into — nudge, look, nudge, look — with the
+// same `--since` each time. Only a mark that has ADVANCED clears the floor.
+func TestReregisterAtSameMarkDoesNotRenudge(t *testing.T) {
+	s, srv, c := testRelay(t)
+	p, _, err := s.CreatePad(store.CreateRequest{
+		Project: "proj", Author: "backend", Title: "start", Content: "hello\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustRegister(t, srv, p.Ref(), "backend", 1)
+	post(t, s, p.Ref(), "frontend", "a question", "x\n")
+	if line := c.next(t); !strings.Contains(line, "--since 1") {
+		t.Fatalf("first nudge: %q", line)
+	}
+
+	// The agent looks at the pad (pad get --as backend) — same mark, nothing posted.
+	mustRegister(t, srv, p.Ref(), "backend", 1)
+	mustRegister(t, srv, p.Ref(), "backend", 1)
+	c.quiet(t, 1500*time.Millisecond)
+
+	// Registration at the same mark must still not lose the pad: fresh traffic after the
+	// floor is the re-nudge's job, and a mark that advances clears it at once.
+	post(t, s, p.Ref(), "backend", "an answer", "y\n")
+	mustRegister(t, srv, p.Ref(), "backend", 3)
+	post(t, s, p.Ref(), "frontend", "thanks", "z\n")
+	if line := c.next(t); !strings.Contains(line, "--since 3") {
+		t.Fatalf("nudge after the mark advanced: %q", line)
+	}
+}

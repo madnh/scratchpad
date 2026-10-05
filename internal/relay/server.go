@@ -302,9 +302,15 @@ func (s *Server) serveConn(conn net.Conn) {
 	_ = json.NewEncoder(conn).Encode(res)
 }
 
-// register records (or refreshes) a subscription. Refreshing is also the ONLY signal the
-// relay gets that the agent is alive and has caught up on that pad, so it clears the
-// pad's outstanding nudge.
+// register records (or refreshes) a subscription.
+//
+// A refresh whose `since` has ADVANCED is the only signal the relay gets that the agent
+// caught up on that pad, so that — and only that — clears the pad's outstanding nudge. A
+// refresh at the same mark proves nothing: `pad get --as` registers on every call with
+// the agent's last POST as the mark, so an agent that reads a nudge, looks at its inbox,
+// and posts nothing re-registers at exactly the mark it was nudged about. Clearing the
+// floor there re-nudged it for the same sections on every look — the agent read the
+// nudge, ran the pointer, and was handed the pointer again, indefinitely.
 func (s *Server) register(r Registration) error {
 	if r.Ref == "" || r.Author == "" {
 		return errors.New("registration needs a ref and an author")
@@ -327,8 +333,14 @@ func (s *Server) register(r Registration) error {
 			reg.since = p.Last().N
 		}
 	}
+	advanced := true
+	if prev, ok := s.regs[reg.ref]; ok && reg.since <= prev.since {
+		advanced = false
+	}
 	s.regs[reg.ref] = reg
-	delete(s.nudged, reg.ref)
+	if advanced {
+		delete(s.nudged, reg.ref)
+	}
 	s.mu.Unlock()
 
 	// Do not answer until the watcher is live. A write that lands while it is still taking
