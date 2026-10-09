@@ -177,8 +177,17 @@ func foldTask(n int, events []Section) Task {
 }
 
 // aggregate reduces the per-owner states to the task's headline status. `done` requires
-// EVERY current owner to be done; anything else reports the most pressing state still
-// outstanding, so a half-finished shared task can never read as finished.
+// EVERY current owner that still owes anything to be done; anything else reports the most
+// pressing state still outstanding, so a half-finished shared task can never read as
+// finished.
+//
+// An owner that DROPPED has withdrawn, and withdrawing releases its completion slot — the
+// owner set means "the parties whose completion is required", and one that dropped out is
+// no longer among them, for the same reason the opener never was. Counting it instead kept
+// `allDone` false forever, so a shared task could never close once a single owner left;
+// and where that owner was the ONLY one, the fold matched no case and fell through to
+// `open`, which is how a dropped task went on reporting as outstanding work. Both shapes
+// were measured on real pads before this was fixed.
 func aggregate(owners []OwnerState, openerOverride Status) Status {
 	if openerOverride != "" {
 		return openerOverride // dropped or force-closed by the opener
@@ -186,8 +195,12 @@ func aggregate(owners []OwnerState, openerOverride Status) Status {
 	if len(owners) == 0 {
 		return StatusOpen
 	}
-	allDone, anyBlocked, anyProgress := true, false, false
+	allDone, anyBlocked, anyProgress, required := true, false, false, 0
 	for _, o := range owners {
+		if o.Status == StatusDropped {
+			continue // withdrew: owes nothing, and holds nothing open
+		}
+		required++
 		if o.Status != StatusDone {
 			allDone = false
 		}
@@ -197,6 +210,12 @@ func aggregate(owners []OwnerState, openerOverride Status) Status {
 		case StatusWIP, StatusDone:
 			anyProgress = true
 		}
+	}
+	if required == 0 {
+		// Every owner withdrew. Reporting `open` here is the bug this guard exists for:
+		// the task is nobody's, and a board that lists it is asking for work that was
+		// explicitly abandoned.
+		return StatusDropped
 	}
 	switch {
 	case allDone:

@@ -245,7 +245,9 @@ scratchpad pad who <ref>                    # who has fallen behind, and what th
 - Reopening (`--status open` from the opener) puts every owner back to `open`: the work
   has to be reported again, which is what disagreeing with a `done` means.
 - A task shared by two agents is `done` only when **both** are — one finishing never
-  hides the other's outstanding work.
+  hides the other's outstanding work. An owner that `dropped` its own slice has withdrawn
+  and no longer counts, so the task closes on whoever is left; when everyone withdraws it
+  reads `dropped`, not `open`.
 - Task events do not take the turn, so opening several in a row is fine, and watching a
   task never obliges you to reply.
 - **`--status` is what makes a section a task event.** `--task 3` on its own merely
