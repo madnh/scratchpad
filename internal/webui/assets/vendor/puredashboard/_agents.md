@@ -103,6 +103,8 @@ if (await confirm("Delete 3 services?")) { /* … */ }        // → boolean
 const name = await prompt("New name?", { value: "web-01" }); // → string | null
 dialog({ title: "Edit", content: (body) => body.append(myForm), onClose: (v) => {} }).show();
 drawer({ position: "right", title: "Filters", content: (b) => {} }).show();
+dialog({ title: "Delete?", content: "Sure?", actions: [{ label: "Cancel", value: "cancel" },
+  { label: "Delete", value: "ok", variant: "primary", danger: true }] }).show();   // library-rendered footer buttons; or onclick: (ev, d) => …
 ```
 ```js
 import { menu } from "LIB/menu.js";              // anchored dropdown
@@ -307,9 +309,14 @@ const draw = () => renderResult(html`
   `focus=false scroll=0` with the iframe reloaded. Selection offsets survive either way; a
   custom element in the row is disconnected and reconnected on both paths. So this is a
   progressive enhancement, not a guarantee: if your UI depends on focus surviving a reorder,
-  it will differ between browsers, and Safari is the one that behaves as before. The version
-  numbers are compat data; only Chrome has actually been run, so Firefox is expected rather
-  than confirmed.
+  it will differ between browsers, and on Safari **relocation behaves exactly as it always
+  did** — measured, not inferred: `moveBefore` absent, 19 relocations all through the
+  fallback, focus lost, selection offsets kept, inner scroll back to 0, iframe reloaded.
+  That sentence is about RELOCATION only. Overlays did change on Safari: an open
+  `<puredashboard-popover>` used to vanish when its row moved (the browser dropped the panel
+  while `open` and `aria-expanded` stayed true) and now stays, re-anchored, with the same gap
+  it had at open — the same on both browsers. Executed: Chrome 149 and Safari 26.5.2. Firefox
+  has the API per compat data and has NOT been run, so it is expected rather than confirmed.
 - **If you cannot accept that difference**, capture `document.activeElement` and its
   `selectionStart`/`selectionEnd` before the update and restore them after — that part an app
   can do for itself. What it cannot do is restore an inner scroll position it never read, or
@@ -400,23 +407,25 @@ Each record: `tag`, `extends`, `summary`, `props[]{name,type,default,desc}`,
 | `puredashboard-textarea` | `value`, `rows`, `autoGrow`, `size`, `error` | native `input`/`change` | |
 | `puredashboard-number` | `value`, `min`, `max`, `step`, `size`, `error` | native `input`/`change` | ± steppers |
 | `puredashboard-select` | `options`([{value,label}]|string[]), `value`, `placeholder`, `size` | native `change` | wraps `<select>` |
-| `puredashboard-combobox` | `options`, `value`, `placeholder`, `allowCustom` | `change`{value} | searchable (APG combobox) |
+| `puredashboard-combobox` | `options`, `value`, `placeholder`, `allowCustom`, `serverFilter`, `loading`, `clearable`, `multiple` | `change`{value}, `comboboxopen`, `comboboxsearch`{text} | searchable (APG combobox); server search = `serverFilter` + answer `comboboxsearch` with new `options`; `multiple`: `value` is `string[]`, chips, name repeated in the form |
 | `puredashboard-checkbox` | `checked`, `indeterminate`, `value`, `label`, `required` | native `change` | |
 | `puredashboard-switch` | `checked`, `value`, `label` | native `change` | role=switch |
 | `puredashboard-radio-group` | `options`, `value`, `name`, `required` | `change`{value} | APG radio group |
 | `puredashboard-slider` | `value`, `min`, `max`, `step`, `showValue` | native `input`/`change` | wraps `<input type=range>` |
 | `puredashboard-date` / `puredashboard-time` | `value`, `min`, `max`, `step`(time) | native `input`/`change` | wrap native pickers |
+| `puredashboard-datetime` | `value` (`yyyy-mm-ddTHH:mm`, no time zone), `min`, `max`, `step` | native `input`/`change` | wraps native `datetime-local` |
 | `puredashboard-color` | `value`(hex), `showValue` | native `input`/`change` | swatch |
 | `puredashboard-rate` | `value`, `count`, `allowHalf`, `allowClear` | `change`{value} | star rating (role=slider) |
-| `puredashboard-form` | `noValidate` | `submit`{values,formData,valid}, `invalid`, `reset` | wraps children in a real `<form>` |
+| `puredashboard-form` | `noValidate`; attrs `direction="row"`, `aria-label`/`aria-labelledby`/`aria-describedby`/`autocomplete` (moved onto the `<form>`) | `submit`{values,formData,valid}, `invalid`, `reset` | wraps children in a real `<form>` |
+| `puredashboard-field` | `label`, `hint`, `error` | — | wraps ONE control child: `<label for>`, label-click focus; label/hint/error ids and `aria-invalid` set on the control's inner field |
 | `puredashboard-upload` | `accept`, `multiple`, `maxSize`; method `upload(url)` | `files`, `uploadprogress`, `uploaddone`, … | drag-drop, multipart |
 
 ### Navigation
 | Tag | Key props | Events | Notes |
 |---|---|---|---|
-| `puredashboard-tabs` | `tabs`([{id,label,disabled,panelId}]), `value` | `tabchange`{value} | APG tabs; toggles `panelId` elements |
+| `puredashboard-tabs` | `tabs`([{id,label,disabled,panelId,href}]), `value` | `tabchange`{value} | APG tabs; toggles `panelId` elements; with `href` on the tabs = link mode: `<nav>` of real `<a>`, `value` = current page (`aria-current`), no panels/keyboard/`tabchange`; `disabled`/no-`href` tab = non-link span |
 | `puredashboard-breadcrumb` | `items`([{label,href}]), `maxItems` | — | last = current; real `<a>` |
-| `puredashboard-pagination` | `page`, `total`+`pageSize` \| `pageCount`, `siblingCount` | `pagechange`{page} | windowed + ellipsis |
+| `puredashboard-pagination` | `page`, `total`+`pageSize` \| `pageCount`, `siblingCount`, `hasMore` | `pagechange`{page,direction} | windowed + ellipsis; `hasMore` = cursor/keyset paging (`pageCount` reached so far, one more offered) |
 | `puredashboard-steps` | `steps`, `current`(0-based), `vertical`, `clickable` | `stepchange`{index} | |
 | `puredashboard-nav` | `items`(tree {label,href,icon,children}), `current` | `toggle` | sidebar; real `<a>`, collapsible groups |
 | `puredashboard-menubar` | `menus`([{label,items,icon,disabled}]), `orientation`, `disabled`, `openIndex`; methods `open(i)`/`close()` | `select`{value,menu,index}, `openchange`{open,index} | desktop app menu bar (File · Edit · View); each dropdown is a full `menu()` (icons, shortcuts, groups, checkbox/radio, submenus); APG menubar keyboard + hover-to-switch |
@@ -424,8 +433,8 @@ Each record: `tag`, `extends`, `summary`, `props[]{name,type,default,desc}`,
 ### Data display
 | Tag | Key props | Events | Notes |
 |---|---|---|---|
-| `puredashboard-table` | `columns`, `rows`, `rowKey`, `selectable`, `actions`, `bulkActions`, `pageSize`, `getHref` | `action`{name,row}, `bulkaction`, `selectionchange` | sort/filter/paginate; `column.render(row)` may return a DOM node |
-| `puredashboard-card` | `title`, `bordered` | — | body = children; `data-card-footer`/`-extra` children project |
+| `puredashboard-table` | `columns`(+`thAttrs`, `wrapHeader`), `rows`, `rowKey`, `rowAttrs(row,i)`, `selectable`, `actions`, `bulkActions`, `pageSize`, `getHref`; attr `wrap-headers` | `action`{name,row}, `bulkaction`, `selectionchange` | sort/filter/paginate; `column.render(row)` may return a DOM node |
+| `puredashboard-card` | `title`, `bordered`; attrs `role` (kept if authored), `scroll` | — | body = children; `data-card-footer`/`-extra` children project |
 | `puredashboard-descriptions` | `items`([{label,value,span}]), `columns`, `bordered`, `title` | — | dl/dt/dd |
 | `puredashboard-statistic` | `title`, `value`, `precision`, `prefix`, `suffix`, `trend`(up/down) | — | formats numbers |
 | `puredashboard-tag` | `color`, `size`, `round`, `closable` | `close`(cancelable) | text = children |
@@ -433,7 +442,7 @@ Each record: `tag`, `extends`, `summary`, `props[]{name,type,default,desc}`,
 | `puredashboard-avatar` | `src`, `name`, `size`, `shape`, `color` | — | image → initials fallback |
 | `puredashboard-list` | `items`([{title,description,extra}]), `header`, `footer`, `bordered`, `loading` | — | |
 | `puredashboard-tree` | `nodes`(hierarchical), `selectedKey`, `expandedKeys` | `select`{key,node}, `toggle` | APG tree |
-| `puredashboard-collapse` | `items`([{key,header,content}]), `value`, `multiple` | `change`{value} | APG accordion |
+| `puredashboard-collapse` | `items`([{key,header,content}]), `value`, `multiple`, `headingLevel`(1-6/none), `regions` | `change`{value} | APG accordion |
 | `puredashboard-timeline` | `items`([{label,content,color,dot}]), `mode`(left/right/alternate), `pending` | — | |
 | `puredashboard-empty` | `description`, `compact` | — | actions = children |
 | `puredashboard-result` | `status`(success/error/info/warning/404/403/500), `title`, `subtitle` | — | actions = children |
@@ -451,7 +460,7 @@ Each record: `tag`, `extends`, `summary`, `props[]{name,type,default,desc}`,
 ### Feedback
 | Tag | Key props | Events | Notes |
 |---|---|---|---|
-| `puredashboard-alert` | `type`, `title`, `message`, `showIcon`, `closable` | `close`(cancelable) | inline banner |
+| `puredashboard-alert` | `type`, `title`, `message`, `showIcon`, `closable`, `live`(alert/status/none) | `close`(cancelable) | inline banner |
 | `puredashboard-progress` | `value`, `max`, `variant`(line/circle), `status`, `showInfo`, `indeterminate` | — | |
 | `puredashboard-meter` | `value`, `min`, `max`, `low`/`high`/`optimum`, `label`, `showValue`, `format`(Intl opts), `locale`, `size` | — | `role=meter` gauge for a READING in a range (disk/quota/score) — not a task's progress; low/high/optimum give the native `<meter>` green/amber/red zones |
 | `puredashboard-spinner` | `size`, `label`, `labelVisible`, `inline` | — | role=status |

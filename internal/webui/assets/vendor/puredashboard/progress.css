@@ -36,6 +36,12 @@ puredashboard-progress {
   --pd-progress-color: var(--pd-accent);   /* fill colour; status modifiers override */
 }
 
+/* Inline variant: a thin bar that sits on the same line as text (set `inline` on the host). The default stays display:block. */
+puredashboard-progress[inline] {
+  display: inline-block;
+  vertical-align: middle;
+}
+
 /* size knobs */
 .puredashboard-progress--sm { --pd-progress-line-h: 5px;  --pd-progress-circle: 64px;  --pd-progress-circle-sw: 6; }
 .puredashboard-progress--lg { --pd-progress-line-h: 12px; --pd-progress-circle: 128px; --pd-progress-circle-sw: 10; }
@@ -122,8 +128,10 @@ puredashboard-progress {
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-.puredashboard-progress--line .puredashboard-progress__info { flex: none; min-width: 4ch; text-align: right; }
+.puredashboard-progress--line .puredashboard-progress__info { flex: none; min-width: 5ch; justify-content: flex-end; }  /* "100%" fits, so stacked tracks end at the same x */
 .puredashboard-progress__glyph { display: inline-flex; font-size: 1.1em; }
+/* circle: the read-out scales with the ring (a fixed 12px label looked lost inside 96-128px rings) */
+.puredashboard-progress--circle .puredashboard-progress__info { font-size: calc(var(--pd-progress-circle) * 0.17); }
 .puredashboard-progress__glyph--success { color: var(--pd-green); }
 .puredashboard-progress__glyph--error   { color: var(--pd-red); }
 
