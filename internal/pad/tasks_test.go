@@ -391,3 +391,66 @@ func TestSameOwnersIgnoresOrder(t *testing.T) {
 		t.Error("dropping an owner is a reassignment")
 	}
 }
+
+// TestDroppedOwnerReleasesItsSlot covers the two shapes an owner's own `dropped` used to
+// break, both measured on real pads. The owner set means "the parties whose completion is
+// required", so an owner that withdrew must stop being counted — otherwise `allDone` can
+// never be true again, and a task whose only owner withdrew matches no case at all and
+// falls through to `open`.
+//
+// The sole-owner case is not exotic: it is the handoff shape. A lead opens a task
+// addressed to its OWN name so a successor inherits it, which makes opener and owner the
+// same agent — and that is precisely what routes the drop past the opener's management
+// branch into the per-owner map.
+func TestDroppedOwnerReleasesItsSlot(t *testing.T) {
+	t.Run("sole owner, also the opener, drops", func(t *testing.T) {
+		p := build(
+			sec{"lead", "HANDOFF: runtime half", task(1, []string{"lead"}, StatusOpen)},
+			sec{"lead", "operator cancelled the handoff", task(1, nil, StatusDropped)},
+		)
+		got, _ := p.Task(1)
+		if got.Status != StatusDropped {
+			t.Fatalf("a cancelled task must not read as outstanding work, got %q", got.Status)
+		}
+		if got.Open() {
+			t.Fatal("Open() still true: the board would keep listing it")
+		}
+	})
+
+	t.Run("one of two drops, the other finishes", func(t *testing.T) {
+		p := build(
+			sec{"pm", "Crash on resume", task(1, []string{"ios", "android"}, StatusOpen)},
+			sec{"android", "not reproducible here, dropping my half", task(1, nil, StatusDropped)},
+			sec{"ios", "fixed the background timer", task(1, nil, StatusDone)},
+		)
+		if got, _ := p.Task(1); got.Status != StatusDone {
+			t.Fatalf("the remaining owner finished, so the task is done, got %q", got.Status)
+		}
+	})
+
+	t.Run("dropping does not fake completion for the others", func(t *testing.T) {
+		p := build(
+			sec{"pm", "Crash on resume", task(1, []string{"ios", "android"}, StatusOpen)},
+			sec{"android", "dropping my half", task(1, nil, StatusDropped)},
+			sec{"ios", "waiting on a signing cert", task(1, nil, StatusBlocked)},
+		)
+		if got, _ := p.Task(1); got.Status != StatusBlocked {
+			t.Fatalf("one owner withdrawing must not hide another's blocker, got %q", got.Status)
+		}
+	})
+
+	t.Run("every owner drops", func(t *testing.T) {
+		p := build(
+			sec{"pm", "Spike three cache designs", task(1, []string{"ios", "android"}, StatusOpen)},
+			sec{"ios", "dropping", task(1, nil, StatusDropped)},
+			sec{"android", "dropping too", task(1, nil, StatusDropped)},
+		)
+		got, _ := p.Task(1)
+		if got.Status != StatusDropped {
+			t.Fatalf("nobody owns it any more, got %q", got.Status)
+		}
+		if got.Open() {
+			t.Fatal("Open() still true for a task every owner abandoned")
+		}
+	})
+}

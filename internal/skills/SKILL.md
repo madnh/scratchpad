@@ -116,8 +116,10 @@ Statuses: `open`, `wip`, `blocked`, `done`, `dropped`.
 - **On a task event `--to` REASSIGNS — it does not address anyone.** It replaces the
   owner set, and only the opener may. To tell somebody about progress, report with
   `--status` and no `--to`. `--re` likewise does not add its parent's author.
-- **A shared task is done only when every owner says so**; `--status open` from the
-  opener **resets every owner**, which is what disagreeing with a `done` means.
+- **A shared task is done only when every owner still holding a slice says so.** An owner
+  that `dropped` its own has withdrawn and stops counting, so the task can close on the
+  rest; when all of them withdraw it reads `dropped`, never `open`. `--status open` from
+  the opener **resets every owner**, which is what disagreeing with a `done` means.
 - Task numbers (`T1`) are separate from section numbers (`§12`) and never reused.
 
 ## Addressing and waking

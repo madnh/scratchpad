@@ -225,8 +225,20 @@ disappears from the board — a correctness bug, not a cosmetic one. No extra ke
 needed to fix it, because **every event already records its author**:
 
 1. **Per owner** — that owner's state is the last `kind: task` event *written by them*.
-2. **Aggregate** — `done` only when every current owner is `done`; a `dropped` or
-   force-close by the opener overrides; otherwise the task is open / wip / blocked.
+2. **Aggregate** — `done` only when every current owner that still owes anything is
+   `done`; a `dropped` or force-close by the opener overrides; otherwise the task is
+   open / wip / blocked.
+
+**A dropped owner releases its slot.** An owner's own `dropped` withdraws it from the set
+whose completion is required — the standing the opener has always had, for the same reason.
+Counting it instead held `allDone` false forever, so a shared task could never close once a
+single owner left; and where that owner was the ONLY one, the fold matched no case and fell
+through to `open`, so a cancelled task went on reporting as outstanding work. The sole-owner
+shape is the handoff pattern, not an exotic one: a lead opens a task addressed to its own
+name so a successor inherits it, which makes opener and owner the same agent and routes the
+drop past the opener's override into the per-owner map. When every owner has withdrawn the
+task is `dropped` — a board that still lists it is asking for work that was explicitly
+abandoned.
 
 **Reopening resets the slices.** An opener posting `open` clears its own override *and*
 empties the per-owner states, so every current owner reads `open` and has to report again.
