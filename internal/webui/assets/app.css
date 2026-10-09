@@ -65,13 +65,11 @@ puredashboard-sider[collapsed] .sider__pads { display: none; }
 /* Square rows: rounded pills read as buttons floating in the rail, and with the
    two-line pad entries they left ragged gaps down both edges. */
 puredashboard-sider .puredashboard-nav__link { border-radius: 0; }
-/* The base stylesheet underlines every <a> on hover. In a rail whose rows already
-   highlight as a block, the underline is a second, noisier hover state. */
-puredashboard-sider .puredashboard-nav__link:hover { text-decoration: none; }
 
 .sider__head { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .5rem; }
-/* Full width with a small label, so neither choice gets ellipsised in a narrow rail. */
-#group-mode puredashboard-segmented { display: block; width: 100%; font-size: .74rem; }
+/* A small label, so neither choice gets ellipsised in a narrow rail. The full width
+   comes from the `block` attribute set in lib/sidebar.js. */
+#group-mode puredashboard-segmented { font-size: .74rem; }
 .sider__label {
   font-size: .7rem; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted);
