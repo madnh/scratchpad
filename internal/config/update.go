@@ -45,6 +45,7 @@ const (
 	GroupDir            = "dir"
 	GroupInstance       = "instance"
 	GroupTCP            = "tcp"
+	GroupAuth           = "auth"
 	GroupUI             = "ui"
 	GroupSchema         = "schema header"
 )
@@ -52,16 +53,30 @@ const (
 // OperatorEditable is what a person may change from a SURFACE (today: the Web UI's
 // settings page).
 //
-// Note what is absent. `tcp` holds the bearer-token digests and `ui` holds no_auth, so
-// either would let a browser session widen who can reach this deployment. `rules` decides
-// whether an agent may rewrite the operator's standing instructions — the store's memory
-// of being burned here is that a privilege must be something the calling code holds, never
-// something a request can name, and "the handler happens not to assign that field" is one
-// forgetful edit away from not being true. Naming the set makes the file enforce it too.
+// Note what is absent. `auth` holds the bearer-token digests, `tcp` holds the legacy ones
+// and the port, and `ui` holds no_auth, so any of them would let a browser session widen
+// who can reach this deployment. `rules` decides whether an agent may rewrite the
+// operator's standing instructions — the store's memory of being burned here is that a
+// privilege must be something the calling code holds, never something a request can name,
+// and "the handler happens not to assign that field" is one forgetful edit away from not
+// being true. Naming the set makes the file enforce it too.
+//
+// `auth` is the newest and the easiest to lose by accident. The digests used to live in
+// `tcp`, and they were protected only BECAUSE that group was absent from this list —
+// moving them to a group of their own would have disabled the guard as a side effect of a
+// refactor, with nothing failing to say so. TestSensitiveGroupsAreNotOperatorEditable is
+// the mechanism that makes that impossible rather than merely intended; adding a group
+// here is a deliberate act that has to argue with a test.
 //
 // `instance` and `dir` are absent for the duller reason that a running process has already
 // bound a socket and resolved a store.
 var OperatorEditable = []string{GroupDisplayName, GroupDefaultProject, GroupLimits, GroupWait}
+
+// OperatorForbidden names, positively, the groups a surface must NEVER be able to write.
+// It exists so the rule is a list the tests can read rather than an absence someone has to
+// notice: an absence cannot be asserted against, and this one protects who may reach the
+// deployment and who may rewrite the operator's instructions.
+var OperatorForbidden = []string{GroupAuth, GroupTCP, GroupUI, GroupRules, GroupDir, GroupInstance, GroupSchema}
 
 // MarkerDigest fingerprints the marker file's bytes as they are on disk.
 //

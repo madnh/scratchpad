@@ -24,7 +24,7 @@ const testMarker = `{
   "display_name": "Test",
   "instance": "scratchpad",
   "limits": { "max_sections_per_pad": 10 },
-  "tcp": { "port": 6710, "token_digests": ["sha256:secret"] },
+  "tcp": { "port": 6710, "token_digests": ["sha256:2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"] },
   "ui": { "port": 6711 },
   "rules": { "store": "ui", "project": "ui", "pad": "opener" }
 }`
@@ -148,7 +148,7 @@ func TestConfigPutSavesAndReloads(t *testing.T) {
 	if onDisk.Limits.MaxSectionsPerPad != 5000 {
 		t.Errorf("limit on disk = %d", onDisk.Limits.MaxSectionsPerPad)
 	}
-	if len(onDisk.TCP.TokenDigests) != 1 || onDisk.TCP.TokenDigests[0] != "sha256:secret" {
+	if len(onDisk.TCP.TokenDigests) != 1 || onDisk.TCP.TokenDigests[0] != "sha256:2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b" {
 		t.Errorf("a save through the UI dropped the tcp digests: %+v", onDisk.TCP)
 	}
 	if onDisk.Rules != config.DefaultRulesPolicy {
@@ -224,7 +224,7 @@ func TestConfigPutCannotReachGuardedGroups(t *testing.T) {
 	if onDisk.Instance != "scratchpad" {
 		t.Fatalf("instance was writable through the UI: %q", onDisk.Instance)
 	}
-	if len(onDisk.TCP.TokenDigests) != 1 || onDisk.TCP.TokenDigests[0] != "sha256:secret" {
+	if len(onDisk.TCP.TokenDigests) != 1 || onDisk.TCP.TokenDigests[0] != "sha256:2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b" {
 		t.Fatalf("tcp token digests were writable through the UI: %+v", onDisk.TCP)
 	}
 }

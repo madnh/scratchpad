@@ -6,6 +6,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -156,6 +157,43 @@ type TCP struct {
 	AllowedOrigins []string `json:"allowed_origins,omitempty"`
 }
 
+// AuthClient is one credential this deployment accepts, with a NAME attached.
+//
+// The name is the whole point. An anonymous array of digests cannot be revoked
+// selectively: you cannot tell which entry belongs to the laptop that was lost, so the
+// only safe move is to remove them all and re-issue every one. That is an operational
+// defect independent of anything remote, and `created` is here for the same audit reason.
+//
+// The natural unit of a credential is a MACHINE or a SESSION, not an agent. One machine
+// hosts several agents sharing one install and one environment; an agent has nowhere
+// private to keep a secret, only what its parent handed it. Binding a token to an author
+// would mean building a per-session credential issuer, and the author name is not what is
+// trusted here anyway — the OS answers "who" before the request arrives.
+type AuthClient struct {
+	// Name identifies the holder for audit and for revoking exactly one thing.
+	Name string `json:"name"`
+	// Digest is "sha256:<64 hex>". Plaintext tokens are never stored, here or anywhere.
+	Digest string `json:"digest"`
+	// Created is a free-form date stamp, for the operator's own reading.
+	Created string `json:"created,omitempty"`
+}
+
+// Auth holds the credentials this deployment accepts. It is its OWN top-level group
+// rather than more fields inside `tcp`, for two reasons.
+//
+// A credential list is not a property of a TCP listener; when another transport wants
+// authentication it reuses this list instead of growing a second one.
+//
+// And hot/cold reload splits by GROUP (see MergeHot), every hot group hot whole. Tokens
+// must reload — revoking one currently needs a restart, and a restart severs every
+// in-flight `pad wait` on the deployment, which makes the emergency operation the most
+// expensive one. But `tcp.port` cannot: the listener is already bound. Splitting a group
+// down the middle would make ColdChanges lie, reporting `tcp` while the thing that
+// changed had already applied. A separate group keeps the split honest.
+type Auth struct {
+	Clients []AuthClient `json:"clients,omitempty"`
+}
+
 // UI configures the Web UI listener (`ui`). It is a HUMAN surface, separate from the
 // MCP transports: a different port, a different audience, and a browser-shaped auth
 // model (a one-time URL token exchanged for a session cookie) instead of MCP's bearer
@@ -275,6 +313,7 @@ type Config struct {
 	Limits Limits      `json:"limits,omitzero"`
 	Wait   Wait        `json:"wait,omitzero"`
 	TCP    TCP         `json:"tcp,omitzero"`
+	Auth   Auth        `json:"auth,omitzero"`
 	UI     UI          `json:"ui,omitzero"`
 	Rules  RulesPolicy `json:"rules,omitzero"`
 
@@ -322,6 +361,11 @@ func LoadDir(dir string) (Config, error) {
 	// before anything derived: a marker that misspells a policy must not start a server
 	// that silently falls back to something looser than the operator asked for.
 	if err := c.validateRules(); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", MarkerPath(abs), err)
+	}
+	// Same reasoning one group over: a credential the binary cannot parse must be an
+	// error at load, not a 401 nobody can explain hours later.
+	if err := c.validateAuth(); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", MarkerPath(abs), err)
 	}
 	c.RootDir = abs
@@ -425,6 +469,75 @@ func (c *Config) applyDefaults() {
 // only safe reading of a misspelling here: every other unknown setting degrades to a
 // default that is merely wrong, while this one would degrade to a permission the operator
 // did not grant, and would do it silently.
+// ParseTokenDigest normalizes one "sha256:<hex>" entry to its lower-case hex, and is the
+// ONE place that decides what a digest looks like. The guard and the validator both call
+// it, so a form the validator accepts can never be a form the guard rejects at request
+// time — a disagreement there would mean a deployment that starts cleanly and then refuses
+// every client.
+func ParseTokenDigest(s string) (string, error) {
+	hexPart, ok := strings.CutPrefix(strings.TrimSpace(s), "sha256:")
+	if !ok || len(hexPart) != 64 {
+		return "", fmt.Errorf("bad token digest %q: want \"sha256:<64 hex chars>\"", s)
+	}
+	hexPart = strings.ToLower(hexPart)
+	if _, err := hex.DecodeString(hexPart); err != nil {
+		return "", fmt.Errorf("bad token digest %q: not hex", s)
+	}
+	return hexPart, nil
+}
+
+// AuthClients returns every credential the MARKER accepts: the named `auth.clients`,
+// followed by any legacy anonymous `tcp.token_digests`.
+//
+// The legacy entries are still honoured because they are the operator's existing
+// configuration and a release must not lock anybody out of their own deployment. They are
+// given a placeholder name so every caller downstream can assume one; that name is also
+// the nudge to move them into `auth.clients`, where a single one can be revoked.
+//
+// Note which group each lives in: `auth` is hot, so editing a named client applies to the
+// next request. `tcp` is cold as a whole, so editing a legacy digest needs the restart it
+// always did. That is not an inconsistency to iron out — it is the honest consequence of
+// splitting reload by group, and a reason to migrate.
+func (c Config) AuthClients() []AuthClient {
+	out := make([]AuthClient, 0, len(c.Auth.Clients)+len(c.TCP.TokenDigests))
+	out = append(out, c.Auth.Clients...)
+	for _, d := range c.TCP.TokenDigests {
+		out = append(out, AuthClient{Name: "(legacy tcp.token_digests)", Digest: d})
+	}
+	return out
+}
+
+// validateAuth rejects a credential the deployment could not act on. It runs at LOAD, so
+// a typo is reported against the file the operator just edited rather than surfacing later
+// as an unexplained 401 — and because a marker that fails to load leaves the RUNNING
+// config alone, a bad edit cannot quietly empty the credential list of a live process.
+//
+// A nameless client is an error rather than a warning: the name is the only thing that
+// makes one entry revocable on its own, so accepting a blank one rebuilds the anonymous
+// array this group exists to replace.
+func (c *Config) validateAuth() error {
+	seen := map[string]string{}
+	for i, cl := range c.Auth.Clients {
+		if strings.TrimSpace(cl.Name) == "" {
+			return fmt.Errorf("auth.clients[%d] has no name: a credential that cannot be named cannot be revoked on its own", i)
+		}
+		if prev, dup := seen[cl.Name]; dup {
+			_ = prev
+			return fmt.Errorf("auth.clients[%d]: duplicate name %q — names are how one credential is revoked, so they must be unique", i, cl.Name)
+		}
+		seen[cl.Name] = cl.Digest
+		if _, err := ParseTokenDigest(cl.Digest); err != nil {
+			return fmt.Errorf("auth.clients[%d] (%s): %w", i, cl.Name, err)
+		}
+	}
+	for i, d := range c.TCP.TokenDigests {
+		if _, err := ParseTokenDigest(d); err != nil {
+			return fmt.Errorf("tcp.token_digests[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
 func (c *Config) validateRules() error {
 	for _, f := range []struct {
 		name, value string

@@ -162,7 +162,7 @@ defaulted that same string, so an agent claimed it by not naming itself. Never r
   It also edits the deployment's own settings (`PUT /api/config`), which is not a widening
   of the above: config is the OPERATOR's, takes no turn and carries no author. What it may
   write is `display_name`, `default_project`, `limits`, `wait` — and nothing else, ever.
-  `tcp`, `ui` and `rules` decide who may reach this deployment and who may rewrite the
+  `auth`, `tcp`, `ui` and `rules` decide who may reach this deployment and who may rewrite the
   operator's instructions; a browser session must not be how those are granted.
 
 - **`exec`** (`internal/relay`, `internal/ptyrun`) — for an AGENT that cannot be trusted
@@ -214,7 +214,7 @@ the agent then posts — must wait on it first, with a timeout, since it never c
 **Config is read continuously, never frozen at startup.** Every surface takes a
 `*config.Live` and reads a snapshot per operation; `store.New`/`mcpsrv.New`/`webui.New`
 take nothing else, so no call site can be handed a stale copy. Only the HOT groups reload
-(`config.MergeHot`: display_name, default_project, limits, wait, rules) — `instance`,
+(`config.MergeHot`: display_name, default_project, limits, wait, rules, auth) — `instance`,
 `dir`, `tcp` and `ui` name things the process has already bound, so they are reported and
 applied on restart. A marker that fails to load leaves the running config ALONE: falling
 back to defaults would silently reset the `rules` policy. Writing the marker goes through

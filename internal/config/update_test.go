@@ -29,7 +29,7 @@ const guardedMarker = `{
   "display_name": "Old name",
   "instance": "prod",
   "limits": { "max_sections_per_pad": 10 },
-  "tcp": { "port": 6710, "token_digests": ["sha256:secret"] },
+  "tcp": { "port": 6710, "token_digests": ["sha256:2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"] },
   "ui": { "port": 6711, "no_auth": false },
   "rules": { "store": "ui", "project": "ui", "pad": "opener" }
 }`
@@ -63,7 +63,7 @@ func TestUpdateMarkerWritesHotAndKeepsTheRest(t *testing.T) {
 	if got.Instance != "prod" || got.UI.Port != 6711 || got.TCP.Port != 6710 {
 		t.Errorf("cold groups were lost: %+v", got)
 	}
-	if len(got.TCP.TokenDigests) != 1 || got.TCP.TokenDigests[0] != "sha256:secret" {
+	if len(got.TCP.TokenDigests) != 1 || got.TCP.TokenDigests[0] != "sha256:2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b" {
 		t.Errorf("tcp token digests were lost: %+v", got.TCP)
 	}
 	if got.Rules != DefaultRulesPolicy {
@@ -129,7 +129,7 @@ func TestUpdateMarkerKeepsKeysItDoesNotModel(t *testing.T) {
   "display_name": "Old name",
   "instance": "prod",
   "limits": { "max_sections_per_pad": 10, "max_content_kb": 64 },
-  "tcp": { "port": 6710, "token_digests": ["sha256:secret"] },
+  "tcp": { "port": 6710, "token_digests": ["sha256:2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"] },
   "ui": { "no_auth": false },
   "future_group": { "require_attestation": true }
 }`)
@@ -165,7 +165,7 @@ func TestUpdateMarkerKeepsKeysItDoesNotModel(t *testing.T) {
 	}
 	tcp, _ := m["tcp"].(map[string]any)
 	digests, _ := tcp["token_digests"].([]any)
-	if len(digests) != 1 || digests[0] != "sha256:secret" {
+	if len(digests) != 1 || digests[0] != "sha256:2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b" {
 		t.Errorf("the tcp digests did not survive the merge: %s", raw)
 	}
 	// An explicit false is an assertion the operator wrote down. `absent` means the same
@@ -419,5 +419,155 @@ func TestUpdateMarkerLeavesNoTempFile(t *testing.T) {
 		if strings.HasSuffix(e.Name(), ".tmp") {
 			t.Fatalf("temp file left behind: %s", filepath.Join(dir, e.Name()))
 		}
+	}
+}
+
+// TestSensitiveGroupsAreNotOperatorEditable is a MECHANISM, not a restatement of
+// OperatorEditable.
+//
+// Those groups were protected by being ABSENT from a list, and an absence cannot be
+// asserted against — it can only be noticed. The credential digests used to live in `tcp`
+// and were safe only because `tcp` was not in OperatorEditable; moving them into a group
+// of their own would have handed a browser session the power to add a bearer token, as a
+// side effect of a refactor, with nothing anywhere failing to say so.
+//
+// So the rule is a list now, and this test is what makes adding a group to
+// OperatorEditable an argument rather than an edit.
+func TestSensitiveGroupsAreNotOperatorEditable(t *testing.T) {
+	for _, g := range OperatorForbidden {
+		if slices.Contains(OperatorEditable, g) {
+			t.Errorf("group %q is operator-editable: a browser session can now write it. "+
+				"auth/tcp decide who may REACH this deployment, ui.no_auth removes its lock, "+
+				"rules decide whether an agent may rewrite the operator's instructions, and "+
+				"dir/instance name things a running process already bound.", g)
+		}
+	}
+	// And the converse: every group the surface MAY write has to be one somebody chose,
+	// so a group added to the model does not become editable by default.
+	for _, g := range OperatorEditable {
+		if !slices.Contains([]string{GroupDisplayName, GroupDefaultProject, GroupLimits, GroupWait}, g) {
+			t.Errorf("group %q became operator-editable without this test being updated", g)
+		}
+	}
+}
+
+// TestAuthValidationRefusesWhatCannotBeRevoked: the name is the only thing that makes one
+// credential removable on its own, so a blank or duplicated name rebuilds the anonymous
+// array this group replaced.
+func TestAuthValidationRefusesWhatCannotBeRevoked(t *testing.T) {
+	good := "sha256:" + strings.Repeat("ab", 32)
+	for _, tc := range []struct {
+		name string
+		auth Auth
+		tcp  TCP
+	}{
+		{"no name", Auth{Clients: []AuthClient{{Digest: good}}}, TCP{}},
+		{"blank name", Auth{Clients: []AuthClient{{Name: "  ", Digest: good}}}, TCP{}},
+		{"duplicate names", Auth{Clients: []AuthClient{
+			{Name: "laptop", Digest: good}, {Name: "laptop", Digest: good},
+		}}, TCP{}},
+		{"short digest", Auth{Clients: []AuthClient{{Name: "laptop", Digest: "sha256:abc"}}}, TCP{}},
+		{"no prefix", Auth{Clients: []AuthClient{{Name: "laptop", Digest: strings.Repeat("ab", 32)}}}, TCP{}},
+		{"not hex", Auth{Clients: []AuthClient{{Name: "laptop", Digest: "sha256:" + strings.Repeat("zz", 32)}}}, TCP{}},
+		{"bad legacy digest", Auth{}, TCP{TokenDigests: []string{"sha256:secret"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Config{Auth: tc.auth, TCP: tc.tcp}
+			if err := c.validateAuth(); err == nil {
+				t.Fatal("accepted a credential the deployment could not act on")
+			}
+		})
+	}
+
+	ok := Config{
+		Auth: Auth{Clients: []AuthClient{
+			{Name: "laptop", Digest: good, Created: "2026-10-09"},
+			{Name: "ci", Digest: "sha256:" + strings.Repeat("CD", 32)},
+		}},
+		TCP: TCP{TokenDigests: []string{good}},
+	}
+	if err := ok.validateAuth(); err != nil {
+		t.Fatalf("a valid credential list was refused: %v", err)
+	}
+	// AuthClients puts the named ones first and gives the legacy entries a name, so no
+	// caller downstream has to cope with a blank one.
+	got := ok.AuthClients()
+	if len(got) != 3 {
+		t.Fatalf("want 3 effective credentials, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != "laptop" || got[2].Name == "" {
+		t.Errorf("effective order or legacy naming wrong: %+v", got)
+	}
+}
+
+// TestAuthIsHotAndTCPStaysCold pins the split the group exists for: credentials reload,
+// the bound port does not, and neither half of a group disagrees with the other.
+func TestAuthIsHotAndTCPStaysCold(t *testing.T) {
+	good := "sha256:" + strings.Repeat("ab", 32)
+	running := Config{
+		Auth: Auth{Clients: []AuthClient{{Name: "old", Digest: good}}},
+		TCP:  TCP{Port: 6710},
+	}
+	fresh := Config{
+		Auth: Auth{Clients: []AuthClient{{Name: "new", Digest: good}}},
+		TCP:  TCP{Port: 7000},
+	}
+	merged := MergeHot(running, fresh)
+	if len(merged.Auth.Clients) != 1 || merged.Auth.Clients[0].Name != "new" {
+		t.Errorf("auth did not reload: %+v", merged.Auth)
+	}
+	if merged.TCP.Port != 6710 {
+		t.Errorf("tcp.port must stay as bound, got %d", merged.TCP.Port)
+	}
+	cold := ColdChanges(running, fresh)
+	if !slices.Contains(cold, GroupTCP) {
+		t.Errorf("a changed tcp.port must be reported as needing a restart: %v", cold)
+	}
+	if slices.Contains(cold, GroupAuth) {
+		t.Errorf("auth applied immediately, so reporting it as cold would be a lie: %v", cold)
+	}
+}
+
+// A surface write must not DROP a group it is not allowed to touch. auth is modelled now,
+// so "unmodelled keys survive" no longer covers it — and losing it would silently empty
+// the deployment's credential list, which the guard reads as "deny everything".
+func TestOperatorWriteKeepsAuth(t *testing.T) {
+	dir := t.TempDir()
+	marker := `{
+  "type": "scratchpad",
+  "version": 1,
+  "display_name": "Old name",
+  "instance": "prod",
+  "auth": { "clients": [ { "name": "laptop", "digest": "sha256:` + strings.Repeat("ab", 32) + `", "created": "2026-10-09" } ] },
+  "tcp": { "port": 6710 }
+}`
+	if err := os.WriteFile(filepath.Join(dir, MarkerFilename), []byte(marker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, digest, err := ReadMarker(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateMarker(dir, digest, OperatorEditable, func(c *Config) error {
+		c.DisplayName = "New name"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("the written marker no longer loads: %v", err)
+	}
+	if got.DisplayName != "New name" {
+		t.Errorf("the allowed change did not land: %q", got.DisplayName)
+	}
+	if len(got.Auth.Clients) != 1 || got.Auth.Clients[0].Name != "laptop" {
+		t.Fatalf("a surface write DROPPED the credential list: %+v", got.Auth)
+	}
+	if got.Auth.Clients[0].Created != "2026-10-09" {
+		t.Errorf("the credential lost a field: %+v", got.Auth.Clients[0])
+	}
+	if got.TCP.Port != 6710 {
+		t.Errorf("tcp was lost: %+v", got.TCP)
 	}
 }
