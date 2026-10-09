@@ -63,6 +63,7 @@ const LABELS = {
  * @method focus - `focus() => void` — focus the current roving-tabindex segment.
  *
  * @cssprop [--pd-segmented-gap] - Padding around the thumb inside the track (defaults to `2px`).
+ * @cssprop [--pd-segmented-item-gap] - Space between segments, so a hover fill or the thumb never touches its neighbour (defaults to `--sp-1`).
  *
  * @example
  * const seg = document.createElement("puredashboard-segmented");
@@ -88,6 +89,10 @@ class PuredashboardSegmented extends Reactive {
 
   // _label(key, …args) → localised string: this.labels override, else the default.
   _label(key, ...a) { const v = (this.labels && this.labels[key]) ?? LABELS[key]; return typeof v === "function" ? v(...a) : v; }
+
+  // Host-level block modifier: the host is inline-block, so a 100%-wide track inside it would size to its own
+  // content and squeeze the equal-width segments down to their minimum (labels truncated). Same pattern as button.
+  updated() { this.classList.toggle("puredashboard-segmented--block", !!this.block); }
 
   setup() {
     this._explicit = this.getAttribute("value") ?? "";   // explicit initial value, if any

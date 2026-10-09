@@ -37,15 +37,21 @@ let uid = 0;
  *
  * @element puredashboard-tabs
  *
- * @prop {Array}   tabs   - Tab defs: `{ id: string, label: string|Node, disabled?: boolean, panelId?: string }`. Each `label` accepts a string (auto-escaped) OR a DOM node / nested `html` template / array — pass a node or template to embed a custom element (you build it, you own its safety; plain strings stay escaped).
- * @prop {string}  value  - Active tab id (get/set). Defaults to the first enabled tab.
+ * @prop {Array}   tabs   - Tab defs: `{ id: string, label: string|Node, disabled?: boolean, panelId?: string, href?: string }`. When any tab has an `href` the list is LINK MODE (below). Each `label` accepts a string (auto-escaped) OR a DOM node / nested `html` template / array — pass a node or template to embed a custom element (you build it, you own its safety; plain strings stay escaped).
+ * @prop {string}  value  - Active tab id (get/set). Defaults to the first enabled tab. In link mode it is the id of the page you are on.
  * @prop {Object}  labels - Override UI strings. Keys: `tablist`. Unset keys keep the English default.
+ *
+ * Link mode (a tab bar whose state lives in the URL): give each tab an `href` and the list renders a `<nav>` of real `<a>` links
+ * (open in a new tab, back/forward and middle-click work) instead of a tablist: the tab for `value` carries `aria-current="page"`, there
+ * are no tab roles, no roving tabindex, no arrow-key handling and no panels (`panelId` is ignored), and no `tabchange` is fired; navigation
+ * is the browser's. A tab that is `disabled` or has no `href` renders as a non-link `<span aria-disabled="true">`.
  *
  * @attr {string}  aria-label - Accessible name, applied to the element that carries the component's role (the host has no role of its own). Overrides the built-in `LABELS` name.
  * @fires tabchange - Bubbling `CustomEvent`; `detail`: `{ value }` — fired when the active tab changes.
  *
  * @cssprop [--pd-tabs-gap]      - Gap between tabs (defaults to `--sp-1`).
  * @cssprop [--pd-tabs-indicator] - Active-tab indicator thickness (defaults to `2px`).
+ * @cssprop [--pd-tabs-radius]   - Top-corner radius of a tab's hover/focus background; the bottom corners stay square (defaults to `--radius-sm`).
  *
  * @example
  * const tabs = document.createElement("puredashboard-tabs");
@@ -88,15 +94,22 @@ class PuredashboardTabs extends Reactive {
     return first ? first.id : undefined;
   }
 
+  // Link mode: any tab with an href. Navigation is the browser's, so nothing is activated here.
+  _links() { return (this.tabs || []).some((t) => t && t.href); }
+
   _activate(id) {
+    if (this._links()) return;
     const t = (this.tabs || []).find((x) => x && x.id === id);
     if (!t || t.disabled) return;
     if (this.value === id) return;
+    // the re-render replaces the buttons: when focus is inside the tab list, put it on the new selected one in updated()
+    this._refocus = this.contains(document.activeElement);
     this.value = id;
     this.emit("tabchange", { value: id });
   }
 
   _onKeydown(e) {
+    if (this._links()) return;
     const enabled = this._enabled();
     if (!enabled.length) return;
     const cur = this._current();
@@ -111,7 +124,11 @@ class PuredashboardTabs extends Reactive {
       default: return;
     }
     e.preventDefault();
-    if (next) { this._activate(next.id); this.$(`[data-tab="${next.id}"]`)?.focus(); }
+    if (!next) return;
+    // _activate re-renders the buttons (the old one is replaced) and refocuses the new selected one in updated(); focusing the old
+    // button lost focus to <body> after a single arrow key.
+    if (next.id === cur) this.$(`[data-tab="${next.id}"]`)?.focus();
+    else this._activate(next.id);
   }
 
   // After each render, reflect the active tab onto the author-provided panels:
@@ -119,7 +136,9 @@ class PuredashboardTabs extends Reactive {
   // located by document.getElementById(panelId) — guard null (a panel may be
   // absent or not yet in the DOM).
   updated() {
+    if (this._links()) return;   // link mode has no panels: nothing to manage
     const active = this._current();
+    if (this._refocus) { this._refocus = false; this.$('[role="tab"][aria-selected="true"]')?.focus(); }
     for (const t of this.tabs || []) {
       if (!t || !t.panelId) continue;
       const panel = document.getElementById(t.panelId);
@@ -133,6 +152,16 @@ class PuredashboardTabs extends Reactive {
   render() {
     const tabs = this.tabs || [];
     const active = this._current();
+    if (this._links()) {
+      return html`<nav class="puredashboard-tabs__list puredashboard-tabs__list--links js-puredashboard-tabs__list" aria-label="${this.getAttribute("aria-label") ?? this._label("tablist")}">
+        ${tabs.map((t) => {
+          const selected = t.id === this.value;
+          // A disabled tab, or one without an href, is not a link: a span marked aria-disabled.
+          if (t.disabled || !t.href) return html`<span class="puredashboard-tabs__tab puredashboard-tabs__tab--disabled" data-tab="${t.id}" aria-disabled="true">${t.label}</span>`;
+          return html`<a class="puredashboard-tabs__tab ${selected ? "puredashboard-tabs__tab--active" : ""}" href="${t.href}" data-tab="${t.id}" aria-current="${selected ? "page" : "false"}">${t.label}</a>`;
+        })}
+      </nav>`;
+    }
     return html`<div class="puredashboard-tabs__list js-puredashboard-tabs__list" role="tablist" aria-label="${this.getAttribute("aria-label") ?? this._label("tablist")}">
       ${tabs.map((t) => {
         const selected = t.id === active;
