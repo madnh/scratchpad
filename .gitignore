@@ -8,3 +8,6 @@ dist/
 # Nested git worktrees live here. They are full checkouts of this same repo, so a
 # stray `git add .` would try to commit a second copy of the tree.
 .claude/worktrees/
+# `go build ./tools/gendemo` from the repo root drops its binary here; one was committed
+# by accident once (b275c62). `make demo` uses `go run` and never writes it.
+/gendemo
