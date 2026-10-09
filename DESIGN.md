@@ -1272,8 +1272,13 @@ naming law is a second law.
 
   "tcp": {
     "port": 6710,
-    "token_digests": ["sha256:..."],
     "allowed_origins": []
+  },
+
+  "auth": {
+    "clients": [
+      { "name": "manh-laptop", "digest": "sha256:...", "created": "2026-10-09" }
+    ]
   },
 
   "ui": { "port": 6711, "no_auth": false }
@@ -1283,7 +1288,14 @@ naming law is a second law.
 - **Required header**: `type` (fixed, a recognition guard) + `version` (the marker's schema version).
 - **Identity group**: `display_name` (the human-facing display name — deliberately *not* `project_name`, because "project" already means something different in Scratchpad), `instance` (a technical label: the socket name).
 - **Storage/behavior group**: `dir` (optional — relocate storage elsewhere, meaningful only in a config at the default location; this is a deliberate exception to the "do not store paths" rule, acting as a pointer that the user requested be configurable via the config file), `default_project` (the default project, overridden by env `SCRATCHPAD_PROJECT_NAME`/flag).
-- **Optional group, omit = default**: `limits`, `wait`, `tcp`, `ui`. `init` writes only the header + identity; the optional groups are added by the operator when needed (the defaults are explained in `config.md`). `tcp.token_digests` stores only the SHA-256 digest, never the raw token; once `tcp` is in the file, `serve --tcp` does not need the flag repeated (flags still win over the file on conflict). `ui` holds the Web UI's loopback `port` and `no_auth` — no origin allow-list, because the UI binds loopback and the browser's own origin is the only one that can reach it.
+- **Optional group, omit = default**: `limits`, `wait`, `tcp`, `auth`, `ui`. `init` writes only the header + identity; the optional groups are added by the operator when needed (the defaults are explained in `config.md`). `ui` holds the Web UI's loopback `port` and `no_auth` — no origin allow-list, because the UI binds loopback and the browser's own origin is the only one that can reach it.
+- **`auth` holds the credentials, and holds them NAMED.** `auth.clients` is a list of `{ name, digest, created }`; the digest is `sha256:<64 hex>` of the bearer token, never the raw token. The name is not decoration: an anonymous array cannot be revoked selectively, because nothing says which entry belongs to the machine that was lost. A blank or duplicated name is refused at load for that reason.
+
+  It is its own top-level group rather than more fields in `tcp`, for two reasons. A credential list is not a property of a TCP listener — the next transport that needs authentication reuses this one instead of growing a second. And reload splits by GROUP, every group hot or cold whole: credentials MUST reload, because revoking one otherwise needs a restart and a restart severs every agent parked in `pad wait`, making the emergency operation the most expensive one; but `tcp.port` cannot, since the listener is bound. Splitting one group down the middle would make the restart-needed report lie about the other half.
+
+  The guard therefore reads `auth` **per request**: remove a client and its token stops working at once. An empty list denies everything — "no credentials configured" is never "no credential required". `--tcp-token-digest` overrides the group entirely and does NOT reload, which is the config model rather than an oversight: a flag beats the marker, and a flag is a process argument that changes when the process does.
+
+  `tcp.token_digests` is still read, so an existing deployment keeps working, but it is superseded: anonymous, and inside a cold group, so editing one still needs the restart it always did. Neither `auth` nor `tcp` is writable from the Web UI — they decide who may reach this deployment.
 
 **Not stored in config**: paths (`projects/`, socket — derived from dir); author (per-agent, belonging to each session's env `SCRATCHPAD_AUTHOR`); a pad's password (belonging to each pad file's header — a pad is self-contained, `rm` cleans it, leaving no cruft in config).
 

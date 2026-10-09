@@ -63,18 +63,23 @@ func newServeCmd() *cobra.Command {
 				if cmd.Flags().Changed("tcp-port") {
 					port = tcpPort
 				}
-				digests := cfg.TCP.TokenDigests
+				// Credentials are left NIL unless the flag names them, so the guard reads
+				// the marker's `auth.clients` per request and a revocation applies without
+				// a restart. Passing the flag pins them for the life of the process — the
+				// same precedence as every other flag, and the reason the override is a
+				// separate field rather than a pre-resolved list.
+				var override []string
 				if cmd.Flags().Changed("tcp-token-digest") {
-					digests = tcpTokenDigests
+					override = tcpTokenDigests
 				}
 				tcp = &server.TCPOptions{
 					Port:           port,
-					TokenDigests:   digests,
+					TokenOverride:  override,
 					AllowedOrigins: cfg.TCP.AllowedOrigins,
 					Realm:          appinfo.Name(),
 				}
 			}
-			return server.ServeHTTP(ctx, ms, cfg.SocketPath, tcp)
+			return server.ServeHTTP(ctx, ms, live, cfg.SocketPath, tcp)
 		},
 	}
 	dir.bind(cmd)

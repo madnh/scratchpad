@@ -58,9 +58,13 @@ func (l *Live) Apply(fresh Config) []string {
 // running on the old one while reporting the new — a config that lies is worse than a
 // config that is stale.
 //
-// HOT:  display_name, default_project, limits, wait, rules
+// HOT:  display_name, default_project, limits, wait, rules, auth
 // COLD: dir, instance, tcp, ui, and every derived path (root_dir, projects_dir,
 // socket_path — derived from the two cold identity fields, so they move only with them).
+//
+// auth is HOT and `tcp` stays COLD even though the legacy `tcp.token_digests` feeds the
+// same check: the split is by GROUP, every group one or the other. Making half of `tcp`
+// apply immediately would make ColdChanges lie about the other half.
 //
 // rules is HOT even though the Web UI may not write it: "where is it edited" and "does it
 // need a restart" are separate questions, and an operator who widens a policy by editing
@@ -72,6 +76,10 @@ func MergeHot(running, fresh Config) Config {
 	out.Limits = fresh.Limits
 	out.Wait = fresh.Wait
 	out.Rules = fresh.Rules
+	// Credentials are hot because the operation that needs them to be is REVOCATION, and
+	// a restart to revoke one token severs every agent currently parked in `pad wait`.
+	// The emergency move must not be the most expensive one.
+	out.Auth = fresh.Auth
 	return out
 }
 

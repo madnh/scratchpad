@@ -1,8 +1,25 @@
 # Scratchpad — remote access, authentication, contexts
 
-**Status: proposal.** Nothing here is implemented. This document records the reasoning
-behind a set of decisions so they can be argued with on paper rather than rediscovered in
-code. See `DESIGN.md` for the spec of what exists, `IDEA.md` for the concept.
+**Status: proposal, with step 1 of the suggested order now built.** This document records
+the reasoning behind a set of decisions so they can be argued with on paper rather than
+rediscovered in code. See `DESIGN.md` for the spec of what exists, `IDEA.md` for the
+concept.
+
+What has since been done, and where to read it instead of here:
+
+- **§2.4 / §2.5 / §2.6 — named credentials, hot reload, a separate `auth` group.** Built.
+  `auth.clients` carries `{ name, digest, created }`, `tcpGuard` takes `*config.Live` and
+  reads it per request, and `GroupAuth` is kept out of `OperatorEditable` by a test rather
+  than by anyone remembering. `DESIGN.md` and `config.md` are the spec now; this section is
+  the argument for it. The `authors` allow-list in §2.4 was NOT built — see open question 2,
+  still open: enforcing it means plumbing the request's author into the guard, which is a
+  larger change than naming credentials.
+- **Open question 3 — ssh contexts.** Answered outside this repo. A shell wrapper (`spat
+  <context>`) has run the full CLI over ssh since August, which is the evidence this
+  document asked for before anyone builds an HTTP client. Nothing in the binary changed.
+
+Everything else below remains a proposal: no remote HTTP client, no `token` command, no
+contexts in the CLI, no Web UI revoke page.
 
 Scope: reaching one deployment from a machine that is not the one it runs on, proving who
 is reaching it, and naming which deployment a command means when there is more than one.
@@ -381,9 +398,12 @@ belongs in the documentation before somebody discovers it by losing a nudge.
 
 # Suggested order
 
-1. `auth.clients` (named) + hot reload + `tcpGuard` reading `*config.Live` + `GroupAuth`
-   added to the `OperatorEditable` exclusion. Worth doing even if remote access is
-   abandoned entirely: today a token cannot be revoked without severing every waiting agent.
+1. ~~`auth.clients` (named) + hot reload + `tcpGuard` reading `*config.Live` + `GroupAuth`
+   added to the `OperatorEditable` exclusion.~~ **Done.** Worth doing even if remote access
+   is abandoned entirely: a token could not be revoked without severing every waiting agent.
+   The migration trap this document warned about was real and is now held shut by
+   `TestSensitiveGroupsAreNotOperatorEditable`, which fails if the group is ever made
+   writable from a surface.
 2. `scratchpad token add/ls/revoke`, plus the view-and-revoke page in the Web UI.
 3. Contexts — and only once a remote client exists, since before that `--context` is an
    alias for `--dir`.

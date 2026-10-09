@@ -87,8 +87,13 @@ a typo can never silently seed a store in the wrong place.
 
   "tcp": {
     "port": 6710,
-    "token_digests": ["sha256:..."],
     "allowed_origins": []
+  },
+
+  "auth": {
+    "clients": [
+      { "name": "manh-laptop", "digest": "sha256:...", "created": "2026-10-09" }
+    ]
   },
 
   "ui": {
@@ -169,11 +174,32 @@ Field reference:
   `timeout_s`, `max_s` the server-side cap (values above it are clamped). The CLI
   `pad wait` is not affected by this cap.
 - **`tcp`** — optional settings for the opt-in `serve --tcp` transport: the loopback
-  `port` (default 6710), `token_digests` (bearer tokens stored as `sha256:<hex>`
-  digests — never the raw token), and `allowed_origins` (exact-match Origin
-  allow-list for browser-based clients; empty rejects cross-origin browsers).
+  `port` (default 6710) and `allowed_origins` (exact-match Origin allow-list for
+  browser-based clients; empty rejects cross-origin browsers).
   Having a `tcp` group here does NOT start TCP — only `serve --tcp` does; the group
   just supplies its settings.
+
+  `token_digests` still works here and is still read, but it is **superseded by
+  `auth.clients`**: it is an anonymous array, so no single entry can be identified or
+  revoked on its own. Entries left here also keep `tcp`'s reload behaviour — editing
+  one needs a restart, while `auth.clients` applies to the next request.
+- **`auth`** — who may reach this deployment over `--tcp`. `clients` is a list of
+  `{ "name", "digest", "created" }`: the `digest` is `sha256:<64 hex>` of the bearer
+  token (never the raw token), `name` identifies the holder, and `created` is a free-form
+  date for your own reading. A nameless or duplicated name is an error at load, because
+  the name is the only thing that makes one credential revocable by itself.
+
+  **This group is read per request.** Remove a client and its token stops working at
+  once — no restart, so revoking does not sever every agent parked in `pad wait`. An
+  empty list denies everything: "no credentials configured" is never "no credential
+  required".
+
+  `--tcp-token-digest` overrides this group entirely, and being a flag it does not
+  reload — credentials pinned on the command line change when the process does, and a
+  file edit cannot widen them.
+
+  Neither `auth` nor `tcp` can be written from the Web UI, by design: they decide who
+  may reach this deployment.
 - **`ui`** — optional settings for the Web UI (`ui`): the loopback `port` (default
   6711, alongside the MCP TCP port but a separate listener with a different audience
   and auth model) and `no_auth`.
@@ -183,7 +209,7 @@ Field reference:
   and the Host/Origin guard — which means **every local process that can reach the
   port can read or delete every pad**, password-protected ones included (the pad
   password gates content, never deletion), **and rewrite this deployment's settings**
-  (`display_name`, `default_project`, `limits`, `wait` — not `tcp`, `ui` or `rules`,
+  (`display_name`, `default_project`, `limits`, `wait` — not `auth`, `tcp`, `ui` or `rules`,
   which no UI session may write). Set it only on a machine you are the sole user of.
   There is no origin allow-list here: the UI binds loopback, so the browser's own
   origin is the only one that can ever reach it.
