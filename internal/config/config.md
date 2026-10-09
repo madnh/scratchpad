@@ -92,7 +92,7 @@ a typo can never silently seed a store in the wrong place.
 
   "auth": {
     "clients": [
-      { "name": "manh-laptop", "digest": "sha256:...", "created": "2026-10-09" }
+      { "name": "work-laptop", "digest": "sha256:...", "created": "2026-10-09" }
     ]
   },
 

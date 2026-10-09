@@ -263,9 +263,28 @@ so mint one first; the server stores only its digest:
 ```sh
 TOKEN=$(openssl rand -hex 32)
 DIGEST="sha256:$(printf %s "$TOKEN" | shasum -a 256 | awk '{print $1}')"   # sha256sum on Linux
-
-scratchpad serve --tcp --tcp-port 6710 --tcp-token-digest "$DIGEST"
 ```
+
+Give it a name in the marker (`~/.scratchpad/scratchpad.config.json`, or your
+`--dir`'s), one entry per holder:
+
+```json
+"auth": {
+  "clients": [
+    { "name": "work-laptop", "digest": "sha256:…", "created": "2026-10-09" }
+  ]
+}
+```
+
+```sh
+scratchpad serve --tcp            # port from tcp.port, default 6710
+```
+
+The name is what lets you revoke one credential by itself: delete its entry and that
+token gets `401` as soon as the marker reloads — no restart, so agents parked in
+`pad wait` stay connected. `--tcp-token-digest "$DIGEST"` still works for a one-off run,
+but it **overrides** `auth.clients` entirely and never reloads; revoking it means a
+restart.
 
 Clients then send `Authorization: Bearer $TOKEN`; without it the listener answers `401`.
 Put it behind an SSH tunnel or a TLS-terminating proxy — the bearer token is the only

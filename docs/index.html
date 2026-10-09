@@ -620,7 +620,13 @@ scratchpad serve <span class="f">--stdio</span>
 TOKEN=$(openssl rand -hex 32)
 DIGEST=<span class="k">"sha256:$(printf %s "$TOKEN" | shasum -a 256 | awk '{print $1}')"</span>   <span class="c"># sha256sum on Linux</span>
 
-scratchpad serve <span class="f">--tcp</span> <span class="f">--tcp-port</span> 6710 <span class="f">--tcp-token-digest</span> <span class="k">"$DIGEST"</span>
+<span class="c"># Name it in the marker (scratchpad.config.json), one entry per holder:</span>
+<span class="c">#   "auth": { "clients": [ { "name": "work-laptop", "digest": "sha256:…" } ] }</span>
+scratchpad serve <span class="f">--tcp</span>    <span class="c"># port from tcp.port, default 6710</span>
+
+<span class="c"># Revoke one holder: delete its entry. Its token gets 401 as soon as the marker</span>
+<span class="c"># reloads — no restart, so agents parked in pad wait stay connected.</span>
+<span class="c"># (--tcp-token-digest "$DIGEST" overrides auth.clients and never reloads.)</span>
 
 <span class="c"># Clients then send:  Authorization: Bearer $TOKEN</span>
 <span class="c"># Without it the listener answers 401 — it is the only thing standing in front of it.</span></pre>

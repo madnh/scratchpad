@@ -175,7 +175,7 @@ Proposed:
 
 ```json
 "auth": { "clients": [
-  { "name": "manh-laptop", "digest": "sha256:abc…", "created": "2026-08-20", "authors": ["backend", "frontend"] },
+  { "name": "work-laptop", "digest": "sha256:abc…", "created": "2026-08-20", "authors": ["backend", "frontend"] },
   { "name": "ci-runner",   "digest": "sha256:def…", "created": "2026-08-20" }
 ]}
 ```
@@ -231,7 +231,7 @@ But the word is *granted*. Revoking is not granting, and revoking only ever narr
 
 **Decision:**
 
-- **Create → CLI on the server.** `scratchpad token add manh-laptop` prints the token
+- **Create → CLI on the server.** `scratchpad token add work-laptop` prints the token
   exactly once and forgets it — the same semantics as `store.GeneratePassword`
   (`internal/store/password.go:16-18`).
 - **List and revoke → Web UI.** This is the operation that is urgent and wanted in a

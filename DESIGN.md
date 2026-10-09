@@ -1277,7 +1277,7 @@ naming law is a second law.
 
   "auth": {
     "clients": [
-      { "name": "manh-laptop", "digest": "sha256:...", "created": "2026-10-09" }
+      { "name": "work-laptop", "digest": "sha256:...", "created": "2026-10-09" }
     ]
   },
 
