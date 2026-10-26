@@ -80,3 +80,36 @@ func StaleSockets(rootDir string) []string {
 	}
 	return stale
 }
+
+// Claim is one pad another live relay of this dir is watching, and under which name.
+type Claim struct {
+	Ref    string
+	Author string
+	PID    int
+}
+
+// OtherClaims asks every other live relay of this dir what it is watching. `exec --rejoin`
+// consults it before registering anything, because the one real hazard of rejoining by
+// identity is the duplicated agent: two terminals running under the same name, and BOTH
+// typing the same pointer into their agents. The earlier relay is the one already holding
+// the conversation, so its claim wins and the newcomer reports the overlap instead of
+// doubling it.
+//
+// A relay is this dir's only when it SAYS so (Status.Dir) — the temp-dir fallback is shared
+// by every store on the machine, so where a socket sits proves nothing.
+func OtherClaims(rootDir, self string) []Claim {
+	var out []Claim
+	for _, path := range CandidateSockets(rootDir) {
+		if path == self {
+			continue
+		}
+		st, err := Query(path)
+		if err != nil || st.Dir != rootDir {
+			continue
+		}
+		for _, w := range st.Watching {
+			out = append(out, Claim{Ref: w.Ref, Author: w.Author, PID: st.PID})
+		}
+	}
+	return out
+}

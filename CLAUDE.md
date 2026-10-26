@@ -190,6 +190,15 @@ defaulted that same string, so an agent claimed it by not naming itself. Never r
   once the terminal it points at is gone, and on disk it would outlive the machine's last
   reboot. **`exec` is opt-in and must stay that way**: it sits between the operator's
   keyboard and the agent for a whole session.
+  **A relaunched agent rebuilds its registrations from the TRANSCRIPT, never from a saved
+  registry** (`exec --rejoin`, `store.Rejoinable`, `relay.Server.Rejoin`). It is the one
+  place a name selects pads, and it holds only because of three limits: the name comes
+  from whoever LAUNCHED `exec` (flag or `SCRATCHPAD_AUTHOR` in exec's own env), never over
+  the control socket, which offers no rejoin; a pad another live relay of the store
+  already watches under that name is declined and reported, so a duplicated agent is not
+  nudged twice; and each pad is watched from the identity's OWN last post, where 0 means
+  "from the start" — not the socket's "0 = the tail", which would hide exactly the
+  traffic that arrived while the agent was down. It must stay opt-in like `exec` itself.
   **The Enter is written SEPARATELY from the line** (`ptyrun.submitDelay`), and that is
   not politeness. A TUI that sees a burst of bytes arrive at once treats it as a PASTE,
   where Enter means newline rather than send — deliberately, so pasting three lines does
