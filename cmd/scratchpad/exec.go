@@ -50,7 +50,7 @@ func newExecCmd() *cobra.Command {
 			"words — content pasted in as if you had typed it is command injection.\n\n" +
 			"A relay remembers nothing once its process ends, so an agent RELAUNCHED under a\n" +
 			"new `exec` (a host restart, a reboot, a resumed conversation) is deaf on every pad\n" +
-			"until it touches each one again. `--rejoin <author>` closes that: before the agent\n" +
+			"until it touches each one again. `--rejoin[=<author>]` closes that: before the agent\n" +
 			"starts, the relay looks up the pads that identity takes part in — posted to, or owns\n" +
 			"or opened an open task in — and watches each from the identity's own last post, so\n" +
 			"what arrived while it was down is pointed at once. Protected pads and pads idle past\n" +
@@ -61,6 +61,12 @@ func newExecCmd() *cobra.Command {
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The agent's command goes after `--`, and nothing may sit before it. This is
+			// what `--rejoin ping -- claude` looks like once the optional value is not
+			// taken: `ping` becomes the program to run. Refusing is the only safe reading.
+			if n := cmd.ArgsLenAtDash(); n > 0 {
+				return fmt.Errorf("unexpected %q before `--`: the agent command goes after it (to name a rejoin identity, write --rejoin=<name>)", strings.Join(args[:n], " "))
+			}
 			_, live, err := dir.open()
 			if err != nil {
 				return err

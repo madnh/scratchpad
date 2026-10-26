@@ -143,3 +143,17 @@ func TestPadGetAgainstAnotherStoreDoesNotRegister(t *testing.T) {
 		t.Fatalf("the relay's own store must still register: %s", stdout)
 	}
 }
+
+// `--rejoin` takes its value only with `=`. Written with a space, the name falls out as a
+// positional and would be RUN as the agent; exec refuses instead of launching it.
+func TestExecRefusesArgumentsBeforeTheDash(t *testing.T) {
+	cmd := newExecCmd()
+	var out, errb bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errb)
+	cmd.SetArgs([]string{"--rejoin", "ping", "--", "true"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `unexpected "ping" before`) {
+		t.Fatalf("err = %v, want a refusal naming ping", err)
+	}
+}
