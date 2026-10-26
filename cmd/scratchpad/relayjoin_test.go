@@ -85,7 +85,7 @@ func TestNoteJoinFallsBackForAnOlderRelay(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	noteJoin(cmd, "default-abc123", "pm", "", 3)
+	noteJoin(cmd, "", "default-abc123", "pm", "", 3)
 
 	if err := <-errs; err != nil {
 		t.Fatal(err)

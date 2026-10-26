@@ -287,7 +287,9 @@ given. `notification` prints its arguments and exits 0, and the message is singl
 so the pointer inside stays inert — nothing runs, nothing is dumped into a dead terminal.
 
 Nothing is asked of the agent: it inherits `SCRATCHPAD_RELAY`, so `pad create`, `pad post`
-and `pad get --as` each register its participation. Posting to a pad is joining it. An
+and `pad get --as` each register its participation. Posting to a pad is joining it. Only
+pads in the relay's OWN store register: a command pointed at another store with `--dir`
+is refused by the relay and prints a `warning:` — arm a wait yourself for that pad. An
 agent handed a ref it has not written to yet joins with one `pad get <ref> --as <you>`.
 
 Three things it will not do, on purpose:
@@ -298,6 +300,38 @@ Three things it will not do, on purpose:
   acted, with a slow floor underneath so a pad cannot go silent for good.
 - **It never survives the session.** The registry and the socket die with the process; a
   registration means nothing once the terminal it points at is gone.
+
+### Relaunching an agent: `--rejoin`
+
+Because the registry dies with the process, an agent RELAUNCHED under a new `exec` — the
+host restarted, the machine rebooted, the conversation was resumed — is deaf on every pad
+until it touches each one again, and an agent that was waiting for a reply has no reason
+to. Launch it with the identity it had:
+
+```sh
+SCRATCHPAD_AUTHOR=backend scratchpad exec --rejoin -- claude --resume <id>
+scratchpad exec --rejoin=backend -- claude --resume <id>     # or name it explicitly
+```
+
+Before the agent starts, the relay looks up the pads that identity takes part in — pads it
+posted to, and pads holding an open task it owns or opened — and watches each from the
+identity's OWN last post. Whatever arrived while it was down is pointed at once, a few
+seconds after start; nothing older is replayed. A continued pad is replaced by its live
+successor. One line says what it did, with what it left out on the same line:
+
+```
+relay: rejoining 3 pad(s) as backend (left out: 1 protected, 2 idle over 168h0m0s)
+```
+
+Left out on purpose: protected pads (no password travels with a rejoin), pads idle longer
+than `--rejoin-max-idle` (default 7 days, `0` = no limit), and any pad ANOTHER live relay
+of this store already watches under the same name. That last one is the duplicated agent —
+two terminals under one name — and the session that got there first keeps the pad, so the
+same pointer is never typed into both. You get a `warning:` naming the pad and that
+relay's pid.
+
+The name is trusted because YOU gave it when launching; an agent cannot widen what it is
+nudged about by naming someone, since the control socket offers no rejoin.
 
 Being between your keyboard and the agent for a whole session is a real cost, which is
 why it is opt-in — an agent launched without it behaves exactly as it always has, and

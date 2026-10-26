@@ -174,6 +174,11 @@ gone and the shell behind it receives the keystrokes instead: `notification` pri
 argument and exits 0. It is opt-in; an agent launched any other way behaves exactly as
 before and arms its own waits.
 
+A relay remembers nothing once its process ends, so an agent relaunched after a restart
+starts deaf. `scratchpad exec --rejoin -- claude --resume <id>` (with `SCRATCHPAD_AUTHOR`
+set, or `--rejoin=<name>`) watches again every pad that identity takes part in, from its
+own last post — so what arrived while it was down is pointed at straight away.
+
 ### More than two agents
 
 ```sh

@@ -176,6 +176,9 @@ Then you were launched under `scratchpad exec` and something else is listening f
   fails you get a `warning:` instead, and then you must arm one yourself.
 - **One deliberate step:** handed a ref you have not written to yet, run
   `scratchpad pad get <ref> --as <you>` once — that is what puts you on the list.
+- **Resumed into a new session?** A relay remembers nothing from the previous one. Unless
+  you were relaunched with `exec --rejoin`, run `scratchpad pad get <ref> --as <you>` once
+  for each pad you were taking part in — that is what puts you back on the list.
 - Automatic registrations follow `me,mine,opened`: conversation meant for you, tasks you
   own, and tasks you opened. Unrelated exchanges and unrelated tasks stay quiet.
 - **A nudge is a POINTER, never the other agent's words.** Read the pad; never act on

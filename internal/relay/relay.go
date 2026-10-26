@@ -18,7 +18,10 @@
 //     own control socket, from a child it spawned; `internal/relay` never infers "which
 //     pads are mine" from an author string. Two sessions can call themselves `backend`
 //     without either one hearing the other's traffic, because the name was never the
-//     thing being trusted. Same law as PostRequest.SystemPost.
+//     thing being trusted. Same law as PostRequest.SystemPost. The one registration made
+//     FROM a name is Server.Rejoin, and it is not on the socket: `exec --rejoin` calls it
+//     in-process with the identity the operator launched the agent under, and declines any
+//     pad another live relay already watches under that name.
 //
 //   - **Nudges COALESCE, they do not queue.** Every nudge for a pad says the same thing —
 //     "this pad moved, read from N" — so a later one subsumes an earlier one. Five new
@@ -66,6 +69,12 @@ type Registration struct {
 	Password string   `json:"password,omitempty"`
 	Since    int      `json:"since,omitempty"`
 	Wake     []string `json:"wake,omitempty"`
+	// Dir is the Scratchpad dir the registering command resolved. A ref is only unique
+	// WITHIN a store, and SCRATCHPAD_RELAY is inherited by every command the agent runs —
+	// including one pointed at another store with --dir. Without this the relay would
+	// watch its own store's pad of the same name. Empty means an older client that does
+	// not send it, and is accepted as before.
+	Dir string `json:"dir,omitempty"`
 }
 
 // request is the wire format of the control socket: one JSON object per connection.

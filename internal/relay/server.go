@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -315,6 +316,9 @@ func (s *Server) register(r Registration) error {
 	if r.Ref == "" || r.Author == "" {
 		return errors.New("registration needs a ref and an author")
 	}
+	if r.Dir != "" && !sameDir(r.Dir, s.rootDir) {
+		return fmt.Errorf("%s: this relay serves the store at %s, and the command used %s", CodeOtherStore, s.rootDir, r.Dir)
+	}
 	if _, _, err := store.ParseRef(r.Ref); err != nil {
 		return err
 	}
@@ -324,7 +328,6 @@ func (s *Server) register(r Registration) error {
 	}
 	reg := &registration{ref: r.Ref, author: r.Author, password: r.Password, wake: w, since: r.Since}
 
-	s.mu.Lock()
 	// An agent that registers without saying where it is starts from the pad as it
 	// stands: the relay's job is what happens NEXT, and replaying a pad's whole history
 	// as "new activity" is a worse first impression than saying nothing.
@@ -333,6 +336,65 @@ func (s *Server) register(r Registration) error {
 			reg.since = p.Last().N
 		}
 	}
+	s.add(reg)
+	return nil
+}
+
+// Rejoin registers the pads a relaunched agent was taking part in, each from the mark
+// given — and 0 there means "from the beginning", never "from the tail" as it does for a
+// registration over the socket. The marks come from the transcript (the agent's own last
+// post), so the traffic that arrived while the agent was down is exactly what gets nudged
+// about, once, coalesced into a single line.
+//
+// It is in-process and exported for one caller: `exec --rejoin`, which the OPERATOR asked
+// for when launching the agent. The control socket never offers it — an agent cannot widen
+// what it is nudged about by naming an identity, because the identity here was named by
+// whoever started this process, the same party that owns the terminal being typed into.
+func (s *Server) Rejoin(regs []Registration) error {
+	var errs []error
+	for _, r := range regs {
+		if r.Ref == "" || r.Author == "" {
+			errs = append(errs, errors.New("registration needs a ref and an author"))
+			continue
+		}
+		if _, _, err := store.ParseRef(r.Ref); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		w, err := pad.ParseWake(r.Wake)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		since := r.Since
+		if since < 0 {
+			since = 0
+		}
+		s.add(&registration{ref: r.Ref, author: r.Author, password: r.Password, wake: w, since: since})
+	}
+	return errors.Join(errs...)
+}
+
+// CodeOtherStore prefixes the refusal of a registration made against a different store.
+const CodeOtherStore = "other_store"
+
+// sameDir compares two store paths as the filesystem sees them, so /tmp and /private/tmp
+// (or any symlinked home) are not taken for two stores. A path that cannot be resolved is
+// compared as written.
+func sameDir(a, b string) bool {
+	return resolveDir(a) == resolveDir(b)
+}
+
+func resolveDir(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
+// add records a registration and checks it against the pad at once.
+func (s *Server) add(reg *registration) {
+	s.mu.Lock()
 	advanced := true
 	if prev, ok := s.regs[reg.ref]; ok && reg.since <= prev.since {
 		advanced = false
@@ -363,7 +425,6 @@ func (s *Server) register(r Registration) error {
 		default:
 		}
 	}
-	return nil
 }
 
 // note re-reads one pad and records whether it holds anything this agent should hear
