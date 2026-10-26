@@ -205,7 +205,7 @@ func newPadCreateCmd() *cobra.Command {
 				fmt.Fprintf(out, "password: %s\n", pw)
 				fmt.Fprintln(cmd.ErrOrStderr(), "note: the password is shown only this once — relay it together with the ref")
 			}
-			noteJoin(cmd, created.Ref(), a, pw, 1)
+			noteJoin(cmd, cfg.Get().RootDir, created.Ref(), a, pw, 1)
 			return nil
 		},
 	}
@@ -254,7 +254,7 @@ func newPadPostCmd() *cobra.Command {
 			"(their own slice) or its opener (reassign, drop, force-close) may do that.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st, _, err := dir.open()
+			st, live, err := dir.open()
 			if err != nil {
 				return err
 			}
@@ -304,7 +304,7 @@ func newPadPostCmd() *cobra.Command {
 			// Register against the pad the post actually LANDED in: when a full pad
 			// continued, the conversation is in the successor and nudging about the old
 			// one would point the agent at a pad that refuses every reply.
-			noteJoin(cmd, res.Pad.Ref(), a, password, res.Section)
+			noteJoin(cmd, live.Get().RootDir, res.Pad.Ref(), a, password, res.Section)
 			// Warnings go to stderr: the post SUCCEEDED, and stdout must stay clean for
 			// whatever is parsing it.
 			for _, w := range res.Warnings {
@@ -367,7 +367,7 @@ func newPadGetCmd() *cobra.Command {
 			"pad after being away.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st, _, err := dir.open()
+			st, live, err := dir.open()
 			if err != nil {
 				return err
 			}
@@ -385,7 +385,7 @@ func newPadGetCmd() *cobra.Command {
 				if a := strings.TrimSpace(author); a != "" {
 					in := p.Inbox(a)
 					report.Inbox = &in
-					noteJoin(cmd, p.Ref(), a, password, in.Since)
+					noteJoin(cmd, live.Get().RootDir, p.Ref(), a, password, in.Since)
 				}
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
@@ -412,7 +412,7 @@ func newPadGetCmd() *cobra.Command {
 				// it covers the agent that was handed a ref and has not posted yet, which
 				// is exactly when being reachable matters most. The mark is the agent's own
 				// last post — the only section it is PROVEN to have seen.
-				noteJoin(cmd, p.Ref(), a, password, in.Since)
+				noteJoin(cmd, live.Get().RootDir, p.Ref(), a, password, in.Since)
 				fmt.Fprintf(out, "\ninbox for %s (your last post: §%d)\n", a, in.Since)
 				if len(in.Unread) == 0 {
 					fmt.Fprintln(out, "  nothing addressed to you since then")

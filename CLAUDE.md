@@ -182,7 +182,10 @@ defaulted that same string, so an agent claimed it by not naming itself. Never r
   turns into an error is one more thing to deal with. Registration arrives over this process's own socket
   from a child it spawned, so `internal/relay` never infers "which pads are mine" from an
   author string — two sessions may both call themselves `backend`, and the name was never
-  what was trusted (same law as `PostRequest.SystemPost`). And nudges COALESCE rather
+  what was trusted (same law as `PostRequest.SystemPost`). A registration also carries
+  the store dir the command resolved, and a relay refuses one from any other store
+  (`other_store`): a ref names a pad only within one store, and the relay env var is
+  inherited by a command the agent points elsewhere with `--dir`. And nudges COALESCE rather
   than queue: every nudge for a pad says the same thing, so a later one subsumes an
   earlier one, and a pad already nudged about waits for a sign the agent acted (any
   registration for it) with `renudgeInterval` underneath so nothing goes silent forever.

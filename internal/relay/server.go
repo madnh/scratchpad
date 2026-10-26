@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -315,6 +316,9 @@ func (s *Server) register(r Registration) error {
 	if r.Ref == "" || r.Author == "" {
 		return errors.New("registration needs a ref and an author")
 	}
+	if r.Dir != "" && !sameDir(r.Dir, s.rootDir) {
+		return fmt.Errorf("%s: this relay serves the store at %s, and the command used %s", CodeOtherStore, s.rootDir, r.Dir)
+	}
 	if _, _, err := store.ParseRef(r.Ref); err != nil {
 		return err
 	}
@@ -369,6 +373,23 @@ func (s *Server) Rejoin(regs []Registration) error {
 		s.add(&registration{ref: r.Ref, author: r.Author, password: r.Password, wake: w, since: since})
 	}
 	return errors.Join(errs...)
+}
+
+// CodeOtherStore prefixes the refusal of a registration made against a different store.
+const CodeOtherStore = "other_store"
+
+// sameDir compares two store paths as the filesystem sees them, so /tmp and /private/tmp
+// (or any symlinked home) are not taken for two stores. A path that cannot be resolved is
+// compared as written.
+func sameDir(a, b string) bool {
+	return resolveDir(a) == resolveDir(b)
+}
+
+func resolveDir(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
 }
 
 // add records a registration and checks it against the pad at once.

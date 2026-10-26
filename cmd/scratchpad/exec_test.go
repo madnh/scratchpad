@@ -81,3 +81,65 @@ func TestPlanRejoinLeavesOutPadsAnotherRelayWatchesUnderTheSameName(t *testing.T
 		t.Errorf("pong takes part in nothing and duplicates nothing: %+v / %q", regs, out.String())
 	}
 }
+
+// The command path end to end: an agent under a relay runs `pad get --as` against a
+// DIFFERENT store. Nothing is registered, and the agent is told to arm its own wait —
+// while the same command against the relay's own store registers as before.
+func TestPadGetAgainstAnotherStoreDoesNotRegister(t *testing.T) {
+	mkStore := func() (string, *config.Live) {
+		dir, err := os.MkdirTemp("", "rj")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		if err := config.WriteMarker(dir, config.Config{}); err != nil {
+			t.Fatal(err)
+		}
+		cfg, _, _, err := config.Resolve(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, config.NewLive(cfg)
+	}
+	homeDir, home := mkStore()
+	otherDir, other := mkStore()
+
+	srv := relay.NewServer(relay.SocketPath(home.Get().RootDir), home, func(string) error { return nil })
+	if err := srv.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.Run(ctx) }()
+	t.Setenv(relay.EnvSocket, srv.Socket())
+
+	foreign, _, err := store.New(other).CreatePad(store.CreateRequest{Project: "alpha", Author: "ping", Title: "t", Content: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err := runPadGet(t, otherDir, foreign.Ref(), "--as", "ping")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := relay.Query(srv.Socket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Watching) != 0 {
+		t.Fatalf("a command against another store registered with this relay: %+v", st.Watching)
+	}
+	if strings.Contains(stdout, "relay: watching") || !strings.Contains(stderr, "arm a wait yourself") {
+		t.Fatalf("the agent must be told nothing is listening:\nstdout=%s\nstderr=%s", stdout, stderr)
+	}
+
+	own, _, err := store.New(home).CreatePad(store.CreateRequest{Project: "alpha", Author: "ping", Title: "t", Content: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout, _, err = runPadGet(t, homeDir, own.Ref(), "--as", "ping"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "relay: watching "+own.Ref()) {
+		t.Fatalf("the relay's own store must still register: %s", stdout)
+	}
+}

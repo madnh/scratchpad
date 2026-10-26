@@ -484,3 +484,38 @@ func TestRejoinWithNothingMissedIsQuietThenDelivers(t *testing.T) {
 		t.Fatalf("nudge = %q", line)
 	}
 }
+
+// A ref names a pad only within one store. A command run against ANOTHER store (an agent
+// under this relay using --dir) must not register here: the relay would watch its own
+// store's pad of that name, or nothing at all. An older client that sends no dir is still
+// accepted, and the same store reached through a symlink is the same store.
+func TestRegistrationFromAnotherStoreIsRefused(t *testing.T) {
+	s, srv, _ := testRelay(t)
+	p, _, err := s.CreatePad(store.CreateRequest{Project: "proj", Author: "ping", Title: "start", Content: "x\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := os.MkdirTemp("", "rly-other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(other) })
+
+	err = Register(srv.Socket(), Registration{Ref: p.Ref(), Author: "ping", Since: 1, Wake: []string{"me"}, Dir: other})
+	if err == nil || !strings.Contains(err.Error(), CodeOtherStore) {
+		t.Fatalf("registration from another store: err = %v, want %s", err, CodeOtherStore)
+	}
+	if w := srv.status().Watching; len(w) != 0 {
+		t.Fatalf("a foreign-store registration was recorded: %+v", w)
+	}
+
+	link := filepath.Join(other, "link")
+	if err := os.Symlink(srv.rootDir, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{srv.rootDir, link, ""} {
+		if err := Register(srv.Socket(), Registration{Ref: p.Ref(), Author: "ping", Since: 1, Wake: []string{"me"}, Dir: dir}); err != nil {
+			t.Fatalf("dir %q is this relay's store (or unsent) and must be accepted: %v", dir, err)
+		}
+	}
+}

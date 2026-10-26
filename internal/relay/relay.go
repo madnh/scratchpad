@@ -69,6 +69,12 @@ type Registration struct {
 	Password string   `json:"password,omitempty"`
 	Since    int      `json:"since,omitempty"`
 	Wake     []string `json:"wake,omitempty"`
+	// Dir is the Scratchpad dir the registering command resolved. A ref is only unique
+	// WITHIN a store, and SCRATCHPAD_RELAY is inherited by every command the agent runs —
+	// including one pointed at another store with --dir. Without this the relay would
+	// watch its own store's pad of the same name. Empty means an older client that does
+	// not send it, and is accepted as before.
+	Dir string `json:"dir,omitempty"`
 }
 
 // request is the wire format of the control socket: one JSON object per connection.

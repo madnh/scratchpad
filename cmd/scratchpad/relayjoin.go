@@ -41,13 +41,17 @@ var relayLegacyWake = []string{"me", "mine"}
 // also closes the worse gap: registration used to fail SILENTLY, so a relay that had died
 // left the agent believing somebody was listening for it. Now that failure says, in the
 // one place the agent is looking, to arm a wait itself.
-func noteJoin(cmd *cobra.Command, ref, author, password string, since int) {
+//
+// rootDir is the store THIS command used. The relay refuses a registration for any other
+// store: a ref names a pad only within one, and an agent under a relay can still point a
+// command at a second store with --dir.
+func noteJoin(cmd *cobra.Command, rootDir, ref, author, password string, since int) {
 	sock := os.Getenv(relay.EnvSocket)
 	if sock == "" || ref == "" || author == "" {
 		return
 	}
 	reg := relay.Registration{
-		Ref: ref, Author: author, Password: password, Since: since, Wake: relayWake,
+		Ref: ref, Author: author, Password: password, Since: since, Wake: relayWake, Dir: rootDir,
 	}
 	err := relay.Register(sock, reg)
 	legacy := false

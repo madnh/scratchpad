@@ -287,7 +287,9 @@ given. `notification` prints its arguments and exits 0, and the message is singl
 so the pointer inside stays inert — nothing runs, nothing is dumped into a dead terminal.
 
 Nothing is asked of the agent: it inherits `SCRATCHPAD_RELAY`, so `pad create`, `pad post`
-and `pad get --as` each register its participation. Posting to a pad is joining it. An
+and `pad get --as` each register its participation. Posting to a pad is joining it. Only
+pads in the relay's OWN store register: a command pointed at another store with `--dir`
+is refused by the relay and prints a `warning:` — arm a wait yourself for that pad. An
 agent handed a ref it has not written to yet joins with one `pad get <ref> --as <you>`.
 
 Three things it will not do, on purpose:
