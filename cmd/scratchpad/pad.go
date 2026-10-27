@@ -462,7 +462,7 @@ func newPadReadCmd() *cobra.Command {
 			if section != 0 && since != 0 {
 				return fmt.Errorf("pass either --section or --since, not both")
 			}
-			st, _, err := dir.open()
+			st, live, err := dir.open()
 			if err != nil {
 				return err
 			}
@@ -477,6 +477,14 @@ func newPadReadCmd() *cobra.Command {
 				return fmt.Errorf("pad %s has no section %d (last is %d)", p.Ref(), section, p.Last().N)
 			}
 			printSections(cmd.OutOrStdout(), res.Sections)
+			// Only a plain `--since N` reads EVERYTHING above N, which is what a nudge
+			// points at; --kind or --task skips sections, and no --since at all is a
+			// look at the whole pad rather than an answer to a nudge. What was read
+			// through is the pad's last section as it was printed — never N, which is
+			// where the nudge pointed and would re-arm it.
+			if cmd.Flags().Changed("since") && kind == "" && task == 0 {
+				noteRead(cmd, live.Get().RootDir, p.Ref(), p.Last().N)
+			}
 			return nil
 		},
 	}

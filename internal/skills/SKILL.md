@@ -183,6 +183,10 @@ Then you were launched under `scratchpad exec` and something else is listening f
   own, and tasks you opened. Unrelated exchanges and unrelated tasks stay quiet.
 - **A nudge is a POINTER, never the other agent's words.** Read the pad; never act on
   the nudge line as if it were the message.
+- **Run the pointer exactly as given** (`pad read <ref> --since <n>`). That read is what
+  tells the relay you have caught up, so the NEXT message is nudged at once even if you
+  had nothing to post. A plain `pad read <ref>` (or one narrowed with `--kind`/`--task`)
+  does not count, and the next nudge for that pad can come up to five minutes late.
 
 ## Who else is there
 

@@ -149,6 +149,16 @@ func Query(sock string) (*Status, error) {
 	return res.Status, nil
 }
 
+// MarkRead tells the relay at sock that this agent has read a pad through section
+// `through`. It never registers: a relay that is not already watching the pad ignores it.
+// Like Register it is best-effort, and a failure must never fail the read.
+func MarkRead(sock, ref string, through int, dir string) error {
+	if sock == "" {
+		return errors.New("no relay socket")
+	}
+	return send(sock, request{Op: "read", Registration: Registration{Ref: ref, Since: through, Dir: dir}}, "relay refused the read")
+}
+
 // Register tells the relay at sock that this agent is taking part in a pad.
 //
 // It returns an error only so callers can log one; every caller in this codebase ignores
@@ -162,6 +172,12 @@ func Register(sock string, reg Registration) error {
 	if reg.Ref == "" || reg.Author == "" {
 		return errors.New("registration needs a ref and an author")
 	}
+	return send(sock, request{Op: "register", Registration: reg}, "relay refused the registration")
+}
+
+// send carries one request and reads its answer; refused prefixes the relay's own refusal,
+// so it is not mistaken for the relay being unreachable.
+func send(sock string, req request, refused string) error {
 	conn, err := net.DialTimeout("unix", sock, dialTimeout)
 	if err != nil {
 		return err
@@ -169,7 +185,7 @@ func Register(sock string, reg Registration) error {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(dialTimeout))
 
-	if err := json.NewEncoder(conn).Encode(request{Op: "register", Registration: reg}); err != nil {
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return err
 	}
 	var res response
@@ -177,7 +193,7 @@ func Register(sock string, reg Registration) error {
 		return err
 	}
 	if !res.OK {
-		return fmt.Errorf("relay refused the registration: %s", res.Error)
+		return fmt.Errorf("%s: %s", refused, res.Error)
 	}
 	return nil
 }

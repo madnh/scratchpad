@@ -297,7 +297,13 @@ Three things it will not do, on purpose:
 - **It never delivers content** — only a pointer to a pad and a section number. Another
   agent's words pasted into a prompt as if you had typed them is command injection.
 - **It never nudges twice for the same pad** while the agent has given no sign of having
-  acted, with a slow floor underneath so a pad cannot go silent for good.
+  acted, with a slow floor (five minutes) underneath so a pad cannot go silent for good.
+  A sign is a post, a `pad get --as` that moves your mark, or running the pointer itself:
+  `pad read <ref> --since <n>` reports the last section it PRINTED, and that lifts the
+  hold. A read without `--since`, or with `--kind`/`--task`, skips nothing on screen but
+  proves nothing either, so it counts for nothing. A read never registers you, carries no
+  name (it moves the mark the relay already holds for that pad), and a read of another
+  store is ignored like a registration from one.
 - **It never survives the session.** The registry and the socket die with the process; a
   registration means nothing once the terminal it points at is gone.
 

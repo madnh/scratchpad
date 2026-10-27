@@ -81,3 +81,22 @@ func noteJoin(cmd *cobra.Command, rootDir, ref, author, password string, since i
 	fmt.Fprintln(cmd.ErrOrStderr(),
 		"note: a relay is listening for you — it will type a pointer into your input when this pad moves. Do not arm a wait.")
 }
+
+// noteRead tells the relay that launched this process — if one did — that the agent has
+// read ref through section `through`, so that a nudge it already acted on stops holding
+// back the next one. Without it, an agent that follows a nudge, reads, and has nothing to
+// say heard about the NEXT question only at the five-minute re-nudge.
+//
+// It never registers, and it prints nothing on success: a read's stdout is the pad's
+// sections, and a line added there would be read as part of the conversation. A refusal
+// from another store is expected (the relay serves one store) and is not worth a word.
+func noteRead(cmd *cobra.Command, rootDir, ref string, through int) {
+	sock := os.Getenv(relay.EnvSocket)
+	if sock == "" || ref == "" {
+		return
+	}
+	if err := relay.MarkRead(sock, ref, through, rootDir); err != nil && !strings.Contains(err.Error(), relay.CodeOtherStore) {
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"note: the relay did not record this read (%v) — its next nudge for %s may come late\n", err, ref)
+	}
+}

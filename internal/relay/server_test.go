@@ -519,3 +519,107 @@ func TestRegistrationFromAnotherStoreIsRefused(t *testing.T) {
 		}
 	}
 }
+
+func mustMarkRead(t *testing.T, srv *Server, ref string, through int) {
+	t.Helper()
+	if err := MarkRead(srv.Socket(), ref, through, ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The case measured on a live pair: the agent follows a nudge, reads, has nothing to say,
+// and does not post. A question addressed to it next must be nudged at once — not held
+// behind the five-minute floor of a nudge it has already acted on.
+func TestReadThenNewTrafficIsNudgedAtOnce(t *testing.T) {
+	s, srv, c := testRelay(t)
+	p, _, err := s.CreatePad(store.CreateRequest{Project: "proj", Author: "pong", Title: "start", Content: "x\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustRegister(t, srv, p.Ref(), "pong", 1)
+	post(t, s, p.Ref(), "ping", "fyi", "x\n")
+	if line := c.next(t); !strings.Contains(line, "--since 1") {
+		t.Fatalf("first nudge: %q", line)
+	}
+
+	mustMarkRead(t, srv, p.Ref(), 2) // pad read --since 1 printed §2
+	post(t, s, p.Ref(), "ops", "a question", "y\n")
+	if line := c.next(t); !strings.Contains(line, "--since 2") {
+		t.Fatalf("the nudge after a read must point past what was read: %q", line)
+	}
+}
+
+// A read that reports a section at or below the mark the relay already holds proves
+// nothing new. It must neither move the mark back nor lift the hold — otherwise the old
+// sections it un-reads are nudged about again.
+func TestReadBelowTheMarkChangesNothing(t *testing.T) {
+	s, srv, c := testRelay(t)
+	p, _, err := s.CreatePad(store.CreateRequest{Project: "proj", Author: "pong", Title: "start", Content: "x\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post(t, s, p.Ref(), "ping", "one", "x\n")
+	post(t, s, p.Ref(), "pong", "two", "x\n")
+	mustRegister(t, srv, p.Ref(), "pong", 3)
+	post(t, s, p.Ref(), "ping", "three", "x\n")
+	c.next(t)
+
+	mustMarkRead(t, srv, p.Ref(), 1)
+	c.quiet(t, 1500*time.Millisecond)
+	if w := srv.status().Watching; len(w) != 1 || w[0].Since != 3 || w[0].NudgedTS == 0 {
+		t.Fatalf("a lower read moved the mark or lifted the hold: %+v", w)
+	}
+}
+
+// Reading at the mark the relay already holds — the agent re-running the same pointer —
+// must not lift the hold. If it did, the sections above the mark would be nudged about
+// on every look: nudge, read, nudge, read, the loop TestReregisterAtSameMarkDoesNotRenudge
+// guards against for registrations.
+func TestReadAtTheSameMarkDoesNotLoop(t *testing.T) {
+	s, srv, c := testRelay(t)
+	p, _, err := s.CreatePad(store.CreateRequest{Project: "proj", Author: "pong", Title: "start", Content: "x\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustRegister(t, srv, p.Ref(), "pong", 1)
+	post(t, s, p.Ref(), "ping", "fyi", "x\n")
+	c.next(t)
+
+	mustMarkRead(t, srv, p.Ref(), 2)
+	post(t, s, p.Ref(), "ops", "more", "y\n")
+	c.next(t)
+	// The agent has not read §3. It runs a stale pointer again and again: same mark.
+	for i := 0; i < 3; i++ {
+		mustMarkRead(t, srv, p.Ref(), 2)
+	}
+	c.quiet(t, 1500*time.Millisecond)
+}
+
+// A read never creates a registration — looking at a pad is not joining it — and a read
+// of a different store is refused, as a registration is.
+func TestReadNeverRegistersAndStaysInItsStore(t *testing.T) {
+	s, srv, _ := testRelay(t)
+	p, _, err := s.CreatePad(store.CreateRequest{Project: "proj", Author: "pong", Title: "start", Content: "x\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustMarkRead(t, srv, p.Ref(), 1)
+	if w := srv.status().Watching; len(w) != 0 {
+		t.Fatalf("a read registered: %+v", w)
+	}
+
+	mustRegister(t, srv, p.Ref(), "pong", 0)
+	post(t, s, p.Ref(), "ping", "q", "x\n")
+	other, err := os.MkdirTemp("", "rly-other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(other) })
+	err = MarkRead(srv.Socket(), p.Ref(), 2, other)
+	if err == nil || !strings.Contains(err.Error(), CodeOtherStore) {
+		t.Fatalf("read from another store: err = %v, want %s", err, CodeOtherStore)
+	}
+	if w := srv.status().Watching; len(w) != 1 || w[0].Since != 1 {
+		t.Fatalf("a foreign-store read moved the mark: %+v", w)
+	}
+}
