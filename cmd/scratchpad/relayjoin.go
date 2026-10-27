@@ -95,7 +95,14 @@ func noteRead(cmd *cobra.Command, rootDir, ref string, through int) {
 	if sock == "" || ref == "" {
 		return
 	}
-	if err := relay.MarkRead(sock, ref, through, rootDir); err != nil && !strings.Contains(err.Error(), relay.CodeOtherStore) {
+	err := relay.MarkRead(sock, ref, through, rootDir)
+	switch {
+	case err == nil, strings.Contains(err.Error(), relay.CodeOtherStore):
+	case strings.Contains(err.Error(), "unknown op read"):
+		// A relay started from an older binary: reads go unrecorded until exec restarts.
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"note: this relay predates read tracking, so its next nudge for %s may wait out the 5-minute floor; restart scratchpad exec to get it\n", ref)
+	default:
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"note: the relay did not record this read (%v) — its next nudge for %s may come late\n", err, ref)
 	}
