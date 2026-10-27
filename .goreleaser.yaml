@@ -53,9 +53,18 @@ changelog:
     exclude:
       - '^(\[[^]]*\] )?test(\(.+\))?!?:'
       - '^(\[[^]]*\] )?chore(\(.+\))?!?:'
-      - "^Merge"
+      # Commits here carry a `[branch] ` prefix, so a bare "^Merge" never matched and every
+      # merge landed under Others.
+      - '^(\[[^]]*\] )?Merge'
 
 release:
+  # The annotated tag's message is the release's prose: its subject as a heading, its
+  # body below. The generated changelog follows. Without this the tag text existed only
+  # in `git show <tag>`.
+  header: |
+    ## {{ .TagSubject }}
+
+    {{ .TagBody }}
   footer: |
     ---
     **Install (one-liner):**
