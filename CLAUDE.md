@@ -187,8 +187,12 @@ defaulted that same string, so an agent claimed it by not naming itself. Never r
   (`other_store`): a ref names a pad only within one store, and the relay env var is
   inherited by a command the agent points elsewhere with `--dir`. And nudges COALESCE rather
   than queue: every nudge for a pad says the same thing, so a later one subsumes an
-  earlier one, and a pad already nudged about waits for a sign the agent acted (any
-  registration for it) with `renudgeInterval` underneath so nothing goes silent forever.
+  earlier one, and a pad already nudged about waits for a sign the agent acted (a
+  registration that ADVANCES its mark, or a `pad read --since` that read past it) with
+  `renudgeInterval` underneath so nothing goes silent forever. A read reports the last
+  section it PRINTED, never its `--since` — reporting N would lift the hold at the very
+  mark the nudge named and re-nudge the sections just read — and it only moves an
+  existing registration forward: it creates none and carries no name.
   The registry is in memory and dies with the process — a registration is meaningless
   once the terminal it points at is gone, and on disk it would outlive the machine's last
   reboot. **`exec` is opt-in and must stay that way**: it sits between the operator's

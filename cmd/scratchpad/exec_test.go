@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/madnh/scratchpad/internal/config"
 	"github.com/madnh/scratchpad/internal/relay"
@@ -155,5 +156,86 @@ func TestExecRefusesArgumentsBeforeTheDash(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), `unexpected "ping" before`) {
 		t.Fatalf("err = %v, want a refusal naming ping", err)
+	}
+}
+
+// The command end to end: only `pad read --since N` tells the relay what was read, and it
+// reports the last section PRINTED. A plain `pad read` — a look at the whole pad, not an
+// answer to a nudge — leaves the hold where it was.
+func TestPadReadSinceLiftsTheHoldAndPlainReadDoesNot(t *testing.T) {
+	dir, err := os.MkdirTemp("", "rd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := config.WriteMarker(dir, config.Config{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, _, err := config.Resolve(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := config.NewLive(cfg)
+	st := store.New(live)
+
+	// Before the relay starts: a project dir created under a running watcher is picked up
+	// on its own schedule, and a post right after it can land before that.
+	p, _, err := st.CreatePad(store.CreateRequest{Project: "alpha", Author: "pong", Title: "t", Content: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nudged := make(chan string, 8)
+	srv := relay.NewServer(relay.SocketPath(cfg.RootDir), live, func(l string) error { nudged <- l; return nil })
+	if err := srv.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.Run(ctx) }()
+	t.Setenv(relay.EnvSocket, srv.Socket())
+
+	if err := relay.Register(srv.Socket(), relay.Registration{Ref: p.Ref(), Author: "pong", Since: 1, Wake: relayWake}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Post(store.PostRequest{Ref: p.Ref(), Author: "ping", Title: "q", Content: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-nudged:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no first nudge")
+	}
+	watched := func() relay.Watched {
+		t.Helper()
+		s, err := relay.Query(srv.Socket())
+		if err != nil || len(s.Watching) != 1 {
+			t.Fatalf("status: %+v, %v", s, err)
+		}
+		return s.Watching[0]
+	}
+
+	read := func(args ...string) {
+		t.Helper()
+		cmd := newPadReadCmd()
+		var out, errb bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&errb)
+		cmd.SetArgs(append([]string{p.Ref(), "--dir", dir}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "relay") || errb.Len() != 0 {
+			t.Fatalf("a read must add nothing to its output:\nstdout=%s\nstderr=%s", out.String(), errb.String())
+		}
+	}
+
+	read()
+	if w := watched(); w.Since != 1 || w.NudgedTS == 0 {
+		t.Fatalf("plain pad read moved the mark or lifted the hold: %+v", w)
+	}
+	read("--since", "1")
+	if w := watched(); w.Since != 2 || w.NudgedTS != 0 {
+		t.Fatalf("pad read --since 1 printed §2 and must record it: %+v", w)
 	}
 }

@@ -50,7 +50,8 @@ type registration struct {
 	password string
 	wake     pad.Wake
 	// since is the last section the agent is known to have seen. It moves only when the
-	// agent itself says so by registering again — posting is what proves a read.
+	// agent itself says so — by registering again, or by a `pad read --since` that
+	// printed past it (markRead). A nudge alone never moves it.
 	since int
 }
 
@@ -295,6 +296,13 @@ func (s *Server) serveConn(conn net.Conn) {
 		} else {
 			res.OK = true
 		}
+	case "read":
+		if err := s.markRead(req.Registration); err != nil {
+			res.Error = err.Error()
+			s.logf("read %s through §%d REFUSED: %v", req.Ref, req.Since, err)
+		} else {
+			res.OK = true
+		}
 	case "status":
 		res.OK, res.Status = true, s.status()
 	default:
@@ -373,6 +381,49 @@ func (s *Server) Rejoin(regs []Registration) error {
 		s.add(&registration{ref: r.Ref, author: r.Author, password: r.Password, wake: w, since: since})
 	}
 	return errors.Join(errs...)
+}
+
+// markRead records that the agent READ a pad through section r.Since — `pad read <ref>
+// --since N`, which prints every section above N, so what it reports is the last section
+// it printed, never N itself. Reporting N would loop: the nudge says `--since 19`, the
+// agent runs exactly that, the mark stays at 19, the hold lifts, and the sections it just
+// read are nudged about again at once.
+//
+// It only ever moves an EXISTING registration forward. A read creates none (looking at a
+// pad is not joining it), and a mark at or below the current one changes nothing — not
+// the mark and not the hold — so a repeated or older read cannot re-arm a nudge. It
+// carries no identity: the registration this relay holds for the pad already has one,
+// and what is trusted is that the read came from a child of this process, as with
+// register. A read of another store is refused for the same reason a registration is.
+func (s *Server) markRead(r Registration) error {
+	if r.Ref == "" {
+		return errors.New("a read needs a ref")
+	}
+	if r.Dir != "" && !sameDir(r.Dir, s.rootDir) {
+		return fmt.Errorf("%s: this relay serves the store at %s, and the command used %s", CodeOtherStore, s.rootDir, r.Dir)
+	}
+	s.mu.Lock()
+	prev, ok := s.regs[r.Ref]
+	if !ok || r.Since <= prev.since {
+		s.mu.Unlock()
+		return nil
+	}
+	// A copy, not an edit: note reads a registration outside the lock.
+	reg := *prev
+	reg.since = r.Since
+	s.regs[r.Ref] = &reg
+	delete(s.nudged, r.Ref)
+	delete(s.pending, r.Ref)
+	s.mu.Unlock()
+
+	s.logf("read %s as %s through §%d", reg.ref, reg.author, reg.since)
+	if s.note(reg.ref, false) {
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+	}
+	return nil
 }
 
 // CodeOtherStore prefixes the refusal of a registration made against a different store.
