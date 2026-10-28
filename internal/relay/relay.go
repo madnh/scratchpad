@@ -18,10 +18,9 @@
 //     own control socket, from a child it spawned; `internal/relay` never infers "which
 //     pads are mine" from an author string. Two sessions can call themselves `backend`
 //     without either one hearing the other's traffic, because the name was never the
-//     thing being trusted. Same law as PostRequest.SystemPost. The one registration made
-//     FROM a name is Server.Rejoin, and it is not on the socket: `exec --rejoin` calls it
-//     in-process with the identity the operator launched the agent under, and declines any
-//     pad another live relay already watches under that name.
+//     thing being trusted. Same law as PostRequest.SystemPost. There is no registration
+//     made FROM a name: a name belongs to one pad, and the same name on another pad may
+//     be a different agent.
 //
 //   - **Nudges COALESCE, they do not queue.** Every nudge for a pad says the same thing —
 //     "this pad moved, read from N" — so a later one subsumes an earlier one. Five new

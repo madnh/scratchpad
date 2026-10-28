@@ -307,37 +307,18 @@ Three things it will not do, on purpose:
 - **It never survives the session.** The registry and the socket die with the process; a
   registration means nothing once the terminal it points at is gone.
 
-### Relaunching an agent: `--rejoin`
+### Relaunching an agent
 
 Because the registry dies with the process, an agent RELAUNCHED under a new `exec` — the
 host restarted, the machine rebooted, the conversation was resumed — is deaf on every pad
-until it touches each one again, and an agent that was waiting for a reply has no reason
-to. Launch it with the identity it had:
+until it touches each one again. Touching is enough: `pad get <ref> --as <name>` registers
+from that name's OWN last post in the pad, so whatever arrived while it was down is
+pointed at once, and nothing older is replayed.
 
-```sh
-SCRATCHPAD_AUTHOR=backend scratchpad exec --rejoin -- claude --resume <id>
-scratchpad exec --rejoin=backend -- claude --resume <id>     # or name it explicitly
-```
-
-Before the agent starts, the relay looks up the pads that identity takes part in — pads it
-posted to, and pads holding an open task it owns or opened — and watches each from the
-identity's OWN last post. Whatever arrived while it was down is pointed at once, a few
-seconds after start; nothing older is replayed. A continued pad is replaced by its live
-successor. One line says what it did, with what it left out on the same line:
-
-```
-relay: rejoining 3 pad(s) as backend (left out: 1 protected, 2 idle over 168h0m0s)
-```
-
-Left out on purpose: protected pads (no password travels with a rejoin), pads idle longer
-than `--rejoin-max-idle` (default 7 days, `0` = no limit), and any pad ANOTHER live relay
-of this store already watches under the same name. That last one is the duplicated agent —
-two terminals under one name — and the session that got there first keeps the pad, so the
-same pointer is never typed into both. You get a `warning:` naming the pad and that
-relay's pid.
-
-The name is trusted because YOU gave it when launching; an agent cannot widen what it is
-nudged about by naming someone, since the control socket offers no rejoin.
+The relay does not do this for it, and cannot: a name belongs to one pad, and the same
+name on another pad may be a different agent. Only the agent knows which pads were its and
+what it was called on each. If it does not do it unprompted, prompting it is the job of
+whoever relaunched it.
 
 Being between your keyboard and the agent for a whole session is a real cost, which is
 why it is opt-in — an agent launched without it behaves exactly as it always has, and

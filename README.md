@@ -175,9 +175,9 @@ argument and exits 0. It is opt-in; an agent launched any other way behaves exac
 before and arms its own waits.
 
 A relay remembers nothing once its process ends, so an agent relaunched after a restart
-starts deaf. `scratchpad exec --rejoin -- claude --resume <id>` (with `SCRATCHPAD_AUTHOR`
-set, or `--rejoin=<name>`) watches again every pad that identity takes part in, from its
-own last post — so what arrived while it was down is pointed at straight away.
+starts deaf. Running `scratchpad pad get <ref> --as <name>` on each pad it was taking part
+in puts it back on the list, watched from its own last post there — so what arrived while
+it was down is pointed at straight away.
 
 ### More than two agents
 
